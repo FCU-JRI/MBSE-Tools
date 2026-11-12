@@ -1,4 +1,5 @@
-# 建立飛行模擬用的 Python 環境（RocketPy）。需要先安裝 Python 3.12。
+# Creates the Python environment used for flight simulation (RocketPy). Requires Python 3.12.
+# Keep this file ASCII-only.
 param([string]$DataDir = "D:\JRI MBSE Data")
 $root = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
