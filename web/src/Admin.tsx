@@ -39,12 +39,7 @@ export function Admin() {
       const sh = (await api<{ files: { file: string; content: string }[] }>("/shared")).files;
       setSharedFiles(sh);
       if (sh[0]) setLib(sh[0]);
-      else setLib({ file: "shared-avionics.sysml", content: "package SharedAvionics {
-    private import JRI::*;
-
-    // 例：part def <'AVX-001'> '飛行電腦' :> Component;
-}
-" });
+      else setLib({ file: "shared-avionics.sysml", content: "package SharedAvionics {\n    private import JRI::*;\n\n    // 例：part def <'AVX-001'> '飛行電腦' :> Component;\n}\n" });
     });
   }, []);
 
