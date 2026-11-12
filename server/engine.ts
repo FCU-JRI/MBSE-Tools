@@ -27,6 +27,7 @@ export interface Analysis extends Extracted {
 export type Source = readonly [name: string, content: string];
 
 export const ROOT_PACKAGE = "Project";
+export const LIBRARY_FILE = "JRI.sysml";
 
 let connection: Awaited<ReturnType<typeof connect>> | undefined;
 async function conn() {
@@ -42,8 +43,8 @@ export async function shutdown(): Promise<void> {
 const cache = new Map<string, Analysis>();
 
 /** 解析一組檔案；語法或語意錯誤會列在 diagnostics，不會丟例外。 */
-export async function analyze(sources: readonly Source[]): Promise<Analysis> {
-  const key = createHash("sha256").update(JSON.stringify(sources)).digest("hex");
+export async function analyze(sources: readonly Source[], shared: readonly string[] = []): Promise<Analysis> {
+  const key = createHash("sha256").update(JSON.stringify([sources, shared])).digest("hex");
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -63,7 +64,8 @@ export async function analyze(sources: readonly Source[]): Promise<Analysis> {
   if (ok) {
     const json = await model.toApiJson();
     const raw = (JSON.parse(json.content) as any[]).map((e) => e.payload ?? e);
-    extracted = extract(raw, ROOT_PACKAGE);
+    const sharedSet = new Set(shared);
+    extracted = extract(raw, new Set(sources.map(([n]) => n).filter((n) => n !== LIBRARY_FILE && !sharedSet.has(n))), sharedSet);
     try {
       const verdicts = await model.verifySatisfaction();
       satisfaction = verdicts.map((v: any) => ({

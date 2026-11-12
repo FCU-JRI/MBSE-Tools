@@ -27,7 +27,7 @@ export function Inspector(p: Props) {
   if (p.sel.type === "element") {
     const sel = p.sel;
     const el = p.view.analysis.elements.find((e) => e.id === sel.id);
-    if (el) return <EditPanel key={el.id} {...p} el={el} />;
+    if (el) return el.shared ? <ReadPanel {...p} el={el} /> : <EditPanel key={el.id} {...p} el={el} />;
   }
   const s = p.sel.type === "new" ? p.sel : { category: "SystemRequirement", parentId: null };
   return <NewPanel key={`${s.category}:${s.parentId}`} {...p} category={s.category} parentId={s.parentId} />;
@@ -47,6 +47,7 @@ function ReadPanel({ view, meta, setSel, el }: Props & { el: Element | undefined
     <>
       <div className="section">
         <div className="section-head"><h2 className="section-title">屬性</h2><span className="label">{cat?.zh ?? stereotype(el)}</span></div>
+        {el.shared && <p className="caption" style={{ marginBottom: 12 }}>來自共用元件庫，專案內不能修改。可以在結構分解圖把它拉進自己的系統。</p>}
         <div className="field"><span className="label">編號</span><span className="data">{el.shortName ?? "—"}</span></div>
         <div className="field"><span className="label">名稱</span><span className="heading">{el.name}</span></div>
         {el.doc && <div className="field"><span className="label">{cat?.keyword === "requirement" ? "內容" : "說明"}</span><p className="body">{el.doc}</p></div>}

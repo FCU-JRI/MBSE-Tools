@@ -15,6 +15,14 @@ import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAIN_FILE = "model.sysml";
+type An = Awaited<ReturnType<typeof store.analyzeProject>>;
+/** 根套件 Project 所在的檔案；新元素預設寫在這裡。 */
+const rootFile = (a: An) => a.elements.find((e) => e.kind === "Package" && e.qualifiedName === ROOT_PACKAGE)?.file || MAIN_FILE;
+const inFile = (a: An, file: string) => a.elements.filter((e) => e.file === file);
+function editable(el: Element): Element {
+  if (el.shared) throw new store.UserError("這是共用元件庫的內容，不能在專案內修改。請管理員到「管理」頁修改。");
+  return el;
+}
 const app = express();
 app.use(express.json({ limit: "5mb" }));
 
@@ -71,6 +79,16 @@ app.get("/api/admin/config", admin, wrap(async (_req, res) => {
 }));
 app.post("/api/admin/config", admin, wrap(async (req, res) => { await auth.updateConfig(req.body ?? {}); res.json({ saved: true }); }));
 
+// 共用元件庫（跨專案，以航電為主）
+app.get("/api/shared", wrap(async (_req, res) => {
+  const files = await store.listShared();
+  res.json({ files: await Promise.all(files.map(async (f) => ({ file: f, content: await store.readShared(f) }))) });
+}));
+app.put("/api/shared/:file", admin, wrap(async (req, res) => {
+  const r = await store.saveShared(String(req.params.file), String(req.body?.content ?? ""));
+  res.status(r.saved ? 200 : 422).json({ saved: r.saved, diagnostics: r.analysis.diagnostics });
+}));
+
 app.get("/api/meta", (_req, res) => {
   res.json({
     categories: CATEGORIES,
@@ -117,13 +135,15 @@ app.post("/api/projects/:id/elements", wrap(async (req, res) => {
   if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正後再新增。");
   const cat = CATEGORIES.find((c) => c.id === req.body.category);
   if (!cat) throw new store.UserError("未知的元素類別。");
-  const content = await store.readFile(id, MAIN_FILE);
+  const parent0 = req.body.parentId ? before.elements.find((e) => e.id === req.body.parentId) : undefined;
+  const file = parent0 ? editable(parent0).file : rootFile(before);
+  const content = await store.readFile(id, file);
   // 指定上層元素時（例如在活動圖內新增階段）寫進該元素的主體，否則放進類別對應的套件
   const parent = req.body.parentId ? before.elements.find((e) => e.id === req.body.parentId) : undefined;
   const next = parent
     ? insertInside(content, parent, (indent) => snippetFor(req.body, before.elements, indent))
-    : insertInto(content, before.elements, ROOT_PACKAGE, cat.pkg, (indent) => snippetFor(req.body, before.elements, indent));
-  const r = await store.saveFile(id, MAIN_FILE, next, author(req), `新增${cat.zh}：${String(req.body.name).trim()}`);
+    : insertInto(content, inFile(before, file), ROOT_PACKAGE, cat.pkg, (indent) => snippetFor(req.body, before.elements, indent));
+  const r = await store.saveFile(id, file, next, author(req), `新增${cat.zh}：${String(req.body.name).trim()}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));
@@ -136,7 +156,12 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   const from = before.elements.find((e) => e.id === req.body.from);
   const to = before.elements.find((e) => e.id === req.body.to);
   if (!from || !to) throw new store.UserError("找不到要連結的元素。");
-  const content = await store.readFile(id, MAIN_FILE);
+  const kind0 = String(req.body.kind);
+  const owner0 = before.elements.find((x) => x.id === from.owner);
+  // 寫進某個元素主體的關係用該元素的檔案，其餘寫在根套件
+  const file = kind0 === "compose" || (kind0 === "satisfy" && /Definition$/.test(from.kind)) ? editable(from).file
+    : ["connect", "succession", "transition"].includes(kind0) && owner0 ? editable(owner0).file : rootFile(before);
+  const content = await store.readFile(id, file);
   const kind = String(req.body.kind);
   const qn = (q: string) => q.split("::").map(quote).join("::");
   const ownerOf = (e: typeof from) => before.elements.find((x) => x.id === e.owner);
@@ -159,11 +184,11 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
       : `first ${quote(from.name)} then ${quote(to.name)};`;
     next = insertInside(content, owner, (indent) => `${indent}${text}\n`);
   } else {
-    next = insertInto(content, before.elements, ROOT_PACKAGE, null, (indent) =>
+    next = insertInto(content, inFile(before, file), ROOT_PACKAGE, null, (indent) =>
       relationSnippet({ kind: req.body.kind, from: from.qualifiedName, to: to.qualifiedName }, indent));
   }
   const zh = RELATION_LABELS[kind]?.zh ?? ({ compose: "包含", connect: "連接", succession: "之後是", transition: "轉換到" } as Record<string, string>)[kind] ?? kind;
-  const r = await store.saveFile(id, MAIN_FILE, next, author(req), `新增關係：${from.name} ${zh} ${to.name}`);
+  const r = await store.saveFile(id, file, next, author(req), `新增關係：${from.name} ${zh} ${to.name}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));
@@ -175,8 +200,9 @@ app.post("/api/projects/:id/relations/delete", wrap(async (req, res) => {
   if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
   const rel = before.relations.find((r) => r.kind === req.body.kind && r.from === req.body.from && r.to === req.body.to);
   if (!rel?.loc) throw new store.UserError("找不到這條關係。");
-  const next = removeLocs(await store.readFile(id, MAIN_FILE), [rel.loc]);
-  const r = await store.saveFile(id, MAIN_FILE, next, author(req), "刪除關係");
+  if (!(await store.listFiles(id)).includes(rel.file)) throw new store.UserError("這條關係在共用元件庫裡，不能在專案內修改。");
+  const next = removeLocs(await store.readFile(id, rel.file), [rel.loc]);
+  const r = await store.saveFile(id, rel.file, next, author(req), "刪除關係");
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));
@@ -191,11 +217,12 @@ app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
   if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
   const target = a.elements.find((e) => e.id === req.body.id);
   if (!target) throw new store.UserError("找不到這個元素。");
+  const file = editable(target).file;
   const cat = CATEGORIES.find((c) => c.id === target.category);
-  let content = await store.readFile(id, MAIN_FILE);
+  let content = await store.readFile(id, file);
   const steps: ((c: string, el: Element, an: typeof a) => string)[] = [];
   const b = req.body ?? {};
-  if (typeof b.name === "string" && b.name.trim() !== target.name) steps.push((c, el, an) => renameText(c, el, b.name, an.elements, an.relations));
+  if (typeof b.name === "string" && b.name.trim() !== target.name) steps.push((c, el, an) => renameText(c, el, b.name, inFile(an, file), an.relations.filter((r) => r.file === file)));
   if (typeof b.doc === "string" && b.doc.trim() !== target.doc.trim()) steps.push((c, el) => setDocText(c, el, b.doc));
   for (const f of cat?.fields ?? []) {
     const v = b.attrs?.[f.name];
@@ -205,13 +232,13 @@ app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
   let el: Element = target;
   for (const step of steps) {
     content = step(content, el, a);
-    a = await store.analyzeProject(id, { file: MAIN_FILE, content });
+    a = await store.analyzeProject(id, { file, content });
     if (!a.ok) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
     const again = findAgain(a.elements, el);
     if (!again) throw new store.UserError("修改後找不到這個元素，未儲存。請到「原始碼」分頁修改。");
     el = again;
   }
-  const r = await store.saveFile(id, MAIN_FILE, content, author(req), `修改${cat?.zh ?? "元素"}：${el.name}`);
+  const r = await store.saveFile(id, file, content, author(req), `修改${cat?.zh ?? "元素"}：${el.name}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, selected: el.id, ...(await view(id)) });
 }));
@@ -223,8 +250,11 @@ app.post("/api/projects/:id/elements/delete", wrap(async (req, res) => {
   if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
   const el = before.elements.find((e) => e.id === req.body.id);
   if (!el) throw new store.UserError("找不到這個元素。");
-  const next = deleteElementText(await store.readFile(id, MAIN_FILE), el, before.elements, before.relations);
-  const r = await store.saveFile(id, MAIN_FILE, next, author(req), `刪除：${el.shortName ?? ""} ${el.name}`.trim());
+  const file = editable(el).file;
+  const outside = before.relations.filter((r) => (r.from === el.id || r.to === el.id) && r.file !== file);
+  if (outside.length) throw new store.UserError(`還有 ${outside.length} 條寫在其他檔案（${[...new Set(outside.map((r) => r.file))].join("、")}）的關係指向它，請先移除。`);
+  const next = deleteElementText(await store.readFile(id, file), el, before.elements, before.relations.filter((r) => r.file === file));
+  const r = await store.saveFile(id, file, next, author(req), `刪除：${el.shortName ?? ""} ${el.name}`.trim());
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));

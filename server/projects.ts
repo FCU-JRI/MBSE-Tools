@@ -109,12 +109,35 @@ export async function createProject(input: { id: string; name: string; kind: "an
 
 export async function listFiles(id: string): Promise<string[]> {
   const names = await fs.readdir(path.join(dirOf(id), "model"));
-  return names.filter((n) => n.endsWith(".sysml")).sort();
+  return names.filter((n) => n.endsWith(".sysml") && !SHARED_FILE.test(n) && n !== "JRI.sysml").sort();
 }
 
 export async function readFile(id: string, file: string): Promise<string> {
   if (!FILE.test(file)) throw new UserError("檔名不合法。");
   return fs.readFile(path.join(dirOf(id), "model", file), "utf8");
+}
+
+const SHARED_DIR = path.join(HOME_DIR, "shared");
+const SHARED_FILE = /^shared-[a-z0-9-]{1,40}\.sysml$/;
+
+export async function listShared(): Promise<string[]> {
+  const names = await fs.readdir(SHARED_DIR).catch(() => [] as string[]);
+  return names.filter((n) => SHARED_FILE.test(n)).sort();
+}
+export async function readShared(file: string): Promise<string> {
+  if (!SHARED_FILE.test(file)) throw new UserError("共用元件庫的檔名必須是 shared-名稱.sysml（小寫英數與連字號）。");
+  return fs.readFile(path.join(SHARED_DIR, file), "utf8").catch(() => "");
+}
+/** 共用元件庫存檔前，連同元模型庫一起解析；有錯誤不寫入。 */
+export async function saveShared(file: string, content: string): Promise<{ saved: boolean; analysis: Analysis }> {
+  if (!SHARED_FILE.test(file)) throw new UserError("共用元件庫的檔名必須是 shared-名稱.sysml（小寫英數與連字號）。");
+  const others: Source[] = [];
+  for (const f of await listShared()) if (f !== file) others.push([f, await readShared(f)]);
+  const analysis = await analyze([["JRI.sysml", await fs.readFile(LIBRARY, "utf8")], ...others, [file, content]], [...others.map(([n]) => n), file]);
+  if (!analysis.ok) return { saved: false, analysis };
+  await fs.mkdir(SHARED_DIR, { recursive: true });
+  await fs.writeFile(path.join(SHARED_DIR, file), content, "utf8");
+  return { saved: true, analysis };
 }
 
 export async function sources(id: string, override?: { file: string; content: string }): Promise<Source[]> {
@@ -124,6 +147,12 @@ export async function sources(id: string, override?: { file: string; content: st
   const copy = path.join(dir, "lib", "JRI.sysml");
   if ((await fs.readFile(copy, "utf8").catch(() => "")) !== lib) await fs.writeFile(copy, lib, "utf8").catch(() => {});
   const out: Source[] = [["JRI.sysml", lib]];
+  // 共用元件庫：所有專案都看得到，副本放進專案的 lib/ 讓儲存庫自給自足
+  for (const f of await listShared()) {
+    const text = await readShared(f);
+    out.push([f, text]);
+    if ((await fs.readFile(path.join(dir, "lib", f), "utf8").catch(() => "")) !== text) await fs.writeFile(path.join(dir, "lib", f), text, "utf8").catch(() => {});
+  }
   const files = await listFiles(id);
   if (override && !files.includes(override.file)) files.push(override.file);
   for (const f of files) {
@@ -133,12 +162,12 @@ export async function sources(id: string, override?: { file: string; content: st
 }
 
 export async function analyzeProject(id: string, override?: { file: string; content: string }): Promise<Analysis> {
-  return analyze(await sources(id, override));
+  return analyze(await sources(id, override), await listShared());
 }
 
 /** 儲存前先解析；有錯誤就不寫入，回傳診斷讓使用者修正。 */
 export async function saveFile(id: string, file: string, content: string, author: string, message: string): Promise<{ saved: boolean; analysis: Analysis; commit?: string }> {
-  if (!FILE.test(file)) throw new UserError("檔名不合法。");
+  if (!FILE.test(file) || SHARED_FILE.test(file) || file === "JRI.sysml") throw new UserError("檔名不合法。");
   const analysis = await analyzeProject(id, { file, content });
   if (!analysis.ok) return { saved: false, analysis };
   const dir = dirOf(id);

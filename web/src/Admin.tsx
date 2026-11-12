@@ -21,6 +21,8 @@ export function Admin() {
   const [share, setShare] = useState({ project: "", label: "", days: "14" });
   const [link, setLink] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sharedFiles, setSharedFiles] = useState<{ file: string; content: string }[]>([]);
+  const [lib, setLib] = useState({ file: "shared-avionics.sysml", content: "" });
 
   const run = async (fn: () => Promise<void>, done?: string) => {
     setMsg(null);
@@ -34,6 +36,15 @@ export function Admin() {
       const ps = await api<Project[]>("/projects");
       setProjects(ps); setShare((s) => ({ ...s, project: ps[0]?.id ?? "" }));
       setCfg(await api<Cfg>("/admin/config"));
+      const sh = (await api<{ files: { file: string; content: string }[] }>("/shared")).files;
+      setSharedFiles(sh);
+      if (sh[0]) setLib(sh[0]);
+      else setLib({ file: "shared-avionics.sysml", content: "package SharedAvionics {
+    private import JRI::*;
+
+    // 例：part def <'AVX-001'> '飛行電腦' :> Component;
+}
+" });
     });
   }, []);
 
@@ -47,6 +58,10 @@ export function Admin() {
     });
   };
   const saveCfg = (ev: FormEvent) => { ev.preventDefault(); run(async () => { await api("/admin/config", "POST", { publicUrl: cfg.publicUrl, clientId: cfg.clientId, clientSecret: secret }); setSecret(""); setCfg(await api<Cfg>("/admin/config")); }, "已儲存登入設定。"); };
+  const saveLib = (ev: FormEvent) => { ev.preventDefault(); run(async () => {
+    await api(`/shared/${encodeURIComponent(lib.file)}`, "PUT", { content: lib.content });
+    setSharedFiles((await api<{ files: { file: string; content: string }[] }>("/shared")).files);
+  }, "已儲存共用元件庫。所有專案立即可用。"); };
   const rankZh = (id: string) => ranks.find((r) => r.id === id)?.zh ?? id;
   const callback = `${cfg.publicUrl || "（先填公開網址）"}/auth/github/callback`;
 
@@ -102,6 +117,20 @@ export function Admin() {
           <button className="tbtn primary" disabled={!share.project}>建立連結</button>
         </form>
         {link && <div style={{ marginTop: 12 }}><p className="caption">連結只顯示這一次，請現在複製：</p><input className="input" readOnly value={link} onFocus={(e) => e.currentTarget.select()} aria-label="唯讀連結" /></div>}
+      </section>
+
+      <section className="section">
+        <div className="section-head"><h2 className="section-title">共用元件庫</h2><span className="label">{sharedFiles.length}</span></div>
+        <p className="body muted" style={{ marginBottom: 12 }}>跨專案共用的元件（例如航電）。這裡定義的元件每個專案都看得到、可以放進自己的結構，但只能在這裡修改。以 SysML v2 撰寫，有錯誤不會儲存。</p>
+        <form onSubmit={saveLib}>
+          <div className="row">
+            {sharedFiles.length > 0 && <label className="field" style={{ flex: "0 0 14rem" }}><span className="label">開啟</span>
+              <select className="input" value={lib.file} onChange={(e) => { const f = sharedFiles.find((x) => x.file === e.target.value); if (f) setLib(f); }}>{sharedFiles.map((f) => <option key={f.file}>{f.file}</option>)}</select></label>}
+            <label className="field"><span className="label">檔名（shared-名稱.sysml）</span><input className="input" required value={lib.file} onChange={(e) => setLib({ ...lib, file: e.target.value })} /></label>
+          </div>
+          <textarea className="code" style={{ minHeight: 220 }} spellCheck={false} value={lib.content} onChange={(e) => setLib({ ...lib, content: e.target.value })} aria-label="共用元件庫原始碼" />
+          <div><button className="tbtn primary">儲存共用元件庫</button></div>
+        </form>
       </section>
 
       <section className="section">

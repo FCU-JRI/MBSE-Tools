@@ -215,7 +215,7 @@ function Tree({ view, meta, diagrams, mode, diagramId, catId, gateId, selectedId
                   </div>
                   {open[k] && <ul>{items.map((e) => (
                     <li key={e.id}><button className="tree-row" aria-current={e.id === selectedId} onClick={() => onElement(e.id, c.id)} title={label(e)}>
-                      <span className="tn">{e.name}</span>{e.shortName && <span className="tid">{e.shortName}</span>}
+                      <span className="tn">{e.name}</span>{e.shared && <span className="tid">共用</span>}{e.shortName && <span className="tid">{e.shortName}</span>}
                     </button></li>
                   ))}</ul>}
                 </li>

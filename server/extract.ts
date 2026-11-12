@@ -15,6 +15,8 @@ export interface Element {
   doc: string;
   types: string[]; // 型別或一般化對象的名稱
   typeIds: string[];
+  file: string; // 所在檔案
+  shared: boolean; // 來自共用元件庫，專案內唯讀
   loc: Loc | null;
   docLoc: Loc | null;
   attrLoc: Record<string, Loc>;
@@ -30,6 +32,7 @@ export interface Relation {
   to: string;
   line: number | null;
   loc: Loc | null;
+  file: string;
 }
 
 export interface Extracted {
@@ -55,7 +58,8 @@ const ref = (v: any): string | null => (v && typeof v === "object" && "@id" in v
 const refs = (v: any): string[] =>
   Array.isArray(v) ? (v.map(ref).filter(Boolean) as string[]) : ref(v) ? [ref(v) as string] : [];
 
-export function extract(raw: Raw[], rootPackage: string): Extracted {
+/** files：專案自己的模型檔；shared：共用元件庫的檔案。其餘（元模型庫、標準庫）不列入。 */
+export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Extracted {
   const byId = new Map<string, Raw>();
   for (const e of raw) byId.set(e["@id"], e);
 
@@ -63,10 +67,23 @@ export function extract(raw: Raw[], rootPackage: string): Extracted {
     const e = id ? byId.get(id) : undefined;
     return e?.["sysx:mappingQualifiedName"] ?? e?.qualifiedName ?? "";
   };
-  const inProject = (e: Raw): boolean => {
-    const q: string = e["sysx:mappingQualifiedName"] ?? e.qualifiedName ?? "";
-    return q === rootPackage || q.startsWith(rootPackage + "::");
+  // 只有最上層套件帶檔名，其餘沿著 owner 往上找
+  const fileCache = new Map<string, string>();
+  const fileOf = (e: Raw | undefined): string => {
+    const chain: string[] = [];
+    let cur = e;
+    let found = "";
+    for (let i = 0; cur && i < 40; i++) {
+      const id = cur["@id"];
+      if (fileCache.has(id)) { found = fileCache.get(id) as string; break; }
+      chain.push(id);
+      if (cur["sysx:sourceDocument"]) { found = String(cur["sysx:sourceDocument"]); break; }
+      cur = byId.get(ref(cur.owner) ?? ref(cur.owningRelatedElement) ?? "");
+    }
+    for (const id of chain) fileCache.set(id, found);
+    return found;
   };
+  const inProject = (e: Raw): boolean => { const f = fileOf(e); return files.has(f) || shared.has(f); };
 
   // 一般化：元素 → 它的型別、父定義、被重定義的特徵
   const generals = new Map<string, string[]>();
@@ -176,6 +193,8 @@ export function extract(raw: Raw[], rootPackage: string): Extracted {
       doc: docs.get(id) ?? "",
       types: (generals.get(id) ?? []).map((g) => qn(g).split("::").pop() ?? "").filter(Boolean),
       typeIds: generals.get(id) ?? [],
+      file: fileOf(e),
+      shared: shared.has(fileOf(e)),
       loc: locOf(e),
       docLoc: docLocs.get(id) ?? null,
       attrLoc,
@@ -189,7 +208,7 @@ export function extract(raw: Raw[], rootPackage: string): Extracted {
   const known = new Set(elements.map((e) => e.id));
   const relations: Relation[] = [];
   const push = (kind: Relation["kind"], from: string | null, to: string | null, src: Raw | undefined) => {
-    if (from && to && known.has(from) && known.has(to)) relations.push({ kind, from, to, line: src?.["sysx:sourceLine"] ?? null, loc: locOf(src) });
+    if (from && to && known.has(from) && known.has(to)) relations.push({ kind, from, to, line: src?.["sysx:sourceLine"] ?? null, loc: locOf(src), file: fileOf(src) });
   };
   // 往上找到第一個已知的具名元素
   const namedOwner = (id: string | null): string | null => {
@@ -204,7 +223,7 @@ export function extract(raw: Raw[], rootPackage: string): Extracted {
   for (const e of raw) {
     const t = e["@type"];
     if (t === "Dependency") {
-      if (!inProjectByOwner(e, byId, rootPackage)) continue;
+      if (!inProject(e)) continue;
       const tags = tagsOf.get(e["@id"]) ?? [];
       const kind = tags.map((x) => LINK_KINDS[x]).find(Boolean) ?? "trace";
       for (const c of refs(e.client)) for (const s of refs(e.supplier)) push(kind, c, s, e);
@@ -222,23 +241,12 @@ export function extract(raw: Raw[], rootPackage: string): Extracted {
       push("allocate", ends[0] ?? null, ends[1] ?? null, e);
     } else if (t === "ConnectionUsage" || t === "InterfaceUsage") {
       const ce = refs(e.relatedFeature);
-      if (inProjectByOwner(e, byId, rootPackage)) push("connect", ce[0] ?? null, ce[1] ?? null, e);
+      if (inProject(e)) push("connect", ce[0] ?? null, ce[1] ?? null, e);
     } else if (t === "TransitionUsage") {
-      if (inProjectByOwner(e, byId, rootPackage)) push("transition", ref(e.source), ref(e.target), e);
+      if (inProject(e)) push("transition", ref(e.source), ref(e.target), e);
     } else if (t === "SuccessionAsUsage") {
       push("succession", ref(e.sourceFeature), refs(e.targetFeature)[0] ?? null, e);
     }
   }
   return { elements, relations };
-}
-
-function inProjectByOwner(e: Raw, byId: Map<string, Raw>, root: string): boolean {
-  let cur: string | null = ref(e.owner);
-  for (let i = 0; cur && i < 20; i++) {
-    const o = byId.get(cur);
-    const q: string = o?.["sysx:mappingQualifiedName"] ?? o?.qualifiedName ?? "";
-    if (q) return q === root || q.startsWith(root + "::");
-    cur = ref(o?.owner);
-  }
-  return false;
 }

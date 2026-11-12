@@ -167,3 +167,41 @@ test("跨站寫入請求被拒絕", async () => {
   const r = await call(`${I}/api/projects/t1/elements`, "POST", { category: "Need", name: "x" }, { origin: "https://evil.example" });
   assert.equal(r.status, 403);
 });
+
+test("多檔案：元素寫回它所在的檔案", async () => {
+  const extra = `package Project_Extra {
+    private import JRI::*;
+    part def <'CMP-900'> '遙測發射機' :> Component;
+}
+`;
+  let r = await call(`${I}/api/projects/t1/files/extra.sysml`, "PUT", { content: extra });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  v = (await call(`${I}/api/projects/t1`)).data;
+  const e = find("遙測發射機");
+  assert.equal(e.file, "extra.sysml");
+  await ok("/elements", "PATCH", { id: e.id, doc: "S 頻段遙測。" });
+  assert.match((await call(`${I}/api/projects/t1/files/extra.sysml`)).data.content, /S 頻段遙測/);
+  assert.doesNotMatch((await call(`${I}/api/projects/t1/files/model.sysml`)).data.content, /S 頻段遙測/);
+});
+
+test("共用元件庫：所有專案可見，專案內唯讀", async () => {
+  const lib = `package SharedAvionics {
+    private import JRI::*;
+    part def <'AVX-001'> '共用飛行電腦' :> Component;
+}
+`;
+  let r = await call(`${I}/api/shared/shared-avionics.sysml`, "PUT", { content: lib });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await call(`${I}/api/shared/shared-avionics.sysml`, "PUT", { content: "package Broken { part def }" });
+  assert.equal(r.status, 422);
+  v = (await call(`${I}/api/projects/t1`)).data;
+  const e = find("共用飛行電腦");
+  assert.equal(e.shared, true);
+  r = await call(`${I}/api/projects/t1/elements`, "PATCH", { id: e.id, name: "改名" });
+  assert.equal(r.status, 400);
+  r = await call(`${I}/api/projects/t1/elements/delete`, "POST", { id: e.id });
+  assert.equal(r.status, 400);
+  // 專案可以把共用元件放進自己的結構
+  await ok("/relations", "POST", { kind: "compose", from: find("航電次系統", "PartDefinition").id, to: e.id });
+  assert.ok(find("共用飛行電腦", "PartUsage"));
+});

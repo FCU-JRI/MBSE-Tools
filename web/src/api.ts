@@ -1,6 +1,6 @@
 export interface Element {
   id: string; kind: string; category: string | null; name: string; shortName: string | null; qualifiedName: string;
-  owner: string | null; doc: string; types: string[]; typeIds: string[]; attrs: Record<string, string>; tags: string[]; line: number | null;
+  owner: string | null; doc: string; types: string[]; typeIds: string[]; file: string; shared: boolean; attrs: Record<string, string>; tags: string[]; line: number | null;
 }
 export interface Relation { kind: string; from: string; to: string; line: number | null }
 export interface Diagnostic { severity: string; message: string; file: string; line: number; column: number }
