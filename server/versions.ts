@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { analyze } from "./engine.ts";
 import type { Analysis, Source } from "./engine.ts";
 import type { Element } from "./extract.ts";
-import { commit, dirOf, git, listShared, pushLater, readProject, readShared, UserError } from "./projects.ts";
+import { commit, dirOf, git, listShared, pushLater, readProject, readShared, repoConfig, UserError } from "./projects.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
@@ -68,6 +68,7 @@ export async function branchDiff(id: string, name: string): Promise<{ diff: stri
 export async function mergeBranch(id: string, name: string, author: string): Promise<{ commit: string }> {
   const dir = dirOf(id);
   const sha = await branchRef(dir, name);
+  await repoConfig(dir);
   if (await git(dir, "status", "--porcelain")) await commit(dir, author, "合併前儲存未提交的變更");
   try {
     await git(dir, "-c", `user.name=${author || "JRI MBSE"}`, "-c", "user.email=mbse@jri.local", "merge", "--no-ff", "--no-commit", sha);

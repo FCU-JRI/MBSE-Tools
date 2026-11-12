@@ -11,7 +11,6 @@ import type { Project } from "./projects.ts";
 import type { SimFile } from "./sim.ts";
 // 圖的資料與 SVG 繪製和前端共用同一份程式
 import { buildGraph, diagramsOf } from "../web/src/model.ts";
-import type { GNode } from "../web/src/model.ts";
 import { toSvg } from "../web/src/exportSvg.ts";
 
 interface Section { heading: string; level: 1 | 2; paragraphs: string[]; table?: { head: string[]; rows: string[][] }; svg?: string; breakBefore?: boolean }
@@ -25,14 +24,13 @@ function diagramSvg(title: string, a: Analysis, id: string): string | null {
   if (!def) return null;
   const g = buildGraph(def, a as any);
   if (g.nodes.length === 0) return null;
-  const size = (n: GNode) => ({ width: 200, height: 58 + (n.el.shortName ? 14 : 0) + (n.lines.length ? Math.min(n.lines.length, 5) * 16 + 9 : 0) });
   const dg = new dagre.graphlib.Graph();
   dg.setGraph({ rankdir: g.direction, nodesep: 36, ranksep: 64 });
   dg.setDefaultEdgeLabel(() => ({}));
-  for (const n of g.nodes) dg.setNode(n.id, size(n));
+  for (const n of g.nodes) dg.setNode(n.id, { width: n.width, height: n.height });
   for (const e of g.edges) if (e.source !== e.target) dg.setEdge(e.source, e.target);
   dagre.layout(dg);
-  const placed = g.nodes.map((n) => { const p = dg.node(n.id), s = size(n); return { g: n, x: p.x - s.width / 2, y: p.y - s.height / 2, w: s.width, h: s.height }; });
+  const placed = g.nodes.map((n) => { const p = dg.node(n.id); return { g: n, x: p.x - n.width / 2, y: p.y - n.height / 2 }; });
   return toSvg(`${def.code} · ${def.title} — ${title}`, placed, g.edges);
 }
 

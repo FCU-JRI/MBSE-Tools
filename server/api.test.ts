@@ -362,3 +362,50 @@ test("刪除定義會連同看不到的實例一起刪；被其他元素引用�
   r = await call(`${I}/api/projects/t5/elements/delete`, "POST", { id: f5("推進次系統", "PartDefinition").id });
   assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
 });
+
+test("重複的關係被拒絕；復原上一步會還原模型修改", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "t6", name: "復原測試", kind: "annual" });
+  let v6 = (await call(`${I}/api/projects/t6`)).data;
+  const f6 = (name: string) => v6.analysis.elements.find((e: any) => e.name === name);
+  const body = { kind: "trace", from: f6("尋回火箭").id, to: f6("競賽主辦方").id };
+  assert.equal((await call(`${I}/api/projects/t6/relations`, "POST", body)).status, 200);
+  const dup = await call(`${I}/api/projects/t6/relations`, "POST", body);
+  assert.equal(dup.status, 400);
+  assert.match(dup.data.error, /已經存在/);
+  const count = (v: any) => v.analysis.relations.filter((r: any) => r.kind === "trace").length;
+  const withRel = (await call(`${I}/api/projects/t6`)).data;
+  const undone = await call(`${I}/api/projects/t6/undo`, "POST", {});
+  assert.equal(undone.status, 200, JSON.stringify(undone.data).slice(0, 200));
+  assert.equal(count(undone.data), count(withRel) - 1);
+  const redone = await call(`${I}/api/projects/t6/undo`, "POST", {});
+  assert.equal(count(redone.data), count(withRel), "再按一次會還原這次的還原");
+});
+
+test("圖的資料：使用案例圖畫出利害關係人之間與案例的連線，活動圖有起訖節點", async () => {
+  const { buildGraph, diagramsOf } = await import("../web/src/model.ts");
+  const { toSvg } = await import("../web/src/exportSvg.ts");
+  const a = (await call(`${I}/api/projects/t6`)).data.analysis;
+  const name = (id: string) => a.elements.find((e: any) => e.id === id)?.name;
+  const g = (kind: string) => buildGraph(diagramsOf(a).find((d: any) => d.kind === kind) as any, a);
+  const uc = g("uc");
+  assert.ok(uc.nodes.filter((n: any) => n.shape === "actor").length >= 2, "利害關係人應畫成火柴人");
+  assert.ok(uc.nodes.some((n: any) => n.shape === "usecase"), "使用案例應畫成橢圓");
+  const assoc = uc.edges.find((e: any) => name(e.source) === "執行發射");
+  assert.deepEqual([assoc?.kind, assoc?.dashed, assoc?.head], ["association", false, "none"]);
+  const req = g("req");
+  assert.ok(req.edges.some((e: any) => e.label === "«deriveReqt»" && e.dashed && e.head === "open"));
+  assert.ok(req.edges.some((e: any) => e.label === "«satisfy»") && req.edges.some((e: any) => e.label === "«verify»"));
+  assert.ok(req.nodes.some((n: any) => n.keyword === "«requirement»" && n.compartments[0]?.[0].startsWith('id = "REQ-')));
+  assert.ok(req.nodes.some((n: any) => n.keyword === "«testCase»"));
+  const bdd = g("bdd");
+  assert.ok(bdd.nodes.every((n: any) => n.keyword === "«block»"));
+  assert.ok(bdd.edges.every((e: any) => e.tail === "diamond" && !e.dashed));
+  const act = g("act");
+  assert.deepEqual([act.nodes[0].shape, act.nodes[act.nodes.length - 1].shape], ["initial", "final"]);
+  assert.ok(act.nodes.filter((n: any) => n.el).every((n: any) => n.shape === "action"));
+  const stm = g("stm");
+  assert.ok(stm.nodes.some((n: any) => n.shape === "state") && stm.nodes.some((n: any) => n.shape === "initial"));
+  const svg = toSvg("t", uc.nodes.map((n: any, i: number) => ({ g: n, x: i * 220, y: 0 })), uc.edges);
+  assert.match(svg, /<ellipse/);
+  assert.ok((svg.match(/<circle/g) ?? []).length >= 2, "火柴人的頭");
+});

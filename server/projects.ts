@@ -111,6 +111,12 @@ export async function commit(dir: string, author: string, message: string): Prom
   return git(dir, "rev-parse", "--short", "HEAD");
 }
 
+/** 專案儲存庫一律不轉換換行字元：Windows 預設的 autocrlf 會在還原與合併時把檔案改成 CRLF，
+ *  造成工作目錄被視為有變更，原始碼位置的計算也會跟著偏移。 */
+export async function repoConfig(dir: string): Promise<void> {
+  await git(dir, "config", "core.autocrlf", "false");
+}
+
 export async function listProjects(): Promise<Project[]> {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const out: Project[] = [];
@@ -152,6 +158,7 @@ export async function createProject(input: { id: string; name: string; kind: "an
   const project: Project = { id: input.id, name: input.name.trim(), kind: input.kind, createdAt: new Date().toISOString(), gates, manual: {}, signoffs: [] };
   await writeProject(project);
   await git(dir, "init", "-b", "main");
+  await repoConfig(dir);
   await commit(dir, input.author, `建立專案：${project.name}`);
   return project;
 }
@@ -288,4 +295,41 @@ export async function archiveProject(id: string, confirmName: string): Promise<s
   const target = path.join(archive, `${id}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   await fs.rename(dirOf(id), target);
   return target;
+}
+
+/** 還原最近一次提交，限於只動到模型檔的提交；還原後模型必須仍能解析。 */
+export async function undoLast(id: string, author: string): Promise<void> {
+  const dir = dirOf(id);
+  await readProject(id);
+  await repoConfig(dir);
+  // 先把未提交的變更（例如圖的版面）存起來，再判斷上一步是什麼
+  if (await git(dir, "status", "--porcelain")) await commit(dir, author, "儲存圖的版面");
+  let target = "HEAD";
+  // 版面的提交不算一步，往前找到最近一次模型修改
+  for (let i = 0; i < 5; i++) {
+    const names = (await git(dir, "show", "--name-only", "--pretty=format:", target)).split("\n").map((f) => f.trim()).filter(Boolean);
+    if (names.length > 0 && names.every((f) => f === "layout.json" || f.startsWith("lib/"))) target += "~1"; else break;
+  }
+  const files = (await git(dir, "show", "--name-only", "--pretty=format:", target)).split("\n").map((f) => f.trim()).filter(Boolean);
+  const parents = (await git(dir, "rev-list", "--parents", "-n", "1", target)).split(" ").length - 1;
+  if (parents !== 1) throw new UserError("上一步是建立專案或合併分支，不能復原。");
+  if (files.length === 0 || !files.every((f) => f.startsWith("model/") || f.startsWith("lib/") || f === "layout.json")) {
+    throw new UserError("上一步不是模型的修改（可能是簽核、時程或模擬），不能在這裡復原。");
+  }
+  const subject = await git(dir, "log", "-1", "--pretty=%s", target);
+  const name = author.trim() || "JRI MBSE";
+  try {
+    await git(dir, "-c", `user.name=${name}`, "-c", "user.email=mbse@jri.local", "revert", "--no-commit", target);
+  } catch {
+    await git(dir, "revert", "--abort").catch(() => "");
+    throw new UserError("無法自動復原上一步。");
+  }
+  const a = await analyzeProject(id);
+  if (!a.ok) {
+    await git(dir, "revert", "--abort").catch(() => "");
+    await git(dir, "checkout", "--", ".").catch(() => "");
+    throw new UserError("復原後的模型會有錯誤，已取消。");
+  }
+  await git(dir, "-c", `user.name=${name}`, "-c", "user.email=mbse@jri.local", "commit", "-m", `復原：${subject}`.slice(0, 200));
+  pushLater(dir);
 }

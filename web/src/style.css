@@ -200,3 +200,32 @@ tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1)
   .tree-row { min-height: 40px; } .tbtn { min-height: 44px; }
   .react-flow__controls-button { width: 40px; height: 40px; }
 }
+
+/* 圖形編輯：左側工具列（仿 Gaphor 的工具箱）加畫布 */
+.diagram { display: flex; flex: 1; min-height: 0; }
+.toolbox { width: 132px; flex: none; overflow-y: auto; border-right: var(--stroke-hair) solid var(--line); padding: var(--space-2) var(--space-2) var(--space-6); }
+.tool-group { display: flex; flex-direction: column; padding: var(--space-2) 0; border-top: var(--stroke-hair) solid var(--line); }
+.tool-group:first-child { border-top: 0; }
+.tool-group > .label { padding: 0 var(--space-1) var(--space-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 2px var(--space-1); border: 0; background: none; color: var(--ink-muted); cursor: pointer; text-align: left; font-family: var(--font-sans); font-size: 12.5px; line-height: 15px; }
+.tool svg { flex: none; }
+.tool span { display: flex; flex-direction: column; min-width: 0; }
+.tool small { font-family: var(--font-grotesk); font-size: 9.5px; letter-spacing: 0.06em; color: var(--ink-faint); }
+.tool:hover:not(:disabled) { color: var(--ink); }
+.tool[aria-pressed="true"] { color: var(--ink); font-weight: 600; box-shadow: inset var(--stroke-bold) 0 0 var(--ink); }
+.tool:disabled { color: var(--ink-faint); opacity: 0.55; cursor: not-allowed; }
+.tool.danger { background: var(--danger); color: var(--on-danger); font-weight: 700; justify-content: center; }
+.canvas { outline: none; }
+.canvas-hint { position: absolute; z-index: 5; top: var(--space-2); left: var(--space-3); display: flex; gap: var(--space-2); align-items: center; background: var(--bg); padding: 2px var(--space-2); }
+.sysml-node { display: block; }
+.sysml-node svg { display: block; overflow: visible; }
+.sysml-node.is-selected svg { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.55)); }
+.canvas.linking .react-flow__handle { opacity: 1; }
+.canvas.linking .react-flow__node { cursor: crosshair; }
+@media (prefers-color-scheme: light) { .sysml-node.is-selected svg { filter: none; } }
+@media (max-width: 860px) {
+  .diagram { flex-direction: column; }
+  .toolbox { width: auto; display: flex; overflow-x: auto; border-right: 0; border-bottom: var(--stroke-hair) solid var(--line); padding: var(--space-1) var(--space-2); }
+  .tool-group { border-top: 0; border-left: var(--stroke-hair) solid var(--line); padding: 0 var(--space-2); flex-direction: row; align-items: center; }
+  .tool-group:first-child { border-left: 0; } .tool-group > .label { display: none; } .tool { white-space: nowrap; min-height: 40px; }
+}

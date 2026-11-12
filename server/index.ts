@@ -167,6 +167,8 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   const from = before.elements.find((e) => e.id === req.body.from);
   const to = before.elements.find((e) => e.id === req.body.to);
   if (!from || !to) throw new store.UserError("找不到要連結的元素。");
+  if (from.id === to.id) throw new store.UserError("不能把元素連到自己。");
+  if (before.relations.some((r) => r.kind === req.body.kind && r.from === from.id && r.to === to.id)) throw new store.UserError("這條關係已經存在。");
   const kind0 = String(req.body.kind);
   const owner0 = before.elements.find((x) => x.id === from.owner);
   // 寫進某個元素主體的關係用該元素的檔案，其餘寫在根套件
@@ -268,6 +270,12 @@ app.post("/api/projects/:id/elements/delete", wrap(async (req, res) => {
   const r = await store.saveFile(id, file, next, author(req), `刪除：${el.shortName ?? ""} ${el.name}`.trim());
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
+}));
+
+// 復原：還原上一次對模型檔的修改。再按一次會還原這次的還原。
+app.post("/api/projects/:id/undo", wrap(async (req, res) => {
+  await store.undoLast(pid(req), author(req));
+  res.json({ saved: true, ...(await view(pid(req))) });
 }));
 
 // 圖的版面（節點位置）。不影響模型，隨下一次儲存一併提交。
