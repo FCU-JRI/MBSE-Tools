@@ -156,10 +156,21 @@ export function removeLocs(content: string, locs: Loc[]): string {
 
 export function deleteElementText(content: string, el: Element, elements: Element[], relations: Relation[]): string {
   if (!el.loc) throw new UserError("找不到元素在檔案中的位置。");
-  const users = elements.filter((x) => x.id !== el.id && x.typeIds.includes(el.id) && !(x.loc && within(x.loc, el.loc as Loc)));
-  if (users.length) throw new UserError(`還有 ${users.length} 個元素以它為型別（${users.slice(0, 3).map((u) => u.name).join("、")}），請先處理。`);
-  const rel = relations.filter((r) => (r.from === el.id || r.to === el.id) && r.loc).map((r) => r.loc as Loc);
-  return removeLocs(content, [el.loc, ...rel]);
+  const inside = (x: Element, outer: Element) => !!(x.loc && outer.loc && within(x.loc, outer.loc));
+  const users = elements.filter((x) => x.id !== el.id && x.file === el.file && x.typeIds.includes(el.id) && !inside(x, el));
+  // 以它為型別的實例（例如 part rocket : 火箭）在樹與圖上看不到，使用者無從先刪，所以一併刪除。
+  // 但寫在別的元素裡面的引用（例如需求的 subject）不能默默拿掉，要請使用者先處理那個元素。
+  const instances = users.filter((x) => x.kind !== "ReferenceUsage" && x.loc);
+  const blocking = users.filter((x) => !instances.includes(x) && !instances.some((i) => inside(x, i)));
+  if (blocking.length) {
+    const where = blocking.slice(0, 3).map((u) => { const o = elements.find((e) => e.id === u.owner); return o ? `${o.shortName ?? ""} ${o.name}`.trim() : u.name; });
+    throw new UserError(`還有 ${blocking.length} 處引用它（在 ${where.join("、")} 裡），請先刪除或修改那些項目。`);
+  }
+  const removed = [el, ...instances];
+  const ids = new Set(removed.map((x) => x.id));
+  for (const x of elements) if (removed.some((r) => r.id !== x.id && inside(x, r))) ids.add(x.id);
+  const rel = relations.filter((r) => (ids.has(r.from) || ids.has(r.to)) && r.loc).map((r) => r.loc as Loc);
+  return removeLocs(content, [...removed.map((x) => x.loc as Loc), ...rel]);
 }
 
 export function setDocText(content: string, el: Element, doc: string): string {

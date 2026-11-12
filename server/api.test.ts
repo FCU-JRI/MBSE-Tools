@@ -102,9 +102,7 @@ test("圖上的操作：加入零件、連接、先後、狀態轉換、使用�
 
 test("不合法的操作會被拒絕且不寫入", async () => {
   const head = (await call(`${I}/api/projects/t1/history`)).data[0].commit;
-  let r = await call(`${I}/api/projects/t1/elements/delete`, "POST", { id: find("推進次系統", "PartDefinition").id });
-  assert.equal(r.status, 400);
-  r = await call(`${I}/api/projects/t1/files/model.sysml`, "PUT", { content: "package Project { part def }" });
+let r = await call(`${I}/api/projects/t1/files/model.sysml`, "PUT", { content: "package Project { part def }" });
   assert.equal(r.status, 422);
   assert.ok(r.data.diagnostics.length > 0);
   r = await call(`${I}/api/projects/t1/relations`, "POST", { kind: "succession", from: find("滑行").id, to: find("推進", "PartUsage").id });
@@ -340,4 +338,27 @@ test("封存專案：名稱不符不動作，封存後從列表消失且資料�
   assert.ok(!(await call(`${I}/api/projects`)).data.some((p: any) => p.id === "t9"));
   const kept = (await fs.readdir(path.join(home, "archive"))).find((n) => n.startsWith("t9-"));
   assert.ok(kept && (await fs.stat(path.join(home, "archive", kept, "model", "model.sysml"))).isFile());
+});
+
+test("刪除定義會連同看不到的實例一起刪；被其他元素引用時說明在哪裡", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "t5", name: "刪除測試", kind: "annual" });
+  let v5 = (await call(`${I}/api/projects/t5`)).data;
+  const f5 = (name: string, kind?: string) => v5.analysis.elements.find((e: any) => e.name === name && (!kind || e.kind === kind));
+  // 火箭被需求的 subject 引用：要先處理需求
+  let r = await call(`${I}/api/projects/t5/elements/delete`, "POST", { id: f5("火箭", "PartDefinition").id });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /REQ-SYS-001/);
+  r = await call(`${I}/api/projects/t5/elements/delete`, "POST", { id: f5("遠地點高度").id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  v5 = r.data;
+  // 現在只剩實例 rocket 與零件引用：刪定義時一併刪除
+  r = await call(`${I}/api/projects/t5/elements/delete`, "POST", { id: f5("火箭", "PartDefinition").id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  v5 = r.data;
+  assert.equal(v5.analysis.ok, true);
+  assert.equal(f5("火箭"), undefined);
+  assert.equal(f5("rocket"), undefined);
+  // 次系統定義原本被火箭的零件引用，火箭刪掉後可以直接刪
+  r = await call(`${I}/api/projects/t5/elements/delete`, "POST", { id: f5("推進次系統", "PartDefinition").id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
 });
