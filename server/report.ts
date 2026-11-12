@@ -31,7 +31,7 @@ function diagramSvg(title: string, a: Analysis, id: string): string | null {
   for (const e of g.edges) if (e.source !== e.target) dg.setEdge(e.source, e.target);
   dagre.layout(dg);
   const placed = g.nodes.map((n) => { const p = dg.node(n.id); return { g: n, x: p.x - n.width / 2, y: p.y - n.height / 2 }; });
-  return toSvg(`${def.code} · ${def.title} — ${title}`, placed, g.edges);
+  return toSvg({ code: def.code, text: `[${title}] ${def.title}` }, placed, g.edges);
 }
 
 export function buildReport(project: Project, a: Analysis, gates: GateStatus[], plan: Pm, sim: SimFile, gateId: string, commit: string): Report {

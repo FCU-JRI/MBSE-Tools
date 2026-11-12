@@ -1,6 +1,6 @@
 // 把圖匯出成 SVG／PNG，放進審查報告用。固定用白底黑線，列印時清楚。
 import type { GEdge, GNode } from "./model.ts";
-import { annotationSvg, esc, nodeSvg, PRINT } from "./shapes.ts";
+import { annotationSvg, esc, FRAME_HEAD, frameSvg, nodeSvg, PRINT } from "./shapes.ts";
 import type { Annotation } from "./api.ts";
 
 export interface Placed { g: GNode; x: number; y: number }
@@ -37,8 +37,8 @@ function ortho(a: Placed, b: Placed, vertical: boolean): { pts: [number, number]
   return vertical ? v() ?? h() : h() ?? v();
 }
 
-export function toSvg(title: string, nodes: Placed[], edges: GEdge[], vertical = true, straight = false, notes: Annotation[] = []): string {
-  const pad = 32, head = 40;
+export function toSvg(frame: { code: string; text: string }, nodes: Placed[], edges: GEdge[], vertical = true, straight = false, notes: Annotation[] = []): string {
+  const m = 12, pad = 32 + m, head = FRAME_HEAD;
   const all = [...nodes.map((n) => ({ x: n.x, y: n.y, w: n.g.width, h: n.g.height })), ...notes];
   const minX = Math.min(...all.map((n) => n.x)), minY = Math.min(...all.map((n) => n.y));
   const maxX = Math.max(...all.map((n) => n.x + n.w)), maxY = Math.max(...all.map((n) => n.y + n.h));
@@ -50,7 +50,7 @@ export function toSvg(title: string, nodes: Placed[], edges: GEdge[], vertical =
   out.push(`<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#111" stroke-width="1.2"/></marker>`);
   out.push(`<marker id="dia" viewBox="0 0 20 12" refX="1" refY="6" markerWidth="18" markerHeight="11" orient="auto"><path d="M1 6 L10 1 L19 6 L10 11 Z" fill="#111"/></marker></defs>`);
   out.push(`<rect width="${W}" height="${H}" fill="#fff"/>`);
-  out.push(`<text x="${pad}" y="${pad + 4}" font-size="13" font-weight="600" fill="#111" letter-spacing="1" font-family="'Noto Sans TC','Microsoft JhengHei',sans-serif">${esc(title)}</text>`);
+  out.push(frameSvg(frame.code, frame.text, m, m, W - m * 2, H - m * 2, PRINT));
   for (const a of notes) if (a.type === "frame") out.push(annotationSvg(a, a.x + ox, a.y + oy, PRINT));
   for (const e of edges) {
     const a = by.get(e.source), b = by.get(e.target);

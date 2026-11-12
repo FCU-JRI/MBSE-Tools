@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Background, BackgroundVariant, ConnectionMode, Handle, MarkerType, NodeResizer, Position, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow } from "@xyflow/react";
+import { Background, BackgroundVariant, ConnectionMode, Handle, MarkerType, NodeResizer, Position, ReactFlow, ReactFlowProvider, ViewportPortal, useEdgesState, useNodesState, useReactFlow } from "@xyflow/react";
 import type { Connection, Edge, Node, NodeProps } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
@@ -7,7 +7,7 @@ import { api } from "./api.ts";
 import type { Annotation, Diagrams, Layout, Meta, View } from "./api.ts";
 import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, LINK_TOOLS, modelItems, PALETTE } from "./model.ts";
 import type { DiagramDef, GEdge, GNode, Graph, LinkTool } from "./model.ts";
-import { annotationSvg, iconSvg, nodeSvg, SCREEN } from "./shapes.ts";
+import { annotationSvg, FRAME_HEAD, frameSvg, iconSvg, nodeSvg, SCREEN } from "./shapes.ts";
 import { downloadPng, downloadSvg, toSvg } from "./exportSvg.ts";
 
 /** g：模型元素的節點；a：標註（註解、外框、文字）。 */
@@ -311,10 +311,21 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const togglePin = (key: "els" | "links", id: string) => setPins((p) => { const next = { ...p, [key]: p[key].includes(id) ? p[key].filter((x) => x !== id) : [...p[key], id] }; store("jri.tools.custom", next); return next; });
   const toggleCollapsed = () => setCollapsed((c) => { store("jri.toolbox", { collapsed: !c }); return !c; });
 
+  // 圖框：包住目前所有節點與標註，跟著內容伸縮
+  const frameText = `[${view.project.name}] ${def.title}`;
+  const frame = useMemo(() => {
+    const boxes = nodes.map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g?.width ?? n.width ?? n.data.a?.w ?? 0, h: n.data.g?.height ?? n.height ?? n.data.a?.h ?? 0 }));
+    if (!boxes.length) return null;
+    const pad = 36;
+    const x = Math.min(...boxes.map((b) => b.x)) - pad, y = Math.min(...boxes.map((b) => b.y)) - pad - FRAME_HEAD;
+    const w = Math.max(...boxes.map((b) => b.x + b.w)) + pad - x, h = Math.max(...boxes.map((b) => b.y + b.h)) + pad - y;
+    return { x, y, w, h, svg: frameSvg(def.code, frameText, 0, 0, w, h, SCREEN) };
+  }, [nodes, def.code, frameText]);
+
   const exportAs = (kind: "svg" | "png") => {
     const placed = (flow.getNodes() as FlowNode[]).filter((n) => n.data.g).map((n) => ({ g: n.data.g!, x: n.position.x, y: n.position.y }));
     if (placed.length + notes.length === 0) return;
-    const svg = toSvg(`${def.code} · ${def.title} — ${view.project.name}`, placed, graph.edges, vertical, straight, notes);
+    const svg = toSvg({ code: def.code, text: frameText }, placed, graph.edges, vertical, straight, notes);
     const name = `${view.project.id}-${def.code}-${def.title}`;
     if (kind === "svg") downloadSvg(svg, name); else downloadPng(svg, name).catch((e) => onError((e as Error).message));
   };
@@ -480,7 +491,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         {empty ? <p className="body muted empty">{custom ? "這張圖還沒有內容。用工具列的「加入既有項目」放進模型裡已有的項目，或用「元素」建立新的。" : "這張圖還沒有內容。用左邊工具列的「元素」開始。"}</p> : (
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onNodeDragStop={onNodeDragStop} onConnect={onConnect} connectionMode={ConnectionMode.Loose} nodesConnectable={!readOnly} deleteKeyCode={null}
-            snapToGrid snapGrid={[SNAP, SNAP]} fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.15}
+            snapToGrid snapGrid={[SNAP, SNAP]} fitView fitViewOptions={{ padding: 0.22, maxZoom: 1 }} minZoom={0.15}
             onNodeClick={(_e, n) => {
               if (n.data.a) { setSelEdge(null); setConfirm(null); onSelectEdge(null); onSelectElement(null); setSelNote(n.id); return; }
               if (!n.data.g?.el) return;
@@ -491,6 +502,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
             style={{ color: "var(--ink)" }} proOptions={{ hideAttribution: true }}>
             <Background id="minor" variant={BackgroundVariant.Dots} gap={GRID} size={1.5} color="var(--grid-dot)" />
             <Background id="major" variant={BackgroundVariant.Cross} gap={GRID * 5} size={7} lineWidth={1} color="var(--grid-cross)" />
+            {frame && <ViewportPortal><svg className="diagram-frame" width={frame.w} height={frame.h} style={{ position: "absolute", left: frame.x, top: frame.y, overflow: "visible", pointerEvents: "none" }} aria-hidden="true" dangerouslySetInnerHTML={{ __html: frame.svg }} /></ViewportPortal>}
           </ReactFlow>
         )}
       </div>

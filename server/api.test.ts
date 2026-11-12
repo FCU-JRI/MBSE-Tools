@@ -405,7 +405,7 @@ test("圖的資料：使用案例圖畫出利害關係人之間與案例的連�
   assert.ok(act.nodes.filter((n: any) => n.el).every((n: any) => n.shape === "action"));
   const stm = g("stm");
   assert.ok(stm.nodes.some((n: any) => n.shape === "state") && stm.nodes.some((n: any) => n.shape === "initial"));
-  const svg = toSvg("t", uc.nodes.map((n: any, i: number) => ({ g: n, x: i * 220, y: 0 })), uc.edges);
+  const svg = toSvg({ code: "UC", text: "t" }, uc.nodes.map((n: any, i: number) => ({ g: n, x: i * 220, y: 0 })), uc.edges);
   assert.match(svg, /<ellipse/);
   assert.ok((svg.match(/<circle/g) ?? []).length >= 2, "火柴人的頭");
 });

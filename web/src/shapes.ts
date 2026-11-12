@@ -110,3 +110,13 @@ export function iconSvg(shape: Shape | "select" | "line" | "dashed" | "diamond" 
     default: return `<rect x="2.5" y="5.5" width="19" height="13" ${s}/>`;
   }
 }
+
+/** 圖框：包住整張圖的矩形，左上角的標籤寫「圖的類型 [專案] 圖名」，標籤右下切角。 */
+export const FRAME_HEAD = 28;
+export function frameSvg(code: string, text: string, x: number, y: number, w: number, h: number, p: Palette): string {
+  const width = (s: string, cjk: number, latin: number) => [...s].reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? cjk : latin), 0);
+  const tw = Math.min(w, Math.ceil(width(code, 14, 8.5) + width(text, 13, 7.2) + 34));
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${p.ink}" stroke-width="1"/>`
+    + `<path d="M${x} ${y} H${x + tw} V${y + FRAME_HEAD - 8} L${x + tw - 8} ${y + FRAME_HEAD} H${x} Z" fill="${p.bg}" stroke="${p.ink}" stroke-width="1"/>`
+    + `<text x="${x + 10}" y="${y + 19}" font-size="13" fill="${p.ink}" ${FONT}><tspan font-weight="700">${esc(code)}</tspan><tspan dx="8">${esc(text)}</tspan></text>`;
+}
