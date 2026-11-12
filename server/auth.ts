@@ -212,6 +212,8 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }).catch(next);
 }
 
+export const levelOf = (u: User): number => (u.rank ? LEVEL[u.rank] : 0);
+
 export const can = {
   edit: (u: User) => u.kind !== "viewer",
   createProject: (u: User) => u.admin,

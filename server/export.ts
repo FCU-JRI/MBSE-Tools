@@ -5,6 +5,8 @@ import type { Element } from "./extract.ts";
 import { CATEGORY } from "./metamodel.ts";
 import type { GateStatus } from "./gates.ts";
 import type { Project } from "./projects.ts";
+import type { Pm } from "./pm.ts";
+import { PRIORITY_ZH } from "./pm.ts";
 
 const METHOD: Record<string, string> = {
   "Method::byTest": "測試 Test",
@@ -13,7 +15,7 @@ const METHOD: Record<string, string> = {
   "Method::byDemonstration": "展示 Demonstration",
 };
 
-export async function exportWorkbook(project: Project, a: Analysis, gates: GateStatus[]): Promise<Buffer> {
+export async function exportWorkbook(project: Project, a: Analysis, gates: GateStatus[], plan: Pm = { tasks: [], costs: [], people: [] }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "JRI MBSE";
   wb.created = new Date();
@@ -102,6 +104,14 @@ export async function exportWorkbook(project: Project, a: Analysis, gates: GateS
 
   sheet("簽核紀錄", [["節點", 12], ["次系統", 18], ["決議", 10], ["簽核人", 14], ["職級", 16], ["意見", 40], ["時間", 22], ["模型版本", 12]],
     project.signoffs.map((s) => [s.gate.toUpperCase(), s.subsystem ?? "", s.decision, s.by, s.role, s.comment, s.at, s.commit]));
+
+  sheet("時程", [["ID", 10], ["任務", 34], ["優先級", 14], ["責任工程師", 16], ["次系統", 16], ["開始", 12], ["結束", 12], ["相依", 14], ["節點", 10], ["連結的模型元素", 24], ["狀態", 10]],
+    plan.tasks.map((t) => [t.id, t.title, `${t.priority} ${PRIORITY_ZH[t.priority]}`, t.re, t.subsystem, t.start, t.end, t.deps.join("、"), t.gate.toUpperCase(), t.links.join("、"), t.done ? "完成" : "進行中"]));
+  sheet("成本", [["編號", 10], ["次系統", 16], ["項目", 34], ["預算", 12], ["實支", 12], ["差額", 12], ["狀態", 12], ["備註", 30]],
+    [...plan.costs.map((c) => [c.id, c.subsystem, c.item, c.planned, c.actual, c.planned - c.actual, c.status, c.note] as (string | number)[]),
+      ["", "", "合計", plan.costs.reduce((s, c) => s + c.planned, 0), plan.costs.reduce((s, c) => s + c.actual, 0), plan.costs.reduce((s, c) => s + c.planned - c.actual, 0), "", ""]]);
+  sheet("人員", [["編號", 10], ["姓名", 16], ["AEAS 職級", 14], ["次系統", 16], ["職責", 34], ["負責的任務", 40]],
+    plan.people.map((p) => [p.id, p.name, p.rank, p.subsystem, p.duty, plan.tasks.filter((t) => t.re === p.name).map((t) => `${t.id} ${t.title}`).join("\n")]));
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

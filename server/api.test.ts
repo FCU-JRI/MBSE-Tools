@@ -255,3 +255,25 @@ test("GitHub 儲存庫網址只接受 github.com", async () => {
   assert.equal((await call(`${I}/api/projects/t1/remote`, "POST", { url: "ext::sh -c whoami" })).status, 400);
   assert.equal((await call(`${I}/api/projects/t1/sync`)).data.remote, "");
 });
+
+test("專案管理：任務、成本、人員；優先級依職級限制", async () => {
+  const base = `${I}/api/projects/t1/pm`;
+  let r = await call(`${base}/tasks`, "POST", { title: "完成 MDR 文件", priority: "P2", re: "王小明", start: "2026-09-01", end: "2026-09-14", gate: "mdr", links: ["REQ-SYS-777"] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.tasks[0].id, "J1");
+  r = await call(`${base}/tasks`, "POST", { title: "不可能的優先級", priority: "P1", start: "2026-09-01", end: "2026-09-02" });
+  assert.equal(r.status, 400, "總工程師（7 級）不能設定 P1");
+  r = await call(`${base}/tasks`, "POST", { title: "日期顛倒", start: "2026-09-10", end: "2026-09-01" });
+  assert.equal(r.status, 400);
+  r = await call(`${base}/tasks`, "POST", { title: "靜態推力測試", start: "2026-12-01", end: "2026-12-05", deps: ["J1"] });
+  assert.equal(r.data.tasks.length, 2);
+  assert.equal((await call(`${base}/tasks/delete`, "POST", { id: "J1" })).status, 400, "被相依的任務不能刪");
+  r = await call(`${base}/costs`, "POST", { item: "氧化劑", subsystem: "推進次系統", planned: 12000, actual: 13500 });
+  assert.equal(r.data.costs[0].actual, 13500);
+  assert.equal((await call(`${base}/costs`, "POST", { item: "x", planned: -5 })).status, 400);
+  r = await call(`${base}/people`, "POST", { name: "王小明", rank: "O-V", subsystem: "推進次系統", duty: "推進組責任工程師" });
+  assert.equal(r.data.people.length, 1);
+  const v2 = (await call(`${I}/api/projects/t1`)).data;
+  const gantt = v2.gates.find((g: any) => g.id === "mdr").checks.find((c: any) => c.id === "mdr.gantt");
+  assert.equal(gantt.pass, true, "有任務後 MDR 的甘特圖檢查應自動通過");
+});

@@ -12,6 +12,7 @@ import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
 import * as auth from "./auth.ts";
 import * as versions from "./versions.ts";
+import * as pm from "./pm.ts";
 import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,7 +43,8 @@ const pid = (req: Request) => String(req.params.id);
 async function view(id: string) {
   const project = await store.readProject(id);
   const analysis = await store.analyzeProject(id);
-  const gates = evaluateGates(analysis, project.gates, project.manual);
+  const plan = await pm.readPm(id);
+  const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
   return { project, analysis, gates };
 }
 
@@ -290,6 +292,16 @@ app.post("/api/projects/:id/signoffs", wrap(async (req, res) => {
   res.json(await view(pid(req)));
 }));
 
+// ───────── 專案管理：時程、成本、人員 ─────────
+const pmKind = (req: Request): pm.Kind => {
+  const k = String(req.params.kind);
+  if (k !== "tasks" && k !== "costs" && k !== "people") throw new store.UserError("未知的資料類型。");
+  return k;
+};
+app.get("/api/projects/:id/pm", wrap(async (req, res) => res.json({ ...(await pm.readPm(pid(req))), priorities: pm.PRIORITIES.map((p) => ({ id: p, zh: pm.PRIORITY_ZH[p], level: pm.PRIORITY_LEVEL[p] })), myLevel: auth.levelOf(me(req)) })));
+app.post("/api/projects/:id/pm/:kind", wrap(async (req, res) => res.json(await pm.upsert(pid(req), pmKind(req), req.body ?? {}, auth.levelOf(me(req)), author(req)))));
+app.post("/api/projects/:id/pm/:kind/delete", wrap(async (req, res) => res.json(await pm.remove(pid(req), pmKind(req), String(req.body?.id ?? ""), author(req)))));
+
 // ───────── 版本：GitHub 同步、分支審查、基線比較 ─────────
 app.get("/api/projects/:id/sync", wrap(async (req, res) => res.json(await store.syncState(pid(req)))));
 app.post("/api/projects/:id/remote", admin, wrap(async (req, res) => res.json(await store.setRemote(pid(req), String(req.body?.url ?? "")))));
@@ -307,7 +319,7 @@ app.get("/api/projects/:id/history", wrap(async (req, res) => res.json(await sto
 app.get("/api/projects/:id/export.xlsx", wrap(async (req, res) => {
   const v = await view(pid(req));
   if (!v.analysis.ok) throw new store.UserError("模型目前有錯誤，修正後才能匯出。");
-  const buf = await exportWorkbook(v.project, v.analysis, v.gates);
+  const buf = await exportWorkbook(v.project, v.analysis, v.gates, await pm.readPm(pid(req)));
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${v.project.id}-mbse.xlsx"`);
   res.send(buf);

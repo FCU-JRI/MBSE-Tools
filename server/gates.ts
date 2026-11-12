@@ -34,6 +34,7 @@ interface Check {
 
 interface Ctx {
   a: Analysis;
+  tasks: number; // 甘特圖上的任務數
   of: (...categories: string[]) => Element[];
   hasOut: (e: Element, ...kinds: string[]) => boolean; // e 是關係的起點
   hasIn: (e: Element, ...kinds: string[]) => boolean; // e 是關係的終點
@@ -92,7 +93,8 @@ export const GATES: GateDef[] = [
       { id: "sys-req-derive", label: "每條系統層需求都有來源", hint: "建立「衍生自」關係，連到目的或 MOE。",
         run: every(["SystemRequirement"], (c, e) => c.hasOut(e, "derive", "refine", "trace"), "來源") },
       { id: "risk", label: "初步風險評估", hint: "到「AEAS 項目」新增風險。", run: atLeastOne("風險", "Risk") },
-      { id: "gantt", label: "任務時程與里程碑（甘特圖）", hint: "由總工程師確認甘特圖已建立。", manual: true },
+      { id: "gantt", label: "任務時程與里程碑（甘特圖）", hint: "到「時程」分頁建立任務。AEAS 規定所有年度計畫都要有甘特圖。",
+        run: (c) => ({ pass: c.tasks > 0, detail: c.tasks > 0 ? `已有 ${c.tasks} 項任務` : "尚未建立任務" }) },
       { id: "vv-plan", label: "驗證與確認計畫", hint: "由總工程師確認已說明各需求打算如何驗證。", manual: true },
     ],
   },
@@ -183,11 +185,12 @@ export interface GateStatus {
   total: number;
 }
 
-export function evaluateGates(a: Analysis, enabled: string[], manualDone: Record<string, boolean>): GateStatus[] {
+export function evaluateGates(a: Analysis, enabled: string[], manualDone: Record<string, boolean>, tasks = 0): GateStatus[] {
   const out = new Set(a.relations.map((r) => `${r.from}|${r.kind}`));
   const inn = new Set(a.relations.map((r) => `${r.to}|${r.kind}`));
   const ctx: Ctx = {
     a,
+    tasks,
     of: () => [],
     hasOut: (e, ...kinds) => kinds.some((k) => out.has(`${e.id}|${k}`)),
     hasIn: (e, ...kinds) => kinds.some((k) => inn.has(`${e.id}|${k}`)),
