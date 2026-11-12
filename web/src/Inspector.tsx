@@ -13,11 +13,16 @@ export type Selection =
 const METHODS: Record<string, string> = { byTest: "測試", byAnalysis: "分析", byInspection: "檢查", byDemonstration: "展示" };
 export const methodZh = (v: string | undefined) => METHODS[(v ?? "").replace("Method::", "")] ?? "";
 
-interface Props { view: View; meta: Meta; sel: Selection; setSel: (s: Selection) => void; onChanged: (v: View) => void }
+interface Props { readOnly?: boolean; view: View; meta: Meta; sel: Selection; setSel: (s: Selection) => void; onChanged: (v: View) => void }
 
 /** 右側欄：選到元素時編輯它，否則新增。整個畫面唯一的主要按鈕在這裡。 */
 export function Inspector(p: Props) {
   if (!p.view.analysis.ok) return <div className="section"><div className="section-head"><h2 className="section-title">屬性</h2></div><p className="caption">模型有錯誤，修正後才能編輯。</p></div>;
+  if (p.readOnly) {
+    const sel = p.sel;
+    const el = sel.type === "element" ? p.view.analysis.elements.find((e) => e.id === sel.id) : undefined;
+    return <ReadPanel {...p} el={el} />;
+  }
   if (p.sel.type === "edge") return <EdgePanel {...p} edge={p.sel.edge} />;
   if (p.sel.type === "element") {
     const sel = p.sel;
@@ -26,6 +31,36 @@ export function Inspector(p: Props) {
   }
   const s = p.sel.type === "new" ? p.sel : { category: "SystemRequirement", parentId: null };
   return <NewPanel key={`${s.category}:${s.parentId}`} {...p} category={s.category} parentId={s.parentId} />;
+}
+
+/** 唯讀：只顯示內容與關係。 */
+function ReadPanel({ view, meta, setSel, el }: Props & { el: Element | undefined }) {
+  if (!el) return <div className="section"><div className="section-head"><h2 className="section-title">屬性</h2></div><p className="caption">點選圖或表中的項目查看內容。</p></div>;
+  const cat = meta.categories.find((c) => c.id === el.category);
+  const byId = new Map(view.analysis.elements.map((e) => [e.id, e]));
+  const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
+  const list = [
+    ...rels.filter((r) => r.from === el.id).map((r) => ({ zh: meta.relations[r.kind]?.zh ?? r.kind, o: byId.get(r.to) })),
+    ...rels.filter((r) => r.to === el.id).map((r) => ({ zh: `被${meta.relations[r.kind]?.zh ?? r.kind}`, o: byId.get(r.from) })),
+  ].filter((x) => x.o);
+  return (
+    <>
+      <div className="section">
+        <div className="section-head"><h2 className="section-title">屬性</h2><span className="label">{cat?.zh ?? stereotype(el)}</span></div>
+        <div className="field"><span className="label">編號</span><span className="data">{el.shortName ?? "—"}</span></div>
+        <div className="field"><span className="label">名稱</span><span className="heading">{el.name}</span></div>
+        {el.doc && <div className="field"><span className="label">{cat?.keyword === "requirement" ? "內容" : "說明"}</span><p className="body">{el.doc}</p></div>}
+        {(cat?.fields ?? []).filter((f) => el.attrs[f.name]).map((f) => <div className="field" key={f.name}><span className="label">{f.zh}</span><span className="body">{el.attrs[f.name]}</span></div>)}
+        {el.attrs.kind && <div className="field"><span className="label">驗證方法</span><span className="data">{methodZh(el.attrs.kind)}</span></div>}
+      </div>
+      <div className="section">
+        <div className="section-head"><h2 className="section-title">關係</h2><span className="label">{list.length}</span></div>
+        {list.map((x, i) => <div className="rel" key={i}><span className="label">{x.zh}</span>
+          <button className="tbtn rn" style={{ textTransform: "none", letterSpacing: 0, fontSize: 13, justifyContent: "flex-start" }} onClick={() => setSel({ type: "element", id: (x.o as Element).id })}>{label(x.o as Element)}</button></div>)}
+        {list.length === 0 && <p className="caption">沒有關係。</p>}
+      </div>
+    </>
+  );
 }
 
 function Msg({ m }: { m: { ok: boolean; text: string } | null }) {

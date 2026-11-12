@@ -10,6 +10,8 @@ import * as store from "./projects.ts";
 import { deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, snippetFor } from "./edits.ts";
 import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
+import * as auth from "./auth.ts";
+import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAIN_FILE = "model.sysml";
@@ -19,7 +21,13 @@ app.use(express.json({ limit: "5mb" }));
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => {
   fn(req, res).catch(next);
 };
-const author = (req: Request) => String(req.body?.author ?? req.header("x-author") ?? "").slice(0, 60);
+const me = (req: Request) => req.user as User;
+// 修改紀錄的作者取自登入身分；只有這台電腦本機操作時才採用自填的名字
+const author = (req: Request) => {
+  const u = me(req);
+  const typed = String(req.body?.author ?? "").trim().slice(0, 60);
+  return u.kind === "local" && typed ? typed : u.name;
+};
 const pid = (req: Request) => String(req.params.id);
 
 async function view(id: string) {
@@ -28,6 +36,40 @@ async function view(id: string) {
   const gates = evaluateGates(analysis, project.gates, project.manual);
   return { project, analysis, gates };
 }
+
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "same-origin");
+  next();
+});
+auth.mountAuthRoutes(app);
+app.use("/api", auth.authenticate);
+app.use("/api/projects/:id", auth.projectGuard);
+
+app.get("/api/me", wrap(async (req, res) => {
+  const c = await auth.getConfig();
+  res.json({ user: req.user ? auth.describe(req.user) : null, githubLogin: !!(c.github.clientId && c.github.clientSecret && c.publicUrl), public: req.isPublic === true });
+}));
+
+// ───────── 管理：成員、唯讀連結、登入設定 ─────────
+const admin = auth.need(auth.can.admin, "只有總工程師以上或管理員可以操作。");
+app.get("/api/admin/members", admin, wrap(async (_req, res) => res.json({ members: await auth.listMembers(), ranks: auth.RANKS.map((r) => ({ id: r, zh: auth.RANK_ZH[r] })) })));
+app.post("/api/admin/members", admin, wrap(async (req, res) => res.json({ members: await auth.saveMember(req.body ?? {}) })));
+app.post("/api/admin/members/delete", admin, wrap(async (req, res) => res.json({ members: await auth.removeMember(String(req.body?.login ?? "")) })));
+app.get("/api/admin/shares", admin, wrap(async (_req, res) => res.json({ shares: await auth.listShares() })));
+app.post("/api/admin/shares", admin, wrap(async (req, res) => {
+  await store.readProject(String(req.body?.project ?? ""));
+  const c = await auth.getConfig();
+  const r = await auth.createShare(String(req.body.project), String(req.body.label ?? ""), Number(req.body.days), me(req).name);
+  res.json({ ...r, path: `/s/${r.token}`, publicUrl: c.publicUrl });
+}));
+app.post("/api/admin/shares/delete", admin, wrap(async (req, res) => { await auth.revokeShare(String(req.body?.id ?? "")); res.json({ shares: await auth.listShares() }); }));
+app.get("/api/admin/config", admin, wrap(async (_req, res) => {
+  const c = await auth.getConfig();
+  res.json({ publicUrl: c.publicUrl, clientId: c.github.clientId, hasSecret: !!c.github.clientSecret, tailscaleAdmins: c.tailscaleAdmins });
+}));
+app.post("/api/admin/config", admin, wrap(async (req, res) => { await auth.updateConfig(req.body ?? {}); res.json({ saved: true }); }));
 
 app.get("/api/meta", (_req, res) => {
   res.json({
@@ -38,9 +80,13 @@ app.get("/api/meta", (_req, res) => {
   });
 });
 
-app.get("/api/projects", wrap(async (_req, res) => res.json(await store.listProjects())));
+app.get("/api/projects", wrap(async (req, res) => {
+  const all = await store.listProjects();
+  const only = me(req).project;
+  res.json(only ? all.filter((p) => p.id === only) : all);
+}));
 
-app.post("/api/projects", wrap(async (req, res) => {
+app.post("/api/projects", auth.need(auth.can.createProject, "建立專案需要總工程師以上的權限。"), wrap(async (req, res) => {
   const { id, name, kind, gates } = req.body ?? {};
   res.json(await store.createProject({ id: String(id ?? ""), name: String(name ?? ""), kind: kind === "small" ? "small" : "annual", gates, author: author(req) }));
 }));
@@ -187,16 +233,25 @@ app.put("/api/projects/:id/layout", wrap(async (req, res) => {
   res.json({ saved: true });
 }));
 
-app.post("/api/projects/:id/manual", wrap(async (req, res) => {
+app.post("/api/projects/:id/manual", auth.need(auth.can.confirm, "人工確認需要責任工程師以上的權限。"), wrap(async (req, res) => {
   await store.setManual(pid(req), String(req.body.key), req.body.done === true, author(req));
   res.json(await view(pid(req)));
 }));
 
+// 簽核：簽核人與職級取自登入身分，權限依 AEAS Table 3
 app.post("/api/projects/:id/signoffs", wrap(async (req, res) => {
   const b = req.body ?? {};
+  const u = me(req);
+  const project = await store.readProject(pid(req));
+  const gate = String(b.gate);
+  const subsystem = b.subsystem ? String(b.subsystem) : null;
+  if (!auth.can.signoff(u, gate, project.highPower !== false, subsystem)) {
+    const def = GATES.find((g) => g.id === gate);
+    throw new store.UserError(`你的職級不能簽核這個節點。核可者：${def?.approver ?? "指定職級"}。`);
+  }
   await store.signoff(pid(req), {
-    gate: String(b.gate), subsystem: b.subsystem ? String(b.subsystem) : null,
-    decision: b.decision === "APPROVE" ? "APPROVE" : "DENY", by: String(b.by ?? ""), role: String(b.role ?? ""), comment: String(b.comment ?? ""),
+    gate, subsystem, decision: b.decision === "APPROVE" ? "APPROVE" : "DENY",
+    by: u.name, role: u.rank ? `${auth.RANK_ZH[u.rank]} [${u.rank}]` : "", comment: String(b.comment ?? ""),
   });
   res.json(await view(pid(req)));
 }));
@@ -220,12 +275,16 @@ if (fs.existsSync(dist)) {
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof store.UserError) return res.status(400).json({ error: err.message });
+  if (err instanceof auth.AuthError) return res.status(err.status).json({ error: err.message });
   console.error(err);
   res.status(500).json({ error: "伺服器發生錯誤，請查看伺服器紀錄。" });
 });
 
-const port = Number(process.env.PORT ?? 8787);
-const server = app.listen(port, "127.0.0.1", () => console.log(`JRI MBSE 伺服器：http://127.0.0.1:${port}`));
+// 內部埠給本機與 Tailscale 私人網路；公開埠給 Funnel，必須登入。兩者都只綁在本機。
+const servers = [
+  app.listen(auth.INTERNAL_PORT, "127.0.0.1", () => console.log(`JRI MBSE 內部埠：http://127.0.0.1:${auth.INTERNAL_PORT}`)),
+  app.listen(auth.PUBLIC_PORT, "127.0.0.1", () => console.log(`JRI MBSE 公開埠（需登入）：http://127.0.0.1:${auth.PUBLIC_PORT}`)),
+];
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
-  process.on(sig, () => { server.close(); shutdown().finally(() => process.exit(0)); });
+  process.on(sig, () => { for (const sv of servers) sv.close(); shutdown().finally(() => process.exit(0)); });
 }

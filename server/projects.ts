@@ -31,6 +31,7 @@ export interface Project {
   kind: "annual" | "small";
   createdAt: string;
   gates: string[];
+  highPower?: boolean; // 高功率（H 級以上）：TRR／FRR 只有指導老師能核可
   manual: Record<string, boolean>;
   signoffs: Signoff[];
 }

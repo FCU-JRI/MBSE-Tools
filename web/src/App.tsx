@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { api, getAuthor, setAuthor } from "./api.ts";
-import type { Meta, Project, View } from "./api.ts";
+import type { Me, Meta, MeResponse, Project, View } from "./api.ts";
+import { Admin } from "./Admin.tsx";
 import { diagramsOf, label, listOf } from "./model.ts";
 import type { DiagramDef } from "./model.ts";
 import { Diagram } from "./Diagram.tsx";
@@ -12,30 +13,62 @@ import { SourceTab } from "./SourceTab.tsx";
 
 export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [projectId, setProjectId] = useState<string | null>(() => new URLSearchParams(location.search).get("p"));
+  const [page, setPage] = useState<"home" | "admin">("home");
   const [author, setAuthorState] = useState(getAuthor);
   const [error, setError] = useState("");
 
-  useEffect(() => { api<Meta>("/meta").then(setMeta).catch((e) => setError(e.message)); }, []);
-  const open = (id: string | null) => { setProjectId(id); history.pushState(null, "", id ? `?p=${id}` : location.pathname); };
-  const who = (
+  useEffect(() => {
+    api<MeResponse>("/me").then((m) => { setMe(m); if (m.user) return api<Meta>("/meta").then(setMeta); }).catch((e) => setError(e.message));
+  }, []);
+  const open = (id: string | null) => { setProjectId(id); setPage("home"); history.pushState(null, "", id ? `?p=${id}` : location.pathname); };
+  const logout = async () => { await fetch("/auth/logout", { method: "POST" }); location.href = "/"; };
+
+  if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p></div>;
+  if (!me) return <div className="page"><p className="label">載入中</p></div>;
+  if (!me.user) return <Login github={me.githubLogin} />;
+  if (!meta) return <div className="page"><p className="label">載入中</p></div>;
+  const user = me.user;
+  // 只有這台電腦本機操作時可以自填名字；其餘身分來自登入
+  const who = user.kind === "local" && user.login === "local" ? (
     <label className="who"><span className="label">使用者</span>
       <input className="input" value={author} placeholder="你的名字" onChange={(e) => { setAuthorState(e.target.value); setAuthor(e.target.value); }} />
     </label>
+  ) : (
+    <span className="who"><span className="label">{user.name} · {user.rankZh}</span>{user.kind !== "local" && <button className="tbtn" onClick={logout}>登出</button>}</span>
   );
 
-  if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p></div>;
-  if (!meta) return <div className="page"><p className="label">載入中</p></div>;
-  if (projectId) return <Workspace id={projectId} meta={meta} onHome={() => open(null)} who={who} />;
+  if (projectId) return <Workspace id={projectId} meta={meta} user={user} onHome={() => open(null)} who={who} />;
   return (
     <div className="shell">
-      <header className="topbar"><span className="brand">JRI MBSE</span><span className="label">噴射推進研究社</span><span className="grow" />{who}</header>
-      <Home meta={meta} onOpen={open} />
+      <header className="topbar">
+        <button className="brand" onClick={() => setPage("home")}>JRI MBSE</button><span className="label">噴射推進研究社</span><span className="grow" />
+        {user.caps.admin && <nav className="seg" role="tablist"><button role="tab" aria-selected={page === "home"} onClick={() => setPage("home")}>專案</button><button role="tab" aria-selected={page === "admin"} onClick={() => setPage("admin")}>管理</button></nav>}
+        {who}
+      </header>
+      {page === "admin" && user.caps.admin ? <Admin /> : <Home meta={meta} user={user} onOpen={open} />}
     </div>
   );
 }
 
-function Home({ meta, onOpen }: { meta: Meta; onOpen: (id: string) => void }) {
+function Login({ github }: { github: boolean }) {
+  return (
+    <div className="shell">
+      <header className="topbar"><span className="brand">JRI MBSE</span><span className="label">噴射推進研究社</span></header>
+      <main className="page" style={{ width: "100%", maxWidth: 480 }}>
+        <section className="section">
+          <div className="section-head"><h1 className="section-title">登入</h1></div>
+          <p className="body" style={{ marginBottom: 16 }}>JRI 成員請用 GitHub 帳號登入。帳號要先由總工程師加入成員名單。</p>
+          {github ? <a className="btn" href="/auth/github">用 GitHub 登入</a> : <p className="msg"><span className="tag">未設定</span>GitHub 登入尚未設定，請聯絡管理員。</p>}
+          <p className="caption" style={{ marginTop: 24 }}>外部審查委員請直接開啟收到的唯讀連結。</p>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: string) => void }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [form, setForm] = useState({ id: "", name: "", kind: "annual" as "annual" | "small", gates: ["mdr", "cdr", "trr"] });
   const [error, setError] = useState("");
@@ -49,7 +82,7 @@ function Home({ meta, onOpen }: { meta: Meta; onOpen: (id: string) => void }) {
     <main className="page home" style={{ width: "100%" }}>
       <section className="section">
         <div className="section-head"><h1 className="section-title">專案</h1><span className="label">{projects?.length ?? 0}</span></div>
-        {projects === null ? <p className="label">載入中</p> : projects.length === 0 ? <p className="body muted">還沒有專案。在右側建立第一個。</p> : projects.map((p) => (
+        {projects === null ? <p className="label">載入中</p> : projects.length === 0 ? <p className="body muted">{user.caps.createProject ? "還沒有專案。在右側建立第一個。" : "還沒有可以開啟的專案。"}</p> : projects.map((p) => (
           <button key={p.id} className="proj" onClick={() => onOpen(p.id)}>
             <span className="heading" style={{ flex: 1 }}>{p.name}</span>
             <span className="label">{p.kind === "annual" ? "年度計畫" : "小型專案"}</span>
@@ -58,7 +91,7 @@ function Home({ meta, onOpen }: { meta: Meta; onOpen: (id: string) => void }) {
           </button>
         ))}
       </section>
-      <form className="section" onSubmit={create}>
+      {user.caps.createProject && <form className="section" onSubmit={create}>
         <div className="section-head"><h2 className="section-title">建立專案</h2></div>
         <label className="field"><span className="label">名稱</span><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="2027 年度探空火箭" /></label>
         <label className="field"><span className="label">代號</span><input className="input" required value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value.toLowerCase() })} placeholder="sr-2027" pattern="[a-z0-9][a-z0-9\-]{1,40}" /></label>
@@ -76,7 +109,7 @@ function Home({ meta, onOpen }: { meta: Meta; onOpen: (id: string) => void }) {
         ))}
         {error && <p className="msg"><span className="tag danger">ERR</span>{error}</p>}
         <div style={{ marginTop: 12 }}><button className="btn" disabled={busy}>{busy ? "建立中" : "建立"}</button></div>
-      </form>
+      </form>}
     </main>
   );
 }
@@ -84,7 +117,8 @@ function Home({ meta, onOpen }: { meta: Meta; onOpen: (id: string) => void }) {
 type Mode = "diagram" | "table" | "trace" | "gates" | "source" | "history";
 const MODES: [Mode, string][] = [["diagram", "圖"], ["table", "表"], ["trace", "追溯"], ["gates", "節點"], ["source", "原始碼"], ["history", "紀錄"]];
 
-function Workspace({ id, meta, onHome, who }: { id: string; meta: Meta; onHome: () => void; who: React.ReactNode }) {
+function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; user: Me; onHome: () => void; who: React.ReactNode }) {
+  const readOnly = !user.caps.edit;
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -110,6 +144,7 @@ function Workspace({ id, meta, onHome, who }: { id: string; meta: Meta; onHome: 
     <div className="shell">
       <header className="topbar">
         <button className="brand" onClick={onHome}>JRI MBSE</button>
+        {readOnly && <span className="tag">唯讀</span>}
         <span className="label crumb">{view.project.name}</span>
         <nav className="seg" role="tablist">{MODES.map(([m, zh]) => <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>{zh}</button>)}</nav>
         <span className="grow" />
@@ -129,16 +164,16 @@ function Workspace({ id, meta, onHome, who }: { id: string; meta: Meta; onHome: 
             <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>
           )}
           {notice && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ flex: 1 }}>{notice}</span><button className="tbtn" onClick={() => setNotice("")}>關閉</button></div>}
-          {mode === "diagram" && <Diagram view={view} meta={meta} def={def} selectedId={selectedId} onSelectElement={selectElement}
+          {mode === "diagram" && <Diagram readOnly={readOnly} view={view} meta={meta} def={def} selectedId={selectedId} onSelectElement={selectElement}
             onSelectEdge={(e) => e && setSel({ type: "edge", edge: e })} onNew={(c, parentId) => setSel({ type: "new", category: c, parentId })}
             onChanged={(v) => { setView(v); setNotice(""); }} onError={setNotice} />}
           {mode === "table" && <div className="center-scroll"><TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={selectElement} /></div>}
           {mode === "trace" && <div className="center-scroll"><TraceView view={view} selectedId={selectedId} onSelect={selectElement} /></div>}
-          {mode === "gates" && <div className="center-scroll"><GatesView view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
-          {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} /></div>}
+          {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
+          {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} /></div>}
           {mode === "history" && <div className="center-scroll"><HistoryView id={id} /></div>}
         </section>
-        {showSide && <aside className="side right"><Inspector view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}
+        {showSide && <aside className="side right"><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}
       </div>
     </div>
   );

@@ -55,6 +55,7 @@ function toEdge(e: GEdge): Edge {
 }
 
 export interface DiagramProps {
+  readOnly?: boolean;
   view: View; meta: Meta; def: DiagramDef;
   selectedId: string | null;
   onSelectElement: (id: string | null) => void;
@@ -64,7 +65,7 @@ export interface DiagramProps {
   onError: (m: string) => void;
 }
 
-export function Diagram({ view, meta, def, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError }: DiagramProps) {
+export function Diagram({ readOnly, view, meta, def, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError }: DiagramProps) {
   const pid = view.project.id;
   const graph = useMemo(() => buildGraph(def, view.analysis), [def, view.analysis]);
   const [layout, setLayout] = useState<Layout | null>(null);
@@ -90,8 +91,9 @@ export function Diagram({ view, meta, def, selectedId, onSelectElement, onSelect
 
   const saveLayout = useCallback((next: Layout) => {
     layoutRef.current = next;
+    if (readOnly) return; // 唯讀時位置只留在這次瀏覽
     api(`/projects/${pid}/layout`, "PUT", { layout: next }).catch((e) => onError((e as Error).message));
-  }, [pid, onError]);
+  }, [pid, onError, readOnly]);
 
   const onNodeDragStop = useCallback((_e: unknown, _n: FlowNode, moved: FlowNode[]) => {
     const cur = { ...(layoutRef.current[def.id] ?? {}) };
@@ -122,13 +124,13 @@ export function Diagram({ view, meta, def, selectedId, onSelectElement, onSelect
     <>
       <div className="canvas-bar">
         <span className="label">{def.code} · {def.title}</span>
-        {PALETTE[def.kind].length > 0 && (
+        {!readOnly && PALETTE[def.kind].length > 0 && (
           <div className="tbtn-row">
             <span className="label">新增</span>
             {PALETTE[def.kind].map((c) => <button key={c} className="tbtn" onClick={() => onNew(c, def.kind === "act" ? def.context : null)}>{meta.categories.find((x) => x.id === c)?.zh}</button>)}
           </div>
         )}
-        {def.kind === "req" && (
+        {!readOnly && def.kind === "req" && (
           <label className="tbtn-row"><span className="label">拉線建立</span>
             <select className="input" style={{ width: "6rem", height: 28, fontSize: 13 }} value={linkKind} onChange={(e) => setLinkKind(e.target.value)}>
               {REQ_LINK_KINDS.map((k) => <option key={k} value={k}>{meta.relations[k]?.zh}</option>)}
@@ -136,7 +138,7 @@ export function Diagram({ view, meta, def, selectedId, onSelectElement, onSelect
           </label>
         )}
         <span style={{ flex: 1 }} />
-        <span className="caption">{linkHint[def.kind]}</span>
+        {!readOnly && <span className="caption">{linkHint[def.kind]}</span>}
         <button className="tbtn" onClick={resetLayout}>自動排列</button>
       </div>
       <div className="canvas">
@@ -149,7 +151,7 @@ export function Diagram({ view, meta, def, selectedId, onSelectElement, onSelect
         </svg>
         {graph.nodes.length === 0 ? <p className="body muted empty">這張圖還沒有內容。用上方的「新增」開始。</p> : (
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-            onNodeDragStop={onNodeDragStop} onConnect={onConnect} deleteKeyCode={null} fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.2}
+            onNodeDragStop={onNodeDragStop} onConnect={onConnect} nodesConnectable={!readOnly} deleteKeyCode={null} fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.2}
             onNodeClick={(_e, n) => { onSelectEdge(null); onSelectElement(n.id); }}
             onEdgeClick={(_e, ed) => onSelectEdge((ed.data as { g: GEdge }).g)}
             onPaneClick={() => { onSelectElement(null); onSelectEdge(null); }}

@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { api, getAuthor } from "./api.ts";
-import type { Element, Gate, Meta, View } from "./api.ts";
+import { api } from "./api.ts";
+import type { Element, Gate, Me, Meta, View } from "./api.ts";
 import { label, listOf } from "./model.ts";
 import { methodZh } from "./Inspector.tsx";
 
-const ROLES = ["指導老師 [F-VIII]", "管制官 [R-VIII]", "總工程師 [D-VII]", "責任工程師 [O-V]"];
 
 export function TableView({ view, meta, catId, selectedId, onSelect }: { view: View; meta: Meta; catId: string; selectedId: string | null; onSelect: (id: string) => void }) {
   const cat = meta.categories.find((c) => c.id === catId) ?? meta.categories[0];
@@ -76,7 +75,7 @@ export function TraceView({ view, selectedId, onSelect }: { view: View; selected
   );
 }
 
-export function GatesView({ view, gateId, setView, onSelect }: { view: View; gateId: string; setView: (v: View) => void; onSelect: (id: string) => void }) {
+export function GatesView({ user, view, gateId, setView, onSelect }: { user: Me; view: View; gateId: string; setView: (v: View) => void; onSelect: (id: string) => void }) {
   const gate = view.gates.find((g) => g.id === gateId) ?? view.gates[0];
   const [error, setError] = useState("");
   if (!gate) return <p className="body">這個專案沒有設定節點。</p>;
@@ -98,26 +97,26 @@ export function GatesView({ view, gateId, setView, onSelect }: { view: View; gat
               <div className="what">{c.label}　<span className="faint">{c.detail}</span></div>
               {!c.pass && <div className="caption" style={{ marginTop: 4 }}>怎麼做　{c.hint}</div>}
               {c.missing.length > 0 && <div className="tbtn-row" style={{ paddingLeft: 8 }}><span className="label">還缺</span>{c.missing.map((m) => <button key={m.id} className="tbtn" style={{ textTransform: "none", letterSpacing: 0, fontSize: 12 }} onClick={() => onSelect(m.id)}>{m.name}</button>)}</div>}
-              {c.manual && <label className="check"><input type="checkbox" checked={c.pass} onChange={(e) => toggle(c.id, e.target.checked)} /><span className="caption">我已確認這一項</span></label>}
+              {c.manual && user.caps.confirm && <label className="check"><input type="checkbox" checked={c.pass} onChange={(e) => toggle(c.id, e.target.checked)} /><span className="caption">我已確認這一項</span></label>}
             </div>
           </li>
         ))}</ul>
       </section>
-      <Signoff view={view} gate={gate} setView={setView} />
+      <Signoff user={user} view={view} gate={gate} setView={setView} />
     </>
   );
 }
 
-function Signoff({ view, gate, setView }: { view: View; gate: Gate; setView: (v: View) => void }) {
+function Signoff({ user, view, gate, setView }: { user: Me; view: View; gate: Gate; setView: (v: View) => void }) {
   const subsystems = listOf(view.analysis.elements, "Subsystem");
-  const [form, setForm] = useState({ role: ROLES[1], subsystem: "", comment: "" });
+  const [form, setForm] = useState({ subsystem: "", comment: "" });
   const [error, setError] = useState("");
   const records = view.project.signoffs.filter((s) => s.gate === gate.id);
   const submit = async (decision: "APPROVE" | "DENY") => {
     setError("");
     if (gate.perSubsystem && !form.subsystem) return setError("請選擇這次審查的次系統。");
     try {
-      setView(await api<View>(`/projects/${view.project.id}/signoffs`, "POST", { gate: gate.id, decision, by: getAuthor(), role: form.role, subsystem: form.subsystem || null, comment: form.comment }));
+      setView(await api<View>(`/projects/${view.project.id}/signoffs`, "POST", { gate: gate.id, decision, subsystem: form.subsystem || null, comment: form.comment }));
       setForm({ ...form, comment: "" });
     } catch (e) { setError((e as Error).message); }
   };
@@ -133,15 +132,16 @@ function Signoff({ view, gate, setView }: { view: View; gate: Gate; setView: (v:
           ))}</tbody>
         </table>
       )}
+      {user.rank && <>
       <div className="row">
-        <label className="field"><span className="label">職級</span><select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{ROLES.map((r) => <option key={r}>{r}</option>)}</select></label>
         {gate.perSubsystem && <label className="field"><span className="label">次系統</span><select className="input" value={form.subsystem} onChange={(e) => setForm({ ...form, subsystem: e.target.value })}><option value="">請選擇</option>{subsystems.map((s) => <option key={s.id}>{s.name}</option>)}</select></label>}
         <label className="field" style={{ flex: 2 }}><span className="label">意見</span><input className="input" value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>
       </div>
       {gate.done < gate.total && <p className="caption">還有 {gate.total - gate.done} 項未完成。仍可簽核，請在意見中說明。</p>}
       {error && <p className="msg"><span className="tag danger">ERR</span>{error}</p>}
       <div className="tbtn-row"><button className="tbtn primary" onClick={() => submit("APPROVE")}>核可 · APPROVE</button><button className="tbtn" onClick={() => submit("DENY")}>退回 · DENY</button></div>
-      <p className="caption">簽核人取自右上角的使用者名稱。核可時在版本紀錄打上基線標籤。</p>
+      <p className="caption">以 {user.name}（{user.rankZh}）的身分簽核；職級不符會被拒絕。核可時在版本紀錄打上基線標籤。</p>
+      </>}
     </section>
   );
 }

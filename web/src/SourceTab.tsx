@@ -3,7 +3,7 @@ import { api, ApiError } from "./api.ts";
 import type { Diagnostic } from "./api.ts";
 
 /** 專家模式：直接編輯 SysML v2 原始碼，輸入時即時檢查，有錯誤不能儲存。 */
-export function SourceTab({ id, onSaved }: { id: string; onSaved: () => void }) {
+export function SourceTab({ id, onSaved, readOnly }: { id: string; onSaved: () => void; readOnly?: boolean }) {
   const [files, setFiles] = useState<string[]>([]);
   const [file, setFile] = useState("model.sysml");
   const [content, setContent] = useState("");
@@ -67,12 +67,12 @@ export function SourceTab({ id, onSaved }: { id: string; onSaved: () => void }) 
         <label className="field" style={{ flex: "0 0 12rem" }}><span className="label">檔案</span><select className="input" value={file} onChange={(e) => setFile(e.target.value)} disabled={dirty}>{files.map((f) => <option key={f}>{f}</option>)}</select></label>
         <label className="field" style={{ flex: 1 }}><span className="label">修改說明</span><input className="input" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="這次改了什麼" /></label>
         <div className="tbtn-row" style={{ marginBottom: 12 }}>
-          <button className="btn" disabled={!dirty || errors.length > 0 || checking} onClick={save}>寫入</button>
+          {!readOnly && <button className="btn" disabled={!dirty || errors.length > 0 || checking} onClick={save}>寫入</button>}
           <button className="tbtn" disabled={!dirty} onClick={() => { setContent(saved); setDiags([]); }}>放棄修改</button>
         </div>
       </div>
       {status && <p className="msg">{!status.ok && <span className="tag danger">ERR</span>}{status.text}</p>}
-      <textarea ref={area} className="code" spellCheck={false} value={content} onChange={(e) => setContent(e.target.value)} aria-label="SysML v2 原始碼" />
+      <textarea ref={area} readOnly={readOnly} className="code" spellCheck={false} value={content} onChange={(e) => setContent(e.target.value)} aria-label="SysML v2 原始碼" />
       <div style={{ marginTop: 8 }}>
         {checking ? <span className="label">檢查中</span> : diags.length === 0 ? <span className="label">{dirty ? "沒有錯誤，可以寫入" : "沒有未儲存的修改"}</span> : (
           <div className="stack">{diags.map((d, i) => (
