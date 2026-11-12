@@ -81,7 +81,8 @@ export async function getConfig(): Promise<Config> {
 }
 export async function updateConfig(patch: { publicUrl?: string; clientId?: string; clientSecret?: string }): Promise<void> {
   const c = await getConfig();
-  if (typeof patch.publicUrl === "string") c.publicUrl = patch.publicUrl.trim().replace(/\/+$/, "");
+  // 空白不覆蓋既有設定，避免表單沒帶到值時把公開網址清掉
+  if (typeof patch.publicUrl === "string" && patch.publicUrl.trim()) c.publicUrl = patch.publicUrl.trim().replace(/\/+$/, "");
   if (typeof patch.clientId === "string") c.github.clientId = patch.clientId.trim();
   if (typeof patch.clientSecret === "string" && patch.clientSecret.trim()) c.github.clientSecret = patch.clientSecret.trim();
   await writeJson(CONFIG_FILE, c);
