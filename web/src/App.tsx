@@ -8,7 +8,8 @@ import type { DiagramDef } from "./model.ts";
 import { Diagram } from "./Diagram.tsx";
 import { Inspector } from "./Inspector.tsx";
 import type { Selection } from "./Inspector.tsx";
-import { GatesView, HistoryView, TableView, TraceView } from "./Views.tsx";
+import { GatesView, TableView, TraceView } from "./Views.tsx";
+import { VersionsView } from "./Versions.tsx";
 import { SourceTab } from "./SourceTab.tsx";
 
 export function App() {
@@ -115,7 +116,7 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
 }
 
 type Mode = "diagram" | "table" | "trace" | "gates" | "source" | "history";
-const MODES: [Mode, string][] = [["diagram", "圖"], ["table", "表"], ["trace", "追溯"], ["gates", "節點"], ["source", "原始碼"], ["history", "紀錄"]];
+const MODES: [Mode, string][] = [["diagram", "圖"], ["table", "表"], ["trace", "追溯"], ["gates", "節點"], ["source", "原始碼"], ["history", "版本"]];
 
 function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; user: Me; onHome: () => void; who: React.ReactNode }) {
   const readOnly = !user.caps.edit;
@@ -171,7 +172,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
           {mode === "trace" && <div className="center-scroll"><TraceView view={view} selectedId={selectedId} onSelect={selectElement} /></div>}
           {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
           {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} /></div>}
-          {mode === "history" && <div className="center-scroll"><HistoryView id={id} /></div>}
+          {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} onChanged={setView} /></div>}
         </section>
         {showSide && <aside className="side right"><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}
       </div>

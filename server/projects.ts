@@ -42,22 +42,71 @@ export class UserError extends Error {}
 const ID = /^[a-z0-9][a-z0-9-]{1,40}$/;
 const FILE = /^[A-Za-z0-9_\-一-鿿]+\.sysml$/;
 
-function dirOf(id: string): string {
+export function dirOf(id: string): string {
   if (!ID.test(id)) throw new UserError("專案代號只能用小寫英數與連字號。");
   return path.join(DATA_DIR, id);
 }
 
-async function git(dir: string, ...args: string[]): Promise<string> {
-  const { stdout } = await run("git", args, { cwd: dir, windowsHide: true });
+export async function git(dir: string, ...args: string[]): Promise<string> {
+  const { stdout } = await run("git", args, { cwd: dir, windowsHide: true, maxBuffer: 32 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
   return stdout.trim();
 }
 
-async function commit(dir: string, author: string, message: string): Promise<string> {
+// ───────── 推送到 GitHub：每次提交後在背景推送，不擋住使用者 ─────────
+export interface SyncState { remote: string; lastPushAt: string | null; error: string | null; pushing: boolean }
+const sync = new Map<string, SyncState>();
+const pending = new Map<string, boolean>();
+
+export async function syncState(id: string): Promise<SyncState> {
+  const dir = dirOf(id);
+  const remote = await git(dir, "remote", "get-url", "origin").catch(() => "");
+  const cur = sync.get(dir) ?? { remote, lastPushAt: null, error: null, pushing: false };
+  cur.remote = remote;
+  sync.set(dir, cur);
+  return cur;
+}
+
+export function pushLater(dir: string): void {
+  if (pending.get(dir)) return;
+  pending.set(dir, true);
+  setTimeout(async () => {
+    pending.set(dir, false);
+    const remote = await git(dir, "remote", "get-url", "origin").catch(() => "");
+    if (!remote) return;
+    const st = sync.get(dir) ?? { remote, lastPushAt: null, error: null, pushing: false };
+    st.remote = remote; st.pushing = true; sync.set(dir, st);
+    try {
+      await run("git", ["push", "--follow-tags", "origin", "main"], { cwd: dir, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      await run("git", ["push", "origin", "--tags"], { cwd: dir, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      st.lastPushAt = new Date().toISOString(); st.error = null;
+    } catch (e) {
+      st.error = String((e as { stderr?: string }).stderr ?? (e as Error).message).split("\n").filter(Boolean).slice(-2).join(" ").slice(0, 300);
+    } finally { st.pushing = false; }
+  }, 1500);
+}
+
+const REMOTE = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\.git)?$/;
+export async function setRemote(id: string, url: string): Promise<SyncState> {
+  const dir = dirOf(id);
+  await readProject(id);
+  const u = url.trim();
+  if (u && !REMOTE.test(u)) throw new UserError("儲存庫網址必須是 https://github.com/組織/名稱 的形式。");
+  const has = await git(dir, "remote", "get-url", "origin").catch(() => "");
+  if (!u) { if (has) await git(dir, "remote", "remove", "origin"); }
+  else if (has) await git(dir, "remote", "set-url", "origin", u);
+  else await git(dir, "remote", "add", "origin", u);
+  sync.delete(dir);
+  if (u) pushLater(dir);
+  return syncState(id);
+}
+
+export async function commit(dir: string, author: string, message: string): Promise<string> {
   await git(dir, "add", "-A");
   const status = await git(dir, "status", "--porcelain");
   if (status) {
     const name = author.trim() || "JRI MBSE";
     await git(dir, "-c", `user.name=${name}`, "-c", "user.email=mbse@jri.local", "commit", "-m", message);
+    pushLater(dir);
   }
   return git(dir, "rev-parse", "--short", "HEAD");
 }
@@ -197,6 +246,7 @@ export async function signoff(id: string, input: Omit<Signoff, "at" | "commit">)
     // 節點通過時打標籤作為基線
     const tag = `baseline/${input.gate}${input.subsystem ? "-" + Buffer.from(input.subsystem).toString("hex").slice(0, 12) : ""}-${Date.now()}`;
     await git(dir, "tag", tag);
+    pushLater(dir);
   }
   return p;
 }

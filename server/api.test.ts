@@ -205,3 +205,53 @@ test("共用元件庫：所有專案可見，專案內唯讀", async () => {
   await ok("/relations", "POST", { kind: "compose", from: find("航電次系統", "PartDefinition").id, to: e.id });
   assert.ok(find("共用飛行電腦", "PartUsage"));
 });
+
+import { execFileSync } from "node:child_process";
+const gitIn = (dir: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=成員", "-c", "user.email=m@jri.local", ...args], { cwd: dir, encoding: "utf8" });
+
+test("分支審查：合法的分支可合併，有錯誤的分支被標示且不能合併", async () => {
+  const dir = path.join(home, "projects", "t1");
+  const model = path.join(dir, "model", "model.sysml");
+  const original = await fs.readFile(model, "utf8");
+
+  gitIn(dir, "checkout", "-q", "-b", "feature/add-req");
+  await fs.writeFile(model, original.replace("package Requirements {", "package Requirements {\n        requirement <'REQ-SYS-777'> '分支新增的需求' : SystemRequirement { doc /* 由分支加入。 */ }"), "utf8");
+  gitIn(dir, "commit", "-qam", "分支：新增需求");
+  gitIn(dir, "checkout", "-q", "main");
+  gitIn(dir, "checkout", "-q", "-b", "feature/broken");
+  await fs.writeFile(model, original + "\npackage Oops { part def }\n", "utf8");
+  gitIn(dir, "commit", "-qam", "分支：壞掉的模型");
+  gitIn(dir, "checkout", "-q", "main");
+
+  const list = (await call(`${I}/api/projects/t1/branches`)).data;
+  const good = list.find((b: any) => b.name === "feature/add-req"), bad = list.find((b: any) => b.name === "feature/broken");
+  assert.equal(good.ok, true);
+  assert.equal(bad.ok, false);
+  assert.ok(bad.firstError.length > 0);
+
+  const d = (await call(`${I}/api/projects/t1/branches/diff?name=feature/add-req`)).data;
+  assert.match(d.diff, /REQ-SYS-777/);
+  assert.ok(d.changes.some((c: any) => c.type === "added" && c.key === "REQ-SYS-777"));
+
+  let r = await call(`${I}/api/projects/t1/branches/merge`, "POST", { name: "feature/broken" });
+  assert.equal(r.status, 400);
+  assert.equal((await call(`${I}/api/projects/t1`)).data.analysis.ok, true, "失敗的合併不應影響 main");
+  r = await call(`${I}/api/projects/t1/branches/merge`, "POST", { name: "feature/add-req" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.ok(r.data.analysis.elements.some((e: any) => e.shortName === "REQ-SYS-777"));
+});
+
+test("基線比較：列出節點核可後的變更", async () => {
+  const list = (await call(`${I}/api/projects/t1/baselines`)).data;
+  assert.ok(list.length >= 2);
+  const base = list.find((b: any) => b.ref.startsWith("baseline/proposal"));
+  const r = await call(`${I}/api/projects/t1/compare?from=${encodeURIComponent(base.ref)}&to=HEAD`);
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.ok(r.data.changes.some((c: any) => c.type === "added" && c.key === "REQ-SYS-777"));
+  assert.equal((await call(`${I}/api/projects/t1/compare?from=HEAD&to=--upload-pack=x`)).status, 400);
+});
+
+test("GitHub 儲存庫網址只接受 github.com", async () => {
+  assert.equal((await call(`${I}/api/projects/t1/remote`, "POST", { url: "ext::sh -c whoami" })).status, 400);
+  assert.equal((await call(`${I}/api/projects/t1/sync`)).data.remote, "");
+});

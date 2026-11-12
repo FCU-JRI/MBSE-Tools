@@ -11,6 +11,7 @@ import { deleteElementText, insertInside, insertInto, quote, relationSnippet, re
 import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
 import * as auth from "./auth.ts";
+import * as versions from "./versions.ts";
 import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -288,6 +289,18 @@ app.post("/api/projects/:id/signoffs", wrap(async (req, res) => {
   });
   res.json(await view(pid(req)));
 }));
+
+// ───────── 版本：GitHub 同步、分支審查、基線比較 ─────────
+app.get("/api/projects/:id/sync", wrap(async (req, res) => res.json(await store.syncState(pid(req)))));
+app.post("/api/projects/:id/remote", admin, wrap(async (req, res) => res.json(await store.setRemote(pid(req), String(req.body?.url ?? "")))));
+app.get("/api/projects/:id/branches", wrap(async (req, res) => res.json(await versions.listBranches(pid(req)))));
+app.get("/api/projects/:id/branches/diff", wrap(async (req, res) => res.json(await versions.branchDiff(pid(req), String(req.query.name ?? "")))));
+app.post("/api/projects/:id/branches/merge", auth.need(auth.can.merge, "合併分支需要責任工程師以上的權限。"), wrap(async (req, res) => {
+  const r = await versions.mergeBranch(pid(req), String(req.body?.name ?? ""), author(req));
+  res.json({ ...r, ...(await view(pid(req))) });
+}));
+app.get("/api/projects/:id/baselines", wrap(async (req, res) => res.json(await versions.listBaselines(pid(req)))));
+app.get("/api/projects/:id/compare", wrap(async (req, res) => res.json(await versions.compare(pid(req), String(req.query.from ?? ""), String(req.query.to ?? "")))));
 
 app.get("/api/projects/:id/history", wrap(async (req, res) => res.json(await store.history(pid(req)))));
 
