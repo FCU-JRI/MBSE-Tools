@@ -201,3 +201,11 @@ export function renameText(content: string, el: Element, newName: string, elemen
   for (const l of lineSet) if (lines[l - 1] !== undefined) lines[l - 1] = lines[l - 1].replace(re, () => newTok);
   return lines.join("\n");
 }
+
+/** 直接設定某個屬性的值（原樣寫入運算式，例如 3012.4 [m]）。模擬結果回寫用。 */
+export function setRawAttrText(content: string, el: Element, name: string, expression: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UserError("屬性名稱不合法。");
+  const text = `:>> ${name} = ${expression};`;
+  const loc = el.attrLoc[name];
+  return loc ? replaceLoc(content, loc, text) : insertInside(content, el, (indent) => `${indent}${text}\n`);
+}

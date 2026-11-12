@@ -157,7 +157,10 @@ test("唯讀連結：可看可匯出，不能改，不能看其他專案，可�
   assert.equal((await call(`${P}/api/projects/t1/signoffs`, "POST", { gate: "mdr", decision: "APPROVE" }, { cookie })).status, 403);
   assert.equal((await call(`${P}/api/projects/other`, "GET", undefined, { cookie })).status, 403);
   assert.equal((await call(`${P}/api/admin/members`, "GET", undefined, { cookie })).status, 403);
-  assert.equal((await call(`${P}/api/projects/t1`, "GET", undefined, { cookie: cookie.slice(0, -1) + "x" })).status, 401);
+  // 竄改簽章中段的一個字元（最後一個字元含填充位元，改了可能解出相同的簽章）
+  const mid = cookie.length - 20;
+  const tampered = cookie.slice(0, mid) + (cookie[mid] === "A" ? "B" : "A") + cookie.slice(mid + 1);
+  assert.equal((await call(`${P}/api/projects/t1`, "GET", undefined, { cookie: tampered })).status, 401);
   await call(`${I}/api/admin/shares/delete`, "POST", { id: made.data.share.id });
   assert.equal((await call(`${P}/api/projects/t1`, "GET", undefined, { cookie })).status, 401);
   assert.equal((await call(`${P}/s/not-a-token`)).status, 404);
@@ -276,4 +279,38 @@ test("專案管理：任務、成本、人員；優先級依職級限制", async
   const v2 = (await call(`${I}/api/projects/t1`)).data;
   const gantt = v2.gates.find((g: any) => g.id === "mdr").checks.find((c: any) => c.id === "mdr.gantt");
   assert.equal(gantt.pass, true, "有任務後 MDR 的甘特圖檢查應自動通過");
+});
+
+test("飛行模擬：執行、結果回寫模型後需求重新判定、OpenRocket 匯出再匯入", { skip: !process.env.JRI_PYTHON && "未設定 JRI_PYTHON，略過模擬測試" }, async () => {
+  await call(`${I}/api/projects`, "POST", { id: "t2", name: "模擬測試", kind: "annual" });
+  const base = `${I}/api/projects/t2/sim`;
+  let s = (await call(base)).data;
+  assert.equal(s.available.ok, true);
+  assert.equal((await call(`${base}/inputs`, "PUT", { inputs: { ...s.inputs, rocket: { ...s.inputs.rocket, radius_m: 65 } } })).status, 400, "把公釐當公尺應被擋下");
+  const curve = (await call(`${base}/thrust`, "POST", { text: "; test\nJ1 98 700 0 3.9 6.5 JRI\n0.1 2400\n3.0 2100\n3.9 0\n;" })).data.curve;
+  assert.deepEqual(curve[0], [0.1, 2400]);
+  const run = await call(`${base}/run`, "POST", {});
+  assert.equal(run.status, 200, JSON.stringify(run.data).slice(0, 300));
+  const apogee = run.data.result.outputs.find((o: any) => o.key === "apogee").value;
+  assert.ok(apogee > 1000 && apogee < 10000, `遠地點 ${apogee} 不合理`);
+  assert.match(run.data.result.engine, /RocketPy/);
+  // 範本的需求是 3000 ± 150 m；模擬值寫回後應重新判定
+  const ap = await call(`${base}/apply`, "POST", { bindings: [{ output: "apogee", element: "Project::Structure::rocket", attribute: "apogee" }] });
+  assert.equal(ap.status, 200, JSON.stringify(ap.data).slice(0, 300));
+  const rocket = ap.data.analysis.elements.find((e: any) => e.qualifiedName === "Project::Structure::rocket");
+  assert.match(rocket.attrs.apogee, new RegExp(String(apogee).slice(0, 6)));
+  const verdict = ap.data.analysis.satisfaction.find((x: any) => x.requirement.endsWith("遠地點高度")).status;
+  assert.equal(verdict, apogee >= 2850 && apogee <= 3150 ? "holds" : "fails");
+  assert.equal((await call(`${base}/apply`, "POST", { bindings: [{ output: "apogee", element: "Project::Structure::rocket", attribute: "nope" }] })).status, 400);
+
+  const ork = Buffer.from(await (await fetch(`${base}/export.ork`)).arrayBuffer());
+  assert.equal(ork.subarray(0, 2).toString(), "PK");
+  s = (await call(base)).data;
+  await call(`${base}/inputs`, "PUT", { inputs: { ...s.inputs, fins: { ...s.inputs.fins, n: 3, span_m: 0.2 }, nose: { ...s.inputs.nose, length_m: 0.4 } } });
+  const imp = await call(`${base}/import-ork`, "POST", { base64: ork.toString("base64") });
+  assert.equal(imp.status, 200, JSON.stringify(imp.data).slice(0, 300));
+  assert.equal(imp.data.sim.inputs.fins.n, 4);
+  assert.equal(imp.data.sim.inputs.fins.span_m, 0.13);
+  assert.equal(imp.data.sim.inputs.nose.length_m, 0.55);
+  assert.equal((await call(`${base}/import-ork`, "POST", { base64: Buffer.from("not a rocket").toString("base64") })).status, 400);
 });

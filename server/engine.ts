@@ -40,6 +40,13 @@ export async function shutdown(): Promise<void> {
   connection = undefined;
 }
 
+/** 解析器的判定用語（holds／violated／fails／undecided…）統一成三種。 */
+function normalize(status: string): string {
+  if (status === "holds" || status === "satisfied") return "holds";
+  if (status === "violated" || status === "fails" || status === "failed") return "fails";
+  return "undecided";
+}
+
 const cache = new Map<string, Analysis>();
 
 /** 解析一組檔案；語法或語意錯誤會列在 diagnostics，不會丟例外。 */
@@ -71,7 +78,7 @@ export async function analyze(sources: readonly Source[], shared: readonly strin
       satisfaction = verdicts.map((v: any) => ({
         requirement: String(v.verdict?.subject?.requirementId ?? ""),
         subject: String(v.verdict?.subject?.instanceTypeId ?? ""),
-        status: String(v.verdict?.status ?? v.verdict?.kind ?? "undecided"),
+        status: normalize(String(v.verdict?.status ?? v.verdict?.kind ?? "")),
       }));
     } catch {
       // 判定失敗不影響其餘結果；表格上顯示為未判定。
