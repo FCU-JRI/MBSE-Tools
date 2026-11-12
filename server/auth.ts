@@ -160,6 +160,23 @@ export class AuthError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
+/** Tailscale 會把非 ASCII 的名字用 RFC 2047 編碼（=?UTF-8?Q?...?= 或 ?B?）放進標頭，這裡還原。 */
+export function decodeHeader(v: string): string {
+  try {
+    // 相鄰的編碼段之間的空白依規範要去掉
+    return v.replace(/\?=\s+=\?/g, "?==?").replace(/=\?([^?]+)\?([QqBb])\?([^?]*)\?=/g, (_m, _charset: string, enc: string, text: string) => {
+      if (enc.toUpperCase() === "B") return Buffer.from(text, "base64").toString("utf8");
+      const bytes: number[] = [];
+      for (let i = 0; i < text.length; i++) {
+        if (text[i] === "_") bytes.push(0x20);
+        else if (text[i] === "=" && /^[0-9A-Fa-f]{2}$/.test(text.slice(i + 1, i + 3))) { bytes.push(parseInt(text.slice(i + 1, i + 3), 16)); i += 2; }
+        else bytes.push(text.charCodeAt(i) & 0xff);
+      }
+      return Buffer.from(bytes).toString("utf8");
+    }).trim().slice(0, 60);
+  } catch { return v.slice(0, 60); }
+}
+
 const memberUser = (m: Member): User => ({ kind: "member", login: m.login, name: m.name, rank: m.rank, subsystems: m.subsystems, admin: m.admin || LEVEL[m.rank] >= 7, project: null });
 
 async function identify(req: Request): Promise<User | null> {
@@ -180,7 +197,7 @@ async function identify(req: Request): Promise<User | null> {
       const m = members.find((x) => x.tailscale?.toLowerCase() === ts);
       if (m) return memberUser(m);
       if (c.tailscaleAdmins.map((x) => x.toLowerCase()).includes(ts)) {
-        return { kind: "local", login: ts, name: decodeURIComponent(String(req.headers["tailscale-user-name"] ?? "")) || ts, rank: "D-VII", subsystems: [], admin: true, project: null };
+        return { kind: "local", login: ts, name: decodeHeader(String(req.headers["tailscale-user-name"] ?? "")) || ts, rank: "D-VII", subsystems: [], admin: true, project: null };
       }
     }
   }
