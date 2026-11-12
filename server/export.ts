@@ -15,7 +15,7 @@ const METHOD: Record<string, string> = {
   "Method::byDemonstration": "展示 Demonstration",
 };
 
-export async function exportWorkbook(project: Project, a: Analysis, gates: GateStatus[], plan: Pm = { tasks: [], costs: [], people: [] }): Promise<Buffer> {
+export async function exportWorkbook(project: Project, a: Analysis, gates: GateStatus[], plan: Pm = { tasks: [], costs: [], people: [], docs: [], milestones: {} }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "JRI MBSE";
   wb.created = new Date();
@@ -52,8 +52,13 @@ export async function exportWorkbook(project: Project, a: Analysis, gates: GateS
   const sat = new Map(a.satisfaction.map((s) => [s.requirement, s.status]));
   const satZh = (e: Element) => ({ holds: "滿足", fails: "不滿足", undecided: "未判定" } as Record<string, string>)[sat.get(e.qualifiedName) ?? ""] ?? "";
   const reqs = of("SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
-  sheet("需求表", [["編號", 14], ["層級", 14], ["名稱", 22], ["需求內容", 50], ["衍生自", 30], ["滿足者", 22], ["驗證事件", 28], ["計算判定", 12]],
-    reqs.map((e) => [e.shortName ?? "", catZh(e), e.name, e.doc, outs(e, "derive", "refine", "trace"), ins(e, "satisfy"), ins(e, "verify"), satZh(e)]));
+const src = (e: Element) => { const d = plan.docs.find((x) => x.id === e.attrs.sourceDoc); return e.attrs.sourceDoc ? `${e.attrs.sourceDoc}${d ? " " + d.title : ""}${e.attrs.sourceRef ? " §" + e.attrs.sourceRef : ""}` : ""; };
+  sheet("需求矩陣", [["編號", 14], ["層級", 14], ["名稱", 22], ["需求內容", 50], ["出處", 28], ["衍生自", 30], ["滿足者", 22], ["驗證方法", 12], ["驗證事件", 28], ["計算判定", 12]],
+    reqs.map((e) => {
+      const ev = a.relations.filter((x) => x.kind === "verify" && x.to === e.id).map((x) => byId.get(x.from)).filter(Boolean) as Element[];
+      return [e.shortName ?? "", catZh(e), e.name, e.doc, src(e), outs(e, "derive", "refine", "trace"), ins(e, "satisfy"), [...new Set(ev.map((v) => METHOD[v.attrs.kind ?? ""] ?? ""))].filter(Boolean).join("、"), ins(e, "verify"), satZh(e)];
+    }));
+  sheet("文件", [["編號", 12], ["名稱", 36], ["類型", 12], ["版次", 12], ["連結", 60], ["備註", 30]], plan.docs.map((d) => [d.id, d.title, d.type, d.revision, d.url, d.note]));
 
   const vers = of("VerificationEvent", "ValidationEvent");
   const rvm: (string | number)[][] = [];
@@ -80,10 +85,11 @@ export async function exportWorkbook(project: Project, a: Analysis, gates: GateS
   sheet("任務階段與功能", [["類別", 12], ["編號", 12], ["名稱", 24], ["上層", 20], ["下一步", 24], ["分配給", 24]],
     of("MissionPhase", "Function").map((e) => [catZh(e), e.shortName ?? "", e.name, byId.get(e.owner ?? "")?.kind === "ActionUsage" ? byId.get(e.owner as string)?.name ?? "" : "", outs(e, "succession"), outs(e, "allocate")]));
 
-  sheet("風險", [["編號", 12], ["名稱", 22], ["失效模式", 26], ["影響", 26], ["原因", 26], ["嚴重度", 9], ["可能性", 9], ["風險值", 9], ["緩解措施", 36], ["負責人", 14]],
+  sheet("FMEA", [["編號", 12], ["名稱", 22], ["失效模式", 26], ["影響", 26], ["原因", 26], ["嚴重度 S", 9], ["可能性 O", 9], ["偵測度 D", 9], ["風險值 S×O", 10], ["RPN S×O×D", 11], ["緩解措施", 36], ["緩解後 S", 9], ["緩解後 O", 9], ["緩解後風險值", 12], ["負責人", 14], ["狀態", 10]],
     of("Risk").map((e) => {
-      const s = Number(e.attrs.severity) || 0, l = Number(e.attrs.likelihood) || 0;
-      return [e.shortName ?? "", e.name, e.attrs.failureMode ?? "", e.attrs.effect ?? "", e.attrs.cause ?? "", s || "", l || "", s * l || "", e.attrs.mitigation ?? "", e.attrs.owner ?? ""];
+      const n = (k: string) => Number(e.attrs[k]) || 0;
+      const s = n("severity"), l = n("likelihood"), d = n("detection"), rs = n("residualSeverity"), rl = n("residualLikelihood");
+      return [e.shortName ?? "", e.name, e.attrs.failureMode ?? "", e.attrs.effect ?? "", e.attrs.cause ?? "", s || "", l || "", d || "", s * l || "", s * l * d || "", e.attrs.mitigation ?? "", rs || "", rl || "", rs * rl || "", e.attrs.owner ?? "", e.attrs.status ?? ""];
     }));
 
   const generic = (name: string, cat: string) => {

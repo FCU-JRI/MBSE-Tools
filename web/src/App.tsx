@@ -8,7 +8,10 @@ import type { DiagramDef } from "./model.ts";
 import { Diagram } from "./Diagram.tsx";
 import { Inspector } from "./Inspector.tsx";
 import type { Selection } from "./Inspector.tsx";
-import { GatesView, TableView, TraceView } from "./Views.tsx";
+import { GatesView, TableView } from "./Views.tsx";
+import { Dashboard } from "./Dashboard.tsx";
+import { Deliverables } from "./Deliverables.tsx";
+import type { DeliverTab } from "./Deliverables.tsx";
 import { VersionsView } from "./Versions.tsx";
 import { PlanView } from "./Plan.tsx";
 import { SimView } from "./Sim.tsx";
@@ -17,7 +20,7 @@ import { SourceTab } from "./SourceTab.tsx";
 export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [me, setMe] = useState<MeResponse | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(() => new URLSearchParams(location.search).get("p"));
+  const [projectId, setProjectId] = useState<string | null>(() => new URLSearchParams(location.search).get("p") ?? lastProject());
   const [page, setPage] = useState<"home" | "admin">("home");
   const [author, setAuthorState] = useState(getAuthor);
   const [error, setError] = useState("");
@@ -25,7 +28,8 @@ export function App() {
   useEffect(() => {
     api<MeResponse>("/me").then((m) => { setMe(m); if (m.user) return api<Meta>("/meta").then(setMeta); }).catch((e) => setError(e.message));
   }, []);
-  const open = (id: string | null) => { setProjectId(id); setPage("home"); history.pushState(null, "", id ? `?p=${id}` : location.pathname); };
+  const open = (id: string | null) => { setProjectId(id); setPage("home"); rememberProject(id); history.pushState(null, "", id ? `?p=${id}` : location.pathname); };
+  const [welcomed, setWelcomed] = useState(seenWelcome);
   const logout = async () => { await fetch("/auth/logout", { method: "POST" }); location.href = "/"; };
 
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p></div>;
@@ -42,6 +46,7 @@ export function App() {
     <span className="who"><span className="label">{user.name} · {user.rankZh}</span>{user.kind !== "local" && <button className="tbtn" onClick={logout}>登出</button>}</span>
   );
 
+  if (!welcomed) return <Welcome name={user.name} role={user.rankZh} onDone={() => { markWelcome(); setWelcomed(true); }} />;
   if (projectId) return <Workspace id={projectId} meta={meta} user={user} onHome={() => open(null)} who={who} />;
   return (
     <div className="shell">
@@ -55,11 +60,40 @@ export function App() {
   );
 }
 
+// 記住上次開啟的專案與是否已看過歡迎畫面；讀不到就當作沒有
+function lastProject(): string | null { try { return localStorage.getItem("jri.last"); } catch { return null; } }
+function rememberProject(id: string | null): void { try { if (id) localStorage.setItem("jri.last", id); else localStorage.removeItem("jri.last"); } catch { /* 無法儲存時略過 */ } }
+function seenWelcome(): boolean { try { return sessionStorage.getItem("jri.welcome") === "1"; } catch { return true; } }
+function markWelcome(): void { try { sessionStorage.setItem("jri.welcome", "1"); } catch { /* 略過 */ } }
+
+/** 進站的歡迎畫面：一條線長出來，名字淡入，約兩秒後進入首頁。點一下或按任意鍵可跳過；每次開瀏覽器只出現一次。 */
+function Welcome({ name, role, onDone }: { name: string; role: string; onDone: () => void }) {
+  useEffect(() => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const t = setTimeout(onDone, reduce ? 900 : 2300);
+    const key = () => onDone();
+    window.addEventListener("keydown", key);
+    return () => { clearTimeout(t); window.removeEventListener("keydown", key); };
+  }, [onDone]);
+  const d = new Date();
+  const stamp = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][d.getDay()]}`;
+  return (
+    <button className="welcome" onClick={onDone} aria-label="進入">
+      <span className="welcome-brand">JRI MBSE</span>
+      <span className="welcome-line" aria-hidden="true" />
+      <span className="welcome-hello">歡迎，{name}</span>
+      <span className="label welcome-meta">{role} · {stamp}</span>
+    </button>
+  );
+}
+
 function Login({ github }: { github: boolean }) {
   return (
-    <div className="shell">
+    <div className="shell enter">
       <header className="topbar"><span className="brand">JRI MBSE</span><span className="label">噴射推進研究社</span></header>
-      <main className="page" style={{ width: "100%", maxWidth: 480 }}>
+      <main className="page login" style={{ width: "100%", maxWidth: 480 }}>
+        <p className="welcome-brand" style={{ marginBottom: 8 }}>JRI MBSE</p>
+        <span className="welcome-line" aria-hidden="true" style={{ display: "block", marginBottom: 32 }} />
         <section className="section">
           <div className="section-head"><h1 className="section-title">登入</h1></div>
           <p className="body" style={{ marginBottom: 16 }}>JRI 成員請用 GitHub 帳號登入。帳號要先由總工程師加入成員名單。</p>
@@ -140,15 +174,16 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
   );
 }
 
-type Mode = "diagram" | "table" | "trace" | "gates" | "plan" | "sim" | "source" | "history";
-const MODES: [Mode, string][] = [["diagram", "圖"], ["table", "表"], ["trace", "追溯"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
+type Mode = "home" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history";
+const MODES: [Mode, string][] = [["home", "首頁"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
 
 function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; user: Me; onHome: () => void; who: React.ReactNode }) {
   const readOnly = !user.caps.edit;
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [mode, setMode] = useState<Mode>("diagram");
+  const [mode, setMode] = useState<Mode>("home");
+  const [deliverTab, setDeliverTab] = useState<DeliverTab>("req");
   const [diagramId, setDiagramId] = useState("bdd");
   const [catId, setCatId] = useState("SystemRequirement");
   const [gateId, setGateId] = useState<string | null>(null);
@@ -166,7 +201,14 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
   const errors = view.analysis.diagnostics.filter((d) => d.severity === "error");
   const selectedId = sel.type === "element" ? sel.id : null;
   const selectElement = (eid: string | null) => setSel(eid ? { type: "element", id: eid } : { type: "new", category: catId, parentId: null });
-  const showSide = mode !== "source" && mode !== "history" && mode !== "plan" && mode !== "sim";
+  const showSide = mode === "diagram" || mode === "table" || mode === "deliver" || mode === "gates";
+  const showTree = mode !== "home";
+  // 首頁各區塊點了之後前往對應的頁面
+  const go = (m: string, arg?: string) => {
+    if (m === "gates" && arg) setGateId(arg);
+    if (m === "deliver" && arg) setDeliverTab(arg as DeliverTab);
+    setMode(m as Mode);
+  };
 
   return (
     <div className="shell">
@@ -180,14 +222,14 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
         {who}
       </header>
       <div className="work">
-        <aside className="side left" style={{ width: panes.leftOpen ? panes.left : 0 }} hidden={!panes.leftOpen}>
+        {showTree && <aside className="side left" style={{ width: panes.leftOpen ? panes.left : 0 }} hidden={!panes.leftOpen}>
           <Tree view={view} meta={meta} diagrams={diagrams} mode={mode} diagramId={def.id} catId={catId} gateId={gateId} selectedId={selectedId}
             onDiagram={(d) => { setDiagramId(d); setMode("diagram"); }}
             onCategory={(c) => { setCatId(c); setMode("table"); setSel({ type: "new", category: c, parentId: null }); }}
             onElement={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); if (mode !== "diagram" && mode !== "table") setMode("table"); }}
             onGate={(g) => { setGateId(g); setMode("gates"); }} />
-        </aside>
-        <Resizer side="left" open={panes.leftOpen} width={panes.left} onWidth={(w) => setPane({ left: w })} onToggle={() => setPane({ leftOpen: !panes.leftOpen })} />
+        </aside>}
+        {showTree && <Resizer side="left" open={panes.leftOpen} width={panes.left} onWidth={(w) => setPane({ left: w })} onToggle={() => setPane({ leftOpen: !panes.leftOpen })} />}
         <section className="center">
           {errors.length > 0 && mode !== "source" && (
             <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>
@@ -197,7 +239,8 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
             onSelectEdge={(e) => e && setSel({ type: "edge", edge: e })} onNew={(c, parentId) => setSel({ type: "new", category: c, parentId })}
             onChanged={(v) => { setView(v); setNotice(""); }} onError={setNotice} />}
           {mode === "table" && <div className="center-scroll"><TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={selectElement} /></div>}
-          {mode === "trace" && <div className="center-scroll"><TraceView view={view} selectedId={selectedId} onSelect={selectElement} /></div>}
+          {mode === "home" && <div className="center-scroll enter"><Dashboard view={view} go={go} /></div>}
+          {mode === "deliver" && <Deliverables view={view} meta={meta} user={user} tab={deliverTab} setTab={setDeliverTab} selectedId={selectedId} onSelect={(eid) => setSel({ type: "element", id: eid })} onChanged={setView} />}
           {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
           {mode === "plan" && <div className="center-scroll"><PlanView view={view} meta={meta} user={user} /></div>}
           {mode === "sim" && <div className="center-scroll"><SimView view={view} user={user} onChanged={setView} /></div>}

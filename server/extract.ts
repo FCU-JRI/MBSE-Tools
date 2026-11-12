@@ -20,6 +20,7 @@ export interface Element {
   loc: Loc | null;
   docLoc: Loc | null;
   attrLoc: Record<string, Loc>;
+  metaLoc: Record<string, Loc>; // 寫在主體內的標記（@Source 等）的位置
   attrs: Record<string, string>;
   tags: string[]; // 標記（metadata），例如 TPM
   line: number | null;
@@ -174,9 +175,12 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
       }
     }
     // 內嵌的標記也可能帶值（例如 @VVMethod { kind = ... }）
+    const metaLoc: Record<string, Loc> = {};
     for (const m of refs(e.ownedMember)) {
       const meta = byId.get(m);
       if (meta?.["@type"] !== "MetadataUsage") continue;
+      const ml = locOf(meta);
+      for (const t of refs(meta.type)) { const tn = qn(t).split("::").pop() ?? ""; if (tn && ml) metaLoc[tn] = ml; }
       for (const f of refs(meta.ownedFeature)) {
         const name = byId.get(f)?.declaredName ?? (generals.get(f) ?? []).map((g) => byId.get(g)?.declaredName).find(Boolean);
         if (name && values.has(f)) attrs[name] = values.get(f) as string;
@@ -198,6 +202,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
       loc: locOf(e),
       docLoc: docLocs.get(id) ?? null,
       attrLoc,
+      metaLoc,
       attrs,
       tags: [...new Set(tagsOf.get(id) ?? [])],
       line: e["sysx:sourceLine"] ?? null,

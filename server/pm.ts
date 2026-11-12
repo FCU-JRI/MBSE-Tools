@@ -13,8 +13,10 @@ export const PRIORITY_ZH: Record<Priority, string> = { P0: "不計代價", P1: "
 export interface Task { id: string; title: string; priority: Priority; re: string; start: string; end: string; deps: string[]; gate: string; links: string[]; subsystem: string; done: boolean }
 export interface Cost { id: string; subsystem: string; item: string; planned: number; actual: number; status: string; note: string }
 export interface Person { id: string; name: string; rank: string; subsystem: string; duty: string }
-export interface Pm { tasks: Task[]; costs: Cost[]; people: Person[] }
-export type Kind = keyof Pm;
+/** 來源文件：只存連結，檔案本身放在 Google Drive 等處。 */
+export interface Doc { id: string; title: string; type: string; revision: string; url: string; note: string }
+export interface Pm { tasks: Task[]; costs: Cost[]; people: Person[]; docs: Doc[]; milestones: Record<string, string> }
+export type Kind = "tasks" | "costs" | "people" | "docs";
 
 const file = (id: string) => path.join(dirOf(id), "pm.json");
 
@@ -22,8 +24,8 @@ export async function readPm(id: string): Promise<Pm> {
   await readProject(id);
   try {
     const p = JSON.parse(await fs.readFile(file(id), "utf8")) as Partial<Pm>;
-    return { tasks: p.tasks ?? [], costs: p.costs ?? [], people: p.people ?? [] };
-  } catch { return { tasks: [], costs: [], people: [] }; }
+    return { tasks: p.tasks ?? [], costs: p.costs ?? [], people: p.people ?? [], docs: p.docs ?? [], milestones: p.milestones ?? {} };
+  } catch { return { tasks: [], costs: [], people: [], docs: [], milestones: {} }; }
 }
 
 const text = (v: unknown, max = 200) => String(v ?? "").trim().slice(0, max);
@@ -71,15 +73,36 @@ function cleanPerson(b: any, pm: Pm, old?: Person): Person {
   return { id: old?.id ?? nextId(pm.people, "M"), name, rank: text(b.rank, 20), subsystem: text(b.subsystem, 60), duty: text(b.duty) };
 }
 
+function cleanDoc(b: any, pm: Pm, old?: Doc): Doc {
+  const title = text(b.title);
+  if (!title) throw new UserError("請填文件名稱。");
+  const url = text(b.url, 600);
+  // 只接受 https 連結，避免存入可執行的網址
+  if (url && !/^https:\/\/[^\s<>"']+$/.test(url)) throw new UserError("連結必須是 https:// 開頭的網址。");
+  const id = old?.id ?? (text(b.id, 31) || `DOC-${String(pm.docs.reduce((m, x) => Math.max(m, Number(x.id.match(/(\d+)$/)?.[1] ?? 0)), 0) + 1).padStart(3, "0")}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,30}$/.test(id)) throw new UserError("文件編號只能用英數、點、底線與連字號。");
+  if (!old && pm.docs.some((d) => d.id === id)) throw new UserError(`文件編號 ${id} 已被使用。`);
+  return { id, title, type: text(b.type, 20) || "其他", revision: text(b.revision, 30), url, note: text(b.note) };
+}
+
+export async function setMilestone(id: string, gate: string, date: string, author: string): Promise<Pm> {
+  const pm = await readPm(id);
+  if (date && !DATE.test(date)) throw new UserError("日期請用 YYYY-MM-DD。");
+  if (date) pm.milestones[gate.slice(0, 20)] = date; else delete pm.milestones[gate];
+  await fs.writeFile(file(id), JSON.stringify(pm, null, 1) + "\n", "utf8");
+  await commit(dirOf(id), author, `設定里程碑日期：${gate.toUpperCase()} ${date || "（清除）"}`);
+  return pm;
+}
+
 export async function upsert(id: string, kind: Kind, body: any, level: number, author: string): Promise<Pm> {
   const pm = await readPm(id);
   const list = pm[kind] as { id: string }[];
   const old = body?.id ? list.find((x) => x.id === body.id) : undefined;
-  const item = kind === "tasks" ? cleanTask(body, pm, level, old as Task | undefined) : kind === "costs" ? cleanCost(body, pm, old as Cost | undefined) : cleanPerson(body, pm, old as Person | undefined);
+  const item = kind === "tasks" ? cleanTask(body, pm, level, old as Task | undefined) : kind === "costs" ? cleanCost(body, pm, old as Cost | undefined) : kind === "docs" ? cleanDoc(body, pm, old as Doc | undefined) : cleanPerson(body, pm, old as Person | undefined);
   if (old) list[list.indexOf(old)] = item; else list.push(item);
   if (kind === "tasks") pm.tasks.sort((a, b) => a.start.localeCompare(b.start) || a.id.localeCompare(b.id));
   await fs.writeFile(file(id), JSON.stringify(pm, null, 1) + "\n", "utf8");
-  const zh = { tasks: "任務", costs: "成本項目", people: "人員" }[kind];
+  const zh = { tasks: "任務", costs: "成本項目", people: "人員", docs: "文件" }[kind];
   await commit(dirOf(id), author, `${old ? "更新" : "新增"}${zh}：${(item as any).title ?? (item as any).item ?? (item as any).name}`);
   return pm;
 }
@@ -89,6 +112,6 @@ export async function remove(id: string, kind: Kind, itemId: string, author: str
   if (kind === "tasks" && pm.tasks.some((t) => t.deps.includes(itemId))) throw new UserError("還有其他任務相依於它，請先移除相依。");
   (pm[kind] as { id: string }[]) = (pm[kind] as { id: string }[]).filter((x) => x.id !== itemId) as any;
   await fs.writeFile(file(id), JSON.stringify(pm, null, 1) + "\n", "utf8");
-  await commit(dirOf(id), author, `刪除${{ tasks: "任務", costs: "成本項目", people: "人員" }[kind]} ${itemId}`);
+  await commit(dirOf(id), author, `刪除${{ tasks: "任務", costs: "成本項目", people: "人員", docs: "文件" }[kind]} ${itemId}`);
   return pm;
 }

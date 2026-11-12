@@ -69,6 +69,18 @@ function Msg({ m }: { m: { ok: boolean; text: string } | null }) {
   return <p className="msg" role="status">{!m.ok && <span className="tag danger">ERR</span>}<span>{m.text}</span></p>;
 }
 
+/** 出處：選一份已登記的文件，再填章節。 */
+function SourceFields({ view, doc, section, onChange }: { view: View; doc: string; section: string; onChange: (doc: string, ref: string) => void }) {
+  if (view.docs.length === 0) return <p className="caption" style={{ marginBottom: 12 }}>到「產出物 → 來源文件」登記文件後，這裡可以標註出處。</p>;
+  return (
+    <div className="row">
+      <label className="field" style={{ flex: 2 }}><span className="label">出處</span>
+        <select className="input" value={doc} onChange={(e) => onChange(e.target.value, e.target.value ? section : "")}><option value="">無</option>{view.docs.map((d) => <option key={d.id} value={d.id}>{d.id} {d.title}</option>)}</select></label>
+      <label className="field"><span className="label">章節</span><input className="input" value={section} disabled={!doc} onChange={(e) => onChange(doc, e.target.value)} placeholder="3.2" /></label>
+    </div>
+  );
+}
+
 function Fields({ cat, attrs, setAttrs }: { cat: Category | undefined; attrs: Record<string, string>; setAttrs: (a: Record<string, string>) => void }) {
   return <>{(cat?.fields ?? []).map((f) => (
     <label key={f.name} className="field"><span className="label">{f.zh}</span>
@@ -82,6 +94,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
   const [name, setName] = useState("");
   const [doc, setDoc] = useState("");
   const [attrs, setAttrs] = useState<Record<string, string>>({});
+  const [src, setSrc] = useState({ doc: "", ref: "" });
   const [verifies, setVerifies] = useState("");
   const [method, setMethod] = useState("byTest");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -95,7 +108,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
     setBusy(true); setMsg(null);
     try {
       const before = new Set(view.analysis.elements.map((e) => e.id));
-      const v = await api<View>(`/projects/${view.project.id}/elements`, "POST", { category: cat.id, name, doc, attrs, parentId: parentId ?? undefined, ...(isVer ? { verifies: verifies || undefined, method } : {}) });
+      const v = await api<View>(`/projects/${view.project.id}/elements`, "POST", { category: cat.id, name, doc, attrs, source: src.doc ? src : undefined, parentId: parentId ?? undefined, ...(isVer ? { verifies: verifies || undefined, method } : {}) });
       onChanged(v);
       const created = v.analysis.elements.find((e) => !before.has(e.id) && e.name === name.trim());
       if (created) setSel({ type: "element", id: created.id });
@@ -122,6 +135,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
         <textarea className="input" rows={3} value={doc} onChange={(e) => setDoc(e.target.value)} />
       </label>
       <Fields cat={cat} attrs={attrs} setAttrs={setAttrs} />
+      <SourceFields view={view} doc={src.doc} section={src.ref} onChange={(d, r) => setSrc({ doc: d, ref: r })} />
       {isVer && <>
         <label className="field"><span className="label">要驗證的需求</span>
           <select className="input" value={verifies} onChange={(e) => setVerifies(e.target.value)}>
@@ -146,6 +160,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const byId = new Map(els.map((e) => [e.id, e]));
   const [name, setName] = useState(el.name);
   const [sn, setSn] = useState(el.shortName ?? "");
+  const [src, setSrc] = useState({ doc: el.attrs.sourceDoc ?? "", ref: el.attrs.sourceRef ?? "" });
   const [doc, setDoc] = useState(el.doc);
   const [attrs, setAttrs] = useState<Record<string, string>>({ ...el.attrs });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -153,16 +168,16 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [relKind, setRelKind] = useState("derive");
   const [relTo, setRelTo] = useState("");
-  useEffect(() => { setName(el.name); setSn(el.shortName ?? ""); setDoc(el.doc); setAttrs({ ...el.attrs }); }, [el]);
+  useEffect(() => { setName(el.name); setSn(el.shortName ?? ""); setSrc({ doc: el.attrs.sourceDoc ?? "", ref: el.attrs.sourceRef ?? "" }); setDoc(el.doc); setAttrs({ ...el.attrs }); }, [el]);
 
-  const dirty = name.trim() !== el.name || sn.trim() !== (el.shortName ?? "") || doc.trim() !== el.doc.trim() || (cat?.fields ?? []).some((f) => (attrs[f.name] ?? "").trim() !== (el.attrs[f.name] ?? "").trim());
+  const dirty = name.trim() !== el.name || sn.trim() !== (el.shortName ?? "") || src.doc !== (el.attrs.sourceDoc ?? "") || src.ref.trim() !== (el.attrs.sourceRef ?? "") || doc.trim() !== el.doc.trim() || (cat?.fields ?? []).some((f) => (attrs[f.name] ?? "").trim() !== (el.attrs[f.name] ?? "").trim());
   const call = async (fn: () => Promise<View & { selected?: string }>, done?: string) => {
     setBusy(true); setMsg(null);
     try { const v = await fn(); onChanged(v); if (v.selected) setSel({ type: "element", id: v.selected }); if (done) setMsg({ ok: true, text: done }); return true; }
     catch (e) { setMsg({ ok: false, text: (e as Error).message }); return false; }
     finally { setBusy(false); }
   };
-  const save = (ev: FormEvent) => { ev.preventDefault(); call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, name, shortName: sn, doc, attrs }), "已寫入。"); };
+  const save = (ev: FormEvent) => { ev.preventDefault(); call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, name, shortName: sn, doc, attrs, source: src }), "已寫入。"); };
   const remove = async () => { if (await call(() => api(`/projects/${pid}/elements/delete`, "POST", { id: el.id }))) setSel({ type: "new", category: el.category ?? "SystemRequirement", parentId: null }); };
 
   const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
@@ -181,6 +196,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
           <textarea className="input" rows={4} value={doc} onChange={(e) => setDoc(e.target.value)} />
         </label>
         <Fields cat={cat} attrs={attrs} setAttrs={setAttrs} />
+        <SourceFields view={view} doc={src.doc} section={src.ref} onChange={(d, r) => setSrc({ doc: d, ref: r })} />
         {el.attrs.kind && <div className="field"><span className="label">驗證方法</span><span className="data">{methodZh(el.attrs.kind)}</span></div>}
         {sat && <div className="field"><span className="label">計算判定</span><span>{sat.status === "holds" ? <span className="tag done">PASS</span> : sat.status === "fails" ? <span className="tag danger">FAIL</span> : <span className="tag">未判定</span>}</span></div>}
         <Msg m={msg} />

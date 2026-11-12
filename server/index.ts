@@ -7,7 +7,7 @@ import { ROOT_PACKAGE, shutdown } from "./engine.ts";
 import { evaluateGates, GATES } from "./gates.ts";
 import { CATEGORIES, PILLARS, RELATION_LABELS } from "./metamodel.ts";
 import * as store from "./projects.ts";
-import { deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, snippetFor } from "./edits.ts";
+import { deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, setSourceText, snippetFor } from "./edits.ts";
 import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
 import * as auth from "./auth.ts";
@@ -47,7 +47,7 @@ async function view(id: string) {
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
   const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  return { project, analysis, gates };
+  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones };
 }
 
 app.use((_req, res, next) => {
@@ -243,6 +243,10 @@ app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
     const v = b.attrs?.[f.name];
     if (typeof v === "string" && v.trim() !== (target.attrs[f.name] ?? "").trim()) steps.push((c, el) => setAttrText(c, el, f, v));
   }
+  if (b.source && typeof b.source === "object") {
+    const d = String(b.source.doc ?? "").trim(), r = String(b.source.ref ?? "").trim();
+    if (d !== (target.attrs.sourceDoc ?? "") || r !== (target.attrs.sourceRef ?? "")) steps.push((c, el) => setSourceText(c, el, d, r));
+  }
   if (steps.length === 0 && !newId) return res.json({ saved: true, ...(await view(id)) });
   let el: Element = target;
   for (const step of steps) {
@@ -321,10 +325,14 @@ app.post("/api/projects/:id/signoffs", wrap(async (req, res) => {
 // ───────── 專案管理：時程、成本、人員 ─────────
 const pmKind = (req: Request): pm.Kind => {
   const k = String(req.params.kind);
-  if (k !== "tasks" && k !== "costs" && k !== "people") throw new store.UserError("未知的資料類型。");
+  if (k !== "tasks" && k !== "costs" && k !== "people" && k !== "docs") throw new store.UserError("未知的資料類型。");
   return k;
 };
 app.get("/api/projects/:id/pm", wrap(async (req, res) => res.json({ ...(await pm.readPm(pid(req))), priorities: pm.PRIORITIES.map((p) => ({ id: p, zh: pm.PRIORITY_ZH[p], level: pm.PRIORITY_LEVEL[p] })), myLevel: auth.levelOf(me(req)) })));
+app.post("/api/projects/:id/milestones", auth.need(auth.can.confirm, "設定里程碑日期需要責任工程師以上的權限。"), wrap(async (req, res) => {
+  await pm.setMilestone(pid(req), String(req.body?.gate ?? ""), String(req.body?.date ?? ""), author(req));
+  res.json(await view(pid(req)));
+}));
 app.post("/api/projects/:id/pm/:kind", wrap(async (req, res) => res.json(await pm.upsert(pid(req), pmKind(req), req.body ?? {}, auth.levelOf(me(req)), author(req)))));
 app.post("/api/projects/:id/pm/:kind/delete", wrap(async (req, res) => res.json(await pm.remove(pid(req), pmKind(req), String(req.body?.id ?? ""), author(req)))));
 

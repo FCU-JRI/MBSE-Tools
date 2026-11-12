@@ -39,6 +39,13 @@ package JRI {
     metadata def <derive> DeriveLink;
     metadata def <refine> RefineLink;
 
+    /* 出處：這個項目來自哪一份文件的哪一節。文件清單在專案的 pm.json（docs）。
+       用法：@Source { sourceDoc = "DOC-001"; sourceRef = "3.2"; } */
+    metadata def Source {
+        attribute sourceDoc : String;
+        attribute sourceRef : String[0..1];
+    }
+
     // ───────── 結構支柱 Structure ─────────
 
     part def System;
@@ -94,6 +101,12 @@ package JRI {
         attribute likelihood : Integer;
         attribute mitigation : String;
         attribute owner : String;
+        /* 偵測度 1–5：越難在出事前發現，分數越高 */
+        attribute detection : Integer;
+        /* 緩解後的嚴重度與可能性 */
+        attribute residualSeverity : Integer;
+        attribute residualLikelihood : Integer;
+        attribute status : String;
     }
 
     /* 安全係數 Factor of Safety */

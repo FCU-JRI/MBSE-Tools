@@ -18,6 +18,7 @@ export interface NewElement {
   shortName?: string;
   doc?: string;
   attrs?: Record<string, string>;
+  source?: { doc?: string; ref?: string }; // 出處
   verifies?: string; // 驗證事件：被驗證需求的完整名稱
   method?: string; // byTest | byAnalysis | byInspection | byDemonstration
   parent?: string; // 結構元素：上層定義的完整名稱
@@ -47,6 +48,7 @@ export function snippetFor(n: NewElement, elements: Element[], indent: string): 
     else if (!/^-?\d+(\.\d+)?$/.test(v)) throw new UserError(`「${f.zh}」必須是數字。`);
     else body.push(`:>> ${f.name} = ${f.type === "real" && !v.includes(".") ? v + ".0" : v};`);
   }
+  if (n.source?.doc?.trim()) body.push(sourceText(n.source.doc, n.source.ref ?? ""));
   if (cat.keyword === "verification") {
     if (n.verifies) body.push(`objective { verify ${qname(n.verifies)}; }`);
     if (n.method) {
@@ -243,4 +245,19 @@ export function setShortNameText(content: string, el: Element, shortName: string
   }
   lines[el.line - 1] = next;
   return lines.join("\n");
+}
+
+function sourceText(doc: string, ref: string): string {
+  const d = doc.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,30}$/.test(d)) throw new UserError("文件編號不合法。");
+  return `@Source { sourceDoc = ${str(d)};${ref.trim() ? ` sourceRef = ${str(ref.trim().slice(0, 80))};` : ""} }`;
+}
+
+/** 設定或清除出處（@Source）。 */
+export function setSourceText(content: string, el: Element, doc: string, ref: string): string {
+  const text = doc.trim() ? sourceText(doc, ref) : "";
+  const loc = el.metaLoc.Source;
+  if (loc) return replaceLoc(content, loc, text);
+  if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
 }

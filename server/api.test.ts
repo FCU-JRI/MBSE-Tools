@@ -426,3 +426,34 @@ test("編號可以自訂：修改、補上、格式與重複檢查", async () =>
   assert.equal((await patch({ id: f7("總衝量").id, shortName: "RTC-REQ-010" })).status, 400, "重複");
   assert.equal((await patch({ id: f7("總衝量").id, shortName: "有 空白" })).status, 400, "格式");
 });
+
+test("來源文件只存連結；元素可標註出處並寫進模型", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "t8", name: "出處測試", kind: "annual" });
+  const base = `${I}/api/projects/t8`;
+  assert.equal((await call(`${base}/pm/docs`, "POST", { title: "壞連結", url: "javascript:alert(1)" })).status, 400);
+  assert.equal((await call(`${base}/pm/docs`, "POST", { title: "壞連結", url: "http://example.com/a" })).status, 400);
+  let r = await call(`${base}/pm/docs`, "POST", { title: "TASA RTC 競賽規則", type: "規則", revision: "2027", url: "https://drive.google.com/file/d/abc/view" });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.docs[0].id, "DOC-001");
+  let v8 = (await call(base)).data;
+  assert.equal(v8.docs.length, 1);
+  const req = v8.analysis.elements.find((e: any) => e.name === "遠地點高度");
+  r = await call(`${base}/elements`, "PATCH", { id: req.id, source: { doc: "DOC-001", ref: "3.2" } });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  let e = r.data.analysis.elements.find((x: any) => x.name === "遠地點高度");
+  assert.deepEqual([e.attrs.sourceDoc, e.attrs.sourceRef], ["DOC-001", "3.2"]);
+  assert.match((await call(`${base}/files/model.sysml`)).data.content, /@Source \{ sourceDoc = "DOC-001"; sourceRef = "3.2"; \}/);
+  r = await call(`${base}/elements`, "PATCH", { id: e.id, source: { doc: "DOC-001", ref: "4.1" } });
+  e = r.data.analysis.elements.find((x: any) => x.name === "遠地點高度");
+  assert.equal(e.attrs.sourceRef, "4.1");
+  assert.equal(((await call(`${base}/files/model.sysml`)).data.content.match(/@Source/g) ?? []).length, 1, "修改出處不應重複加入");
+  r = await call(`${base}/elements`, "PATCH", { id: e.id, source: { doc: "", ref: "" } });
+  assert.equal(r.data.analysis.elements.find((x: any) => x.name === "遠地點高度").attrs.sourceDoc, undefined);
+  r = await call(`${base}/elements`, "POST", { category: "Need", name: "符合競賽規則", doc: "火箭需符合規則。", source: { doc: "DOC-001", ref: "1" } });
+  assert.equal(r.data.analysis.elements.find((x: any) => x.name === "符合競賽規則").attrs.sourceDoc, "DOC-001");
+  r = await call(`${base}/milestones`, "POST", { gate: "mdr", date: "2026-09-15" });
+  assert.equal(r.data.milestones.mdr, "2026-09-15");
+  r = await call(`${base}/elements`, "PATCH", { id: r.data.analysis.elements.find((x: any) => x.name === "降落傘未展開").id, attrs: { detection: "3", residualSeverity: "5", residualLikelihood: "1" } });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.elements.find((x: any) => x.name === "降落傘未展開").attrs.detection, "3");
+});
