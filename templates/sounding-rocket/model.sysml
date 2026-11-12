@@ -119,7 +119,7 @@ package Project {
         }
     }
 
-    // ───────── AEAS 項目 ─────────
+    // ───────── 風險與安全 ─────────
     package Risks {
         item <'RISK-001'> '降落傘未展開' : Risk {
             :>> failureMode = "降落傘未展開";

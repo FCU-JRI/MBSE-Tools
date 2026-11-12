@@ -5,7 +5,7 @@ export interface Category {
   id: string;
   zh: string;
   en: string;
-  pillar: "requirements" | "structure" | "behavior" | "parametrics" | "vv" | "aeas";
+  pillar: "requirements" | "structure" | "behavior" | "parametrics" | "vv" | "risk" | "ops";
   prefix: string; // 編號前綴，例如 REQ-SYS
   pkg: string; // 新增時放進哪個套件
   keyword: string; // SysML v2 關鍵字
@@ -20,7 +20,8 @@ export const PILLARS: Record<Category["pillar"], string> = {
   behavior: "行為 Behavior",
   parametrics: "參數 Parametrics",
   vv: "驗證與確認 V&V",
-  aeas: "AEAS 項目",
+  risk: "風險與安全 Risk & Safety",
+  ops: "作業與品質 Operations & Quality",
 };
 
 export const CATEGORIES: Category[] = [
@@ -65,33 +66,33 @@ export const CATEGORIES: Category[] = [
     help: "用測試、分析、檢查或展示，證明某條需求有被做到。", example: "以飛行電腦氣壓計紀錄遠地點高度。" },
   { id: "ValidationEvent", zh: "確認事件", en: "Validation Event", pillar: "vv", prefix: "VAL", pkg: "Verification", keyword: "verification",
     help: "確認做出來的系統真的符合利害關係人的期望（做對的東西）。", example: "飛行後與指導老師檢視任務是否達成目的。" },
-  { id: "Risk", zh: "風險", en: "Risk (FMEA)", pillar: "aeas", prefix: "RISK", pkg: "Risks", keyword: "item",
+  { id: "Risk", zh: "風險", en: "Risk (FMEA)", pillar: "risk", prefix: "RISK", pkg: "Risks", keyword: "item",
     help: "可能出錯的事。嚴重度與可能性各評 1–5，並寫下緩解方式。", example: "降落傘未展開",
     fields: [
       { name: "failureMode", zh: "失效模式", type: "text" }, { name: "effect", zh: "影響", type: "text" },
       { name: "cause", zh: "原因", type: "text" }, { name: "severity", zh: "嚴重度 1–5", type: "int" },
       { name: "likelihood", zh: "可能性 1–5", type: "int" }, { name: "mitigation", zh: "緩解措施", type: "text" },
       { name: "owner", zh: "負責人", type: "text" } ] },
-  { id: "SafetyFactor", zh: "安全係數", en: "Factor of Safety", pillar: "aeas", prefix: "FOS", pkg: "Safety", keyword: "item",
+  { id: "SafetyFactor", zh: "安全係數", en: "Factor of Safety", pillar: "risk", prefix: "FOS", pkg: "Safety", keyword: "item",
     help: "結構或壓力元件的實際安全係數與要求值。", example: "燃燒室爆破安全係數",
     fields: [
       { name: "required", zh: "要求值", type: "real" }, { name: "actual", zh: "實際值", type: "real" },
       { name: "basis", zh: "計算依據", type: "text" } ] },
-  { id: "SOP", zh: "標準作業程序", en: "SOP", pillar: "aeas", prefix: "SOP", pkg: "Operations", keyword: "item",
+  { id: "SOP", zh: "標準作業程序", en: "SOP", pillar: "ops", prefix: "SOP", pkg: "Operations", keyword: "item",
     help: "測試或發射要照著做的步驟文件。TRR 必須附上。", example: "靜態推力測試 SOP",
     fields: [{ name: "documentRef", zh: "文件連結或編號", type: "text" }, { name: "revision", zh: "版次", type: "text" }] },
-  { id: "RosterEntry", zh: "名冊", en: "Roster", pillar: "aeas", prefix: "ROS", pkg: "Operations", keyword: "item",
+  { id: "RosterEntry", zh: "名冊", en: "Roster", pillar: "ops", prefix: "ROS", pkg: "Operations", keyword: "item",
     help: "測試或飛行當天的人員與職責。TRR 核可後不得更改。", example: "點火官",
     fields: [
       { name: "person", zh: "姓名", type: "text" }, { name: "duty", zh: "職責", type: "text" },
       { name: "rank", zh: "AEAS 職級", type: "text" } ] },
-  { id: "Anomaly", zh: "異常報告", en: "Anomaly", pillar: "aeas", prefix: "ANM", pkg: "Anomalies", keyword: "item",
+  { id: "Anomaly", zh: "異常報告", en: "Anomaly", pillar: "risk", prefix: "ANM", pkg: "Anomalies", keyword: "item",
     help: "測試中發生的非預期狀況，以及根因與矯正措施。", example: "點火延遲 2 秒",
     fields: [
       { name: "observed", zh: "現象", type: "text" }, { name: "rootCause", zh: "根本原因", type: "text" },
       { name: "severity", zh: "嚴重度 1–5", type: "int" }, { name: "correction", zh: "矯正措施", type: "text" },
       { name: "prevention", zh: "預防措施", type: "text" }, { name: "status", zh: "狀態（開啟／結案）", type: "text" } ] },
-  { id: "QCRecord", zh: "加工 QC 紀錄", en: "QC Record", pillar: "aeas", prefix: "QC", pkg: "Quality", keyword: "item",
+  { id: "QCRecord", zh: "加工 QC 紀錄", en: "QC Record", pillar: "ops", prefix: "QC", pkg: "Quality", keyword: "item",
     help: "加工零件的簽核紀錄：設計者 → 加工前簽核 → 加工者 → 加工後簽核 → 最終簽核。", example: "噴嘴喉部加工",
     fields: [
       { name: "drawingRef", zh: "工程圖編號", type: "text" }, { name: "designer", zh: "設計者", type: "text" },

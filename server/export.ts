@@ -1,4 +1,4 @@
-// Excel 匯出：NASA-HDBK-1009A 第 8、9 章的表格，加上 AEAS 項目。
+// Excel 匯出：NASA-HDBK-1009A 第 8、9 章的表格，加上風險、安全、作業與品質的表格。
 import ExcelJS from "exceljs";
 import type { Analysis } from "./engine.ts";
 import type { Element } from "./extract.ts";

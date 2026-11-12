@@ -83,7 +83,7 @@ package JRI {
         attribute kind : Method;
     }
 
-    // ───────── AEAS 額外項目 ─────────
+    // ───────── 風險與安全、作業與品質 ─────────
 
     /* 風險（FMEA）：嚴重度與可能性皆為 1–5 */
     item def Risk {
