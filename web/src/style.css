@@ -164,7 +164,7 @@ tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1)
 
 /* 圖 */
 .canvas-bar { display: flex; align-items: center; gap: var(--space-6); min-height: 40px; padding: 0 var(--space-4); border-bottom: var(--stroke-hair) solid var(--line); flex-wrap: wrap; }
-.canvas { flex: 1; min-height: 0; position: relative; }
+.canvas { flex: 1; min-height: 0; position: relative; --grid-dot: rgba(255, 255, 255, 0.22); --grid-cross: rgba(255, 255, 255, 0.34); }
 .react-flow { background: var(--bg); --xy-edge-stroke-default: var(--ink); --xy-edge-stroke-selected-default: var(--ink); --xy-connectionline-stroke-default: var(--ink-muted);
   --xy-attribution-background-color-default: transparent; --xy-handle-background-color-default: var(--bg); --xy-handle-border-color-default: var(--line-strong);
   --xy-edge-label-background-color-default: var(--bg); --xy-edge-label-color-default: var(--ink-faint); --xy-minimap-background-color-default: var(--bg);
@@ -227,7 +227,7 @@ tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1)
 .sysml-node.is-selected svg { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.55)); }
 .canvas.linking .react-flow__handle { opacity: 1; }
 .canvas.linking .react-flow__node { cursor: crosshair; }
-@media (prefers-color-scheme: light) { .sysml-node.is-selected svg { filter: none; } }
+@media (prefers-color-scheme: light) { .sysml-node.is-selected svg { filter: none; } .canvas { --grid-dot: rgba(0, 0, 0, 0.22); --grid-cross: rgba(0, 0, 0, 0.34); } }
 @media (max-width: 860px) {
   .diagram { flex-direction: column; }
   .toolbox { width: auto; display: flex; overflow-x: auto; border-right: 0; border-bottom: var(--stroke-hair) solid var(--line); padding: var(--space-1) var(--space-2); }

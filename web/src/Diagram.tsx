@@ -35,29 +35,66 @@ function autoLayout(graph: Graph): Record<string, { x: number; y: number }> {
   for (const e of graph.edges) if (e.source !== e.target) dg.setEdge(e.source, e.target);
   dagre.layout(dg);
   const out: Record<string, { x: number; y: number }> = {};
-  for (const n of graph.nodes) { const p = dg.node(n.id); out[n.id] = { x: Math.round(p.x - n.width / 2), y: Math.round(p.y - n.height / 2) }; }
+  for (const n of graph.nodes) { const p = dg.node(n.id); out[n.id] = { x: snap(p.x - n.width / 2), y: snap(p.y - n.height / 2) }; }
   return out;
 }
 
+/** 格點：畫面上每 24 px 一點，節點貼齊半格。 */
+const GRID = 24, SNAP = 12;
+const snap = (v: number) => Math.round(v / SNAP) * SNAP;
+
 type Box = { x: number; y: number; w: number; h: number };
-/** 依兩個節點的相對位置選最近的一對連接點，線才不會穿過圖形。 */
-function sides(a: Box, b: Box): [Position, Position] {
-  const dx = b.x + b.w / 2 - (a.x + a.w / 2), dy = b.y + b.h / 2 - (a.y + a.h / 2);
-  if (Math.abs(dx) * (a.h + b.h) > Math.abs(dy) * (a.w + b.w)) return dx > 0 ? [Position.Right, Position.Left] : [Position.Left, Position.Right];
-  return dy > 0 ? [Position.Bottom, Position.Top] : [Position.Top, Position.Bottom];
+type Pt = { x: number; y: number };
+const hit = (a: Box, b: Box, m = GRID) => a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
+
+/** 只替新加入的節點找位置，既有節點一律不動：放在相連節點的下一層（或上一層），沒有相連的放在整張圖下方；有重疊就沿另一軸往後挪。 */
+function placeNew(graph: Graph, known: Record<string, Pt>): Record<string, Pt> {
+  const out: Record<string, Pt> = {};
+  const size = new Map(graph.nodes.map((n) => [n.id, n]));
+  const placed: Box[] = [];
+  for (const n of graph.nodes) { const p = known[n.id]; if (p) placed.push({ ...p, w: n.width, h: n.height }); }
+  const vertical = graph.direction === "TB" || graph.direction === "BT";
+  const sign = graph.direction === "TB" || graph.direction === "LR" ? 1 : -1;
+  for (const n of graph.nodes) {
+    if (known[n.id] || out[n.id]) continue;
+    const at = (id: string) => known[id] ?? out[id];
+    const e = graph.edges.find((x) => (x.source === n.id && at(x.target)) || (x.target === n.id && at(x.source)));
+    let p: Pt;
+    if (e) {
+      const otherId = e.source === n.id ? e.target : e.source, o = at(otherId)!, os = size.get(otherId)!;
+      const after = (e.target === n.id ? 1 : -1) * sign > 0; // 在相連節點之後（下方或右方）
+      p = vertical
+        ? { x: o.x + (os.width - n.width) / 2, y: after ? o.y + os.height + 72 : o.y - n.height - 72 }
+        : { x: after ? o.x + os.width + 72 : o.x - n.width - 72, y: o.y + (os.height - n.height) / 2 };
+    } else {
+      p = placed.length ? { x: Math.min(...placed.map((b) => b.x)), y: Math.max(...placed.map((b) => b.y + b.h)) + 48 } : { x: 24, y: 24 };
+    }
+    const box: Box = { x: snap(p.x), y: snap(p.y), w: n.width, h: n.height };
+    for (let i = 0; i < 400 && placed.some((b) => hit(box, b)); i++) { if (vertical || !e) box.x += GRID; else box.y += GRID; }
+    placed.push(box);
+    out[n.id] = { x: box.x, y: box.y };
+  }
+  return out;
 }
 
-function toEdge(e: GEdge, pos: Map<string, Box>): Edge {
+/** 連接點依圖的方向固定：階層圖一律由上往下（上方節點的底邊接到下方節點的頂邊），流程圖一律由左往右。只有兩個節點在該方向上重疊時才改用另一軸。 */
+function sides(a: Box, b: Box, vertical: boolean): [Position, Position] {
+  const v: [Position, Position] | null = b.y >= a.y + a.h ? [Position.Bottom, Position.Top] : a.y >= b.y + b.h ? [Position.Top, Position.Bottom] : null;
+  const h: [Position, Position] | null = b.x >= a.x + a.w ? [Position.Right, Position.Left] : a.x >= b.x + b.w ? [Position.Left, Position.Right] : null;
+  return (vertical ? v ?? h : h ?? v) ?? (vertical ? [Position.Bottom, Position.Top] : [Position.Right, Position.Left]);
+}
+
+function toEdge(e: GEdge, pos: Map<string, Box>, vertical: boolean, straight: boolean): Edge {
   const a = pos.get(e.source), b = pos.get(e.target);
-  const [sh, th] = a && b ? sides(a, b) : [Position.Bottom, Position.Top];
+  const [sh, th] = a && b ? sides(a, b, vertical) : vertical ? [Position.Bottom, Position.Top] : [Position.Right, Position.Left];
   return {
     id: e.id, source: e.source, target: e.target, sourceHandle: sh, targetHandle: th, label: e.label || undefined, data: { g: e },
-    type: e.kind === "compose" || e.kind === "succession" || e.kind === "transition" ? "smoothstep" : "straight",
+    type: straight ? "straight" : "smoothstep", pathOptions: { borderRadius: 0 },
     style: { strokeWidth: 1, strokeDasharray: e.dashed ? "6 4" : undefined }, labelBgPadding: [4, 2],
     markerStart: e.tail === "diamond" ? "jri-diamond" : undefined,
     markerEnd: e.head === "open" ? { type: MarkerType.Arrow, color: "currentColor", width: 18, height: 18, strokeWidth: 1.2 } : undefined,
     selectable: e.remove !== null, focusable: e.remove !== null,
-  };
+  } as Edge;
 }
 const boxes = (list: { id: string; position: { x: number; y: number }; data: NData }[]) =>
   new Map<string, Box>(list.map((n) => [n.id, { x: n.position.x, y: n.position.y, w: n.data.g.width, h: n.data.g.height }]));
@@ -104,32 +141,40 @@ function Canvas({ readOnly, view, meta, def, selectedId, onSelectElement, onSele
   useEffect(() => { api<Layout>(`/projects/${pid}/layout`).then((l) => { layoutRef.current = l; setLayout(l); }).catch(() => setLayout({})); }, [pid]);
   useEffect(() => { setTool("select"); setSelEdge(null); setConfirm(false); }, [def.id]);
 
-  useEffect(() => {
-    if (!layout) return;
-    const saved = layout[def.id] ?? {};
-    const auto = autoLayout(graph);
-    const next: FlowNode[] = graph.nodes.map((g) => ({ id: g.id, type: "el", position: saved[g.id] ?? auto[g.id], data: { g }, selected: g.id === selectedId, selectable: !!g.el, width: g.width, height: g.height }));
-    setNodes(next);
-    setEdges(graph.edges.map((e) => toEdge(e, boxes(next))));
-    // selectedId 的變化由下一個 effect 處理，避免重排版面
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, layout, def.id]);
-
-  useEffect(() => { setNodes((ns) => ns.map((n) => (n.selected === (n.id === selectedId) ? n : { ...n, selected: n.id === selectedId }))); }, [selectedId, setNodes]);
-
+  const vertical = graph.direction === "TB" || graph.direction === "BT";
+  const straight = def.kind === "uc"; // 使用案例圖的關聯畫直線，其餘走直角折線
   const saveLayout = useCallback((next: Layout) => {
     layoutRef.current = next;
     if (readOnly) return; // 唯讀時位置只留在這次瀏覽
     api(`/projects/${pid}/layout`, "PUT", { layout: next }).catch((e) => onError((e as Error).message));
   }, [pid, onError, readOnly]);
 
+  useEffect(() => {
+    if (!layout) return;
+    // 位置一旦決定就存起來，之後編輯模型不會重排；只有「自動排列」會整張重排。
+    const saved = layoutRef.current[def.id] ?? {};
+    const missing = graph.nodes.filter((g) => !saved[g.id]);
+    let pos = saved;
+    if (missing.length > 0) {
+      pos = { ...saved, ...(Object.keys(saved).length === 0 ? autoLayout(graph) : placeNew(graph, saved)) };
+      saveLayout({ ...layoutRef.current, [def.id]: pos });
+    }
+    const next: FlowNode[] = graph.nodes.map((g) => ({ id: g.id, type: "el", position: pos[g.id], data: { g }, selected: g.id === selectedId, selectable: !!g.el, width: g.width, height: g.height }));
+    setNodes(next);
+    setEdges(graph.edges.map((e) => toEdge(e, boxes(next), vertical, straight)));
+    // selectedId 的變化由下一個 effect 處理，避免重排版面
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, layout, def.id]);
+
+  useEffect(() => { setNodes((ns) => ns.map((n) => (n.selected === (n.id === selectedId) ? n : { ...n, selected: n.id === selectedId }))); }, [selectedId, setNodes]);
+
   const onNodeDragStop = useCallback((_e: unknown, _n: FlowNode, moved: FlowNode[]) => {
     const cur = { ...(layoutRef.current[def.id] ?? {}) };
     for (const n of moved) cur[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
     saveLayout({ ...layoutRef.current, [def.id]: cur });
     // 節點移動後重新挑選連接點
-    setEdges(graph.edges.map((e) => toEdge(e, boxes(flow.getNodes() as FlowNode[]))));
-  }, [def.id, saveLayout, graph, flow, setEdges]);
+    setEdges(graph.edges.map((e) => toEdge(e, boxes(flow.getNodes() as FlowNode[]), vertical, straight)));
+  }, [def.id, saveLayout, graph, flow, setEdges, vertical, straight]);
 
   const resetLayout = () => { const next = { ...layoutRef.current }; delete next[def.id]; saveLayout(next); setLayout(next); setTimeout(() => flow.fitView({ padding: 0.15, maxZoom: 1 }), 60); };
 
@@ -230,12 +275,13 @@ function Canvas({ readOnly, view, meta, def, selectedId, onSelectElement, onSele
         {graph.nodes.length === 0 ? <p className="body muted empty">這張圖還沒有內容。用左邊工具列的「元素」開始。</p> : (
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onNodeDragStop={onNodeDragStop} onConnect={onConnect} connectionMode={ConnectionMode.Loose} nodesConnectable={!readOnly} deleteKeyCode={null}
-            fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.15}
+            snapToGrid snapGrid={[SNAP, SNAP]} fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.15}
             onNodeClick={(_e, n) => { if (!n.data.g.el) return; setSelEdge(null); setConfirm(false); onSelectEdge(null); onSelectElement(n.id); }}
             onEdgeClick={(_e, ed) => { const g = (ed.data as { g: GEdge }).g; if (!g.remove) return; setSelEdge(g); setConfirm(false); onSelectEdge(g); }}
             onPaneClick={() => { setSelEdge(null); setConfirm(false); onSelectElement(null); onSelectEdge(null); }}
             style={{ color: "var(--ink)" }} proOptions={{ hideAttribution: true }}>
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
+            <Background id="minor" variant={BackgroundVariant.Dots} gap={GRID} size={1.5} color="var(--grid-dot)" />
+            <Background id="major" variant={BackgroundVariant.Cross} gap={GRID * 5} size={7} lineWidth={1} color="var(--grid-cross)" />
           </ReactFlow>
         )}
       </div>
