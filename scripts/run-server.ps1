@@ -11,7 +11,7 @@ $node = (Get-Command node -ErrorAction Stop).Source
 while ($true) {
   $log = Join-Path $logDir ("server-" + (Get-Date -Format "yyyy-MM-dd") + ".log")
   Add-Content $log ("[" + (Get-Date -Format "s") + "] starting server")
-  & $node "server/index.ts" *>> $log
+  & $node "server/index.ts" 2>&1 | ForEach-Object { "$_" } | Out-File -FilePath $log -Append -Encoding utf8
   Add-Content $log ("[" + (Get-Date -Format "s") + "] server exited (code $LASTEXITCODE), restarting in 5s")
   Get-ChildItem $logDir -Filter "server-*.log" | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 5

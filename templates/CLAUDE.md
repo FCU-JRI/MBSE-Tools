@@ -6,13 +6,14 @@
 
 - `model/*.sysml`：專案模型。根套件必須是 `Project`。
 - `lib/JRI.sysml`：JRI 元模型庫（依 NASA-HDBK-1009A 與 AEAS-EXB-REG-1001）。不要修改；要改請到工具的儲存庫提出。
-- `project.json`：節點設定與簽核紀錄。由工具維護，不要手動修改。
+- `lib/shared-*.sysml`：跨專案的共用元件庫。不要在專案內修改。
+- `project.json`、`pm.json`、`sim.json`、`layout.json`：節點與簽核、時程成本、模擬參數與結果、圖的版面。由工具維護，不要手動修改。
 
 ## 建模規則
 
 - 元素以 `lib/JRI.sysml` 的定義為型別，工具依型別歸類。例如系統層需求寫成
   `requirement <'REQ-SYS-001'> '遠地點高度' : SystemRequirement { doc /* ... */ }`。
-- 每個元素都要有編號（短名稱 `<'...'>`），前綴依類別：STK、EXP、NEED、GOAL、OBJ、MOE、REQ-SYS、REQ-SUB、REQ-CMP、MOP、VER、VAL、RISK、FOS、SOP、ROS、ANM、QC。編號不可重複，也不要重編既有編號。
+- 每個元素都要有編號（短名稱 `<'...'>`），前綴依類別：STK、EXP、NEED、GOAL、OBJ、MOE、REQ-SYS、REQ-SUB、REQ-CMP、MOP、UC、MODE、VER、VAL、RISK、FOS、SOP、ROS、ANM、QC。編號不可重複，也不要重編既有編號。
 - 需求內容用繁體中文寫在 `doc` 裡，一條只寫一件事，用「應」字，必須能被驗證。能量化的條件另外寫成 `require constraint`，並帶單位。
 - 追溯關係：
   - `#derive dependency from 子 to 母;`　需求衍生
@@ -28,4 +29,5 @@
 1. 在自己的分支上修改，不要直接改 `main`。
 2. 修改後確認模型能被解析且沒有錯誤（工具的「原始碼」分頁，或 OpenSysML 的 `sysml` 指令）。
 3. 不要刪除或改寫你沒被要求處理的元素；只做局部修改，保留原有排版與註解。
-4. 由責任工程師或總工程師審查後合併。
+4. 推送分支後，它會出現在工具的「版本」頁。工具會自動檢查模型能否解析，再由責任工程師或總工程師審查合併。
+5. 模型有錯誤的分支不能合併；和 main 衝突時，先把 main 合併進自己的分支解決。
