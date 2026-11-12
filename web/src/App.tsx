@@ -154,7 +154,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
         <a className={`tbtn ${view.analysis.ok ? "" : "disabled"}`} href={view.analysis.ok ? `/api/projects/${id}/export.xlsx` : undefined}>匯出 Excel</a>
         {who}
       </header>
-      <div className="work" style={showSide ? undefined : { gridTemplateColumns: "272px minmax(0, 1fr)" }}>
+      <div className={showSide ? "work" : "work wide"}>
         <aside className="side left">
           <Tree view={view} meta={meta} diagrams={diagrams} mode={mode} diagramId={def.id} catId={catId} gateId={gateId} selectedId={selectedId}
             onDiagram={(d) => { setDiagramId(d); setMode("diagram"); }}
