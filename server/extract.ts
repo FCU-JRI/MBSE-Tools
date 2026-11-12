@@ -25,7 +25,7 @@ export interface Element {
 }
 
 export interface Relation {
-  kind: "derive" | "trace" | "refine" | "satisfy" | "verify" | "allocate" | "succession" | "connect";
+  kind: "derive" | "trace" | "refine" | "satisfy" | "verify" | "allocate" | "succession" | "connect" | "transition";
   from: string;
   to: string;
   line: number | null;
@@ -223,6 +223,8 @@ export function extract(raw: Raw[], rootPackage: string): Extracted {
     } else if (t === "ConnectionUsage" || t === "InterfaceUsage") {
       const ce = refs(e.relatedFeature);
       if (inProjectByOwner(e, byId, rootPackage)) push("connect", ce[0] ?? null, ce[1] ?? null, e);
+    } else if (t === "TransitionUsage") {
+      if (inProjectByOwner(e, byId, rootPackage)) push("transition", ref(e.source), ref(e.target), e);
     } else if (t === "SuccessionAsUsage") {
       push("succession", ref(e.sourceFeature), refs(e.targetFeature)[0] ?? null, e);
     }

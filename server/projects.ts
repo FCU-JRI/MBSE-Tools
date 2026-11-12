@@ -10,7 +10,8 @@ import { GATES } from "./gates.ts";
 
 const run = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const DATA_DIR = path.resolve(process.env.JRI_DATA ?? path.join(ROOT, "data", "projects"));
+export const HOME_DIR = path.resolve(process.env.JRI_HOME ?? path.join(ROOT, "data"));
+export const DATA_DIR = path.join(HOME_DIR, "projects");
 const TEMPLATE_DIR = path.join(ROOT, "templates");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
 
@@ -118,7 +119,11 @@ export async function readFile(id: string, file: string): Promise<string> {
 
 export async function sources(id: string, override?: { file: string; content: string }): Promise<Source[]> {
   const dir = dirOf(id);
-  const out: Source[] = [["JRI.sysml", await fs.readFile(path.join(dir, "lib", "JRI.sysml"), "utf8")]];
+// 元模型庫以工具內的版本為準；專案內的副本（給 Claude 與離線閱讀用）不同時就更新，隨下一次儲存提交
+  const lib = await fs.readFile(LIBRARY, "utf8");
+  const copy = path.join(dir, "lib", "JRI.sysml");
+  if ((await fs.readFile(copy, "utf8").catch(() => "")) !== lib) await fs.writeFile(copy, lib, "utf8").catch(() => {});
+  const out: Source[] = [["JRI.sysml", lib]];
   const files = await listFiles(id);
   if (override && !files.includes(override.file)) files.push(override.file);
   for (const f of files) {

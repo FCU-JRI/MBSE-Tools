@@ -86,6 +86,7 @@ export const GATES: GateDef[] = [
       { id: "moe", label: "每個目的都有效能量度（MOE）", hint: "新增 MOE 並以「細化」連到目的。",
         run: every(["Objective"], (c, e) => c.hasIn(e, "refine"), " MOE") },
       { id: "context", label: "定義系統與外部對象（系統脈絡）", hint: "到「結構」分頁新增系統與外部對象。", run: atLeastOne("系統", "System") },
+      { id: "usecases", label: "定義使用案例", hint: "到「行為」新增使用案例，並追溯到相關的利害關係人。", run: atLeastOne("使用案例", "UseCase") },
       { id: "phases", label: "定義任務階段（執行概念）", hint: "到「行為」分頁新增任務階段並排出先後。", run: atLeastOne("任務階段", "MissionPhase") },
       { id: "sys-req", label: "建立系統層需求", hint: "到「需求」分頁新增系統層需求。", run: atLeastOne("系統層需求", "SystemRequirement") },
       { id: "sys-req-derive", label: "每條系統層需求都有來源", hint: "建立「衍生自」關係，連到目的或 MOE。",

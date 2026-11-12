@@ -53,6 +53,10 @@ package JRI {
     action def MissionPhase;
     /* 功能 Function / Activity */
     action def Function;
+    /* 使用案例 Use Case：利害關係人怎麼使用系統 */
+    use case def UseCase;
+    /* 模式與狀態 Mode / State */
+    state def Mode;
 
     // ───────── 參數支柱 Parametrics ─────────
 

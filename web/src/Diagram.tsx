@@ -7,6 +7,7 @@ import { api } from "./api.ts";
 import type { Layout, Meta, View } from "./api.ts";
 import { buildGraph, CONNECT_KIND, PALETTE, REQ_LINK_KINDS } from "./model.ts";
 import type { DiagramDef, GEdge, GNode, Graph } from "./model.ts";
+import { downloadPng, downloadSvg, toSvg } from "./exportSvg.ts";
 
 type NData = { g: GNode; horizontal: boolean };
 type FlowNode = Node<NData, "el">;
@@ -80,7 +81,7 @@ export function Diagram({ readOnly, view, meta, def, selectedId, onSelectElement
     if (!layout) return;
     const saved = layout[def.id] ?? {};
     const auto = autoLayout(graph);
-    const horizontal = graph.direction === "LR";
+    const horizontal = graph.direction === "LR" || graph.direction === "RL";
     setNodes(graph.nodes.map((g) => ({ id: g.id, type: "el", position: saved[g.id] ?? auto[g.id], data: { g, horizontal }, selected: g.id === selectedId })));
     setEdges(graph.edges.map(toEdge));
     // selectedId 的變化由下一個 effect 處理，避免重排版面
@@ -115,9 +116,18 @@ export function Diagram({ readOnly, view, meta, def, selectedId, onSelectElement
     catch (e) { onError((e as Error).message); }
   }, [def.kind, linkKind, pid, onChanged, onError]);
 
+  const exportAs = (kind: "svg" | "png") => {
+    const placed = nodes.map((n) => { const s = nodeSize(n.data.g); return { g: n.data.g, x: n.position.x, y: n.position.y, w: n.measured?.width ?? s.width, h: n.measured?.height ?? s.height }; });
+    if (placed.length === 0) return;
+    const svg = toSvg(`${def.code} · ${def.title} — ${view.project.name}`, placed, graph.edges);
+    const name = `${view.project.id}-${def.code}-${def.title}`;
+    if (kind === "svg") downloadSvg(svg, name); else downloadPng(svg, name).catch((e) => onError((e as Error).message));
+  };
+
   const linkHint: Record<string, string> = {
     bdd: "從上層拉線到下層＝加入零件", ibd: "在零件之間拉線＝連接", act: "拉線＝排定先後",
     req: "從下層拉到上層＝建立所選關係",
+    uc: "從使用案例拉到利害關係人＝誰參與", stm: "在狀態之間拉線＝轉換",
   };
 
   return (
@@ -127,7 +137,7 @@ export function Diagram({ readOnly, view, meta, def, selectedId, onSelectElement
         {!readOnly && PALETTE[def.kind].length > 0 && (
           <div className="tbtn-row">
             <span className="label">新增</span>
-            {PALETTE[def.kind].map((c) => <button key={c} className="tbtn" onClick={() => onNew(c, def.kind === "act" ? def.context : null)}>{meta.categories.find((x) => x.id === c)?.zh}</button>)}
+            {PALETTE[def.kind].map((c) => <button key={c} className="tbtn" onClick={() => onNew(c, def.kind === "act" || def.kind === "stm" ? def.context : null)}>{meta.categories.find((x) => x.id === c)?.zh}</button>)}
           </div>
         )}
         {!readOnly && def.kind === "req" && (
@@ -140,6 +150,8 @@ export function Diagram({ readOnly, view, meta, def, selectedId, onSelectElement
         <span style={{ flex: 1 }} />
         {!readOnly && <span className="caption">{linkHint[def.kind]}</span>}
         <button className="tbtn" onClick={resetLayout}>自動排列</button>
+        <button className="tbtn" onClick={() => exportAs("png")}>匯出 PNG</button>
+        <button className="tbtn" onClick={() => exportAs("svg")}>SVG</button>
       </div>
       <div className="canvas">
         <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">

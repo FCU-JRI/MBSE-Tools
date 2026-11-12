@@ -192,3 +192,10 @@ tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1)
 
 /* 捲軸：細、與底色同調 */
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+/* 觸控裝置：連接點放大並常駐顯示；點一下起點再點終點即可連線 */
+@media (pointer: coarse) {
+  .react-flow__handle { width: 18px; height: 18px; opacity: 1; }
+  .tree-row { min-height: 40px; } .tbtn { min-height: 44px; }
+  .react-flow__controls-button { width: 40px; height: 40px; }
+}

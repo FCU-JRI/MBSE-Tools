@@ -149,17 +149,20 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
     if (from.kind !== "PartDefinition" || to.kind !== "PartDefinition") throw new store.UserError("結構分解只能連接兩個定義（part def）。");
     if (from.id === to.id) throw new store.UserError("不能把元素放進自己裡面。");
     next = insertInside(content, from, (indent) => `${indent}part ${quote(to.name)} : ${qn(to.qualifiedName)};\n`);
-  } else if (kind === "connect" || kind === "succession") {
+  } else if (kind === "connect" || kind === "succession" || kind === "transition") {
     const owner = ownerOf(from);
     if (!owner || owner.id !== to.owner) throw new store.UserError("兩端必須在同一個上層元素內。");
     if (kind === "succession" && !/^Action/.test(owner.kind)) throw new store.UserError("先後順序只能建立在同一個任務或活動之內。");
-    const text = kind === "connect" ? `connect ${quote(from.name)} to ${quote(to.name)};` : `first ${quote(from.name)} then ${quote(to.name)};`;
+    if (kind === "transition" && !/^State/.test(owner.kind)) throw new store.UserError("狀態轉換只能建立在同一個模式之內。");
+    const text = kind === "connect" ? `connect ${quote(from.name)} to ${quote(to.name)};`
+      : kind === "transition" ? `transition first ${quote(from.name)} then ${quote(to.name)};`
+      : `first ${quote(from.name)} then ${quote(to.name)};`;
     next = insertInside(content, owner, (indent) => `${indent}${text}\n`);
   } else {
     next = insertInto(content, before.elements, ROOT_PACKAGE, null, (indent) =>
       relationSnippet({ kind: req.body.kind, from: from.qualifiedName, to: to.qualifiedName }, indent));
   }
-  const zh = RELATION_LABELS[kind]?.zh ?? ({ compose: "包含", connect: "連接", succession: "之後是" } as Record<string, string>)[kind] ?? kind;
+  const zh = RELATION_LABELS[kind]?.zh ?? ({ compose: "包含", connect: "連接", succession: "之後是", transition: "轉換到" } as Record<string, string>)[kind] ?? kind;
   const r = await store.saveFile(id, MAIN_FILE, next, author(req), `新增關係：${from.name} ${zh} ${to.name}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });

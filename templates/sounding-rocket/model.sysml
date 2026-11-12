@@ -70,6 +70,26 @@ package Project {
             first '動力飛行' then '滑行';
             first '滑行' then '回收';
         }
+
+        state <'MODE-001'> '飛行模式' : Mode {
+            state '待命' : Mode;
+            state '上升' : Mode;
+            state '下降' : Mode;
+            state '落地' : Mode;
+            transition first '待命' then '上升';
+            transition first '上升' then '下降';
+            transition first '下降' then '落地';
+        }
+    }
+
+    package UseCases {
+        use case <'UC-001'> '執行發射' : UseCase {
+            doc /* 發射團隊依發射程序完成架設、點火與發射。 */
+        }
+        use case <'UC-002'> '尋回火箭' : UseCase {
+            doc /* 回收團隊依落點預測與定位訊號尋回火箭。 */
+        }
+        #trace dependency from '執行發射' to Stakeholders::'指導老師';
     }
 
     // ───────── 需求 ─────────
