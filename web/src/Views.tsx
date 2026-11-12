@@ -88,6 +88,11 @@ export function GatesView({ user, view, gateId, setView, onSelect }: { user: Me;
       <section className="section">
         <div className="section-head"><h1 className="section-title">{gate.zh}</h1><span className="label">{gate.en} · {gate.done} / {gate.total}</span></div>
         <p className="body">{gate.purpose}</p>
+        <div className="tbtn-row" style={{ margin: "8px 0" }}>
+          <span className="label">審查報告</span>
+          <a className="tbtn primary" href={`/api/projects/${view.project.id}/report?gate=${gate.id}`} target="_blank" rel="noreferrer">開啟（可列印成 PDF）</a>
+          <a className="tbtn" href={`/api/projects/${view.project.id}/report?gate=${gate.id}&format=docx`}>下載 Word</a>
+        </div>
         <p className="caption" style={{ margin: "8px 0 16px" }}>核可者　{gate.approver}{gate.deadline ? `　　期限　${gate.deadline}` : ""}{gate.perSubsystem ? "　　各次系統分場審查" : ""}</p>
         {error && <p className="msg"><span className="tag danger">ERR</span>{error}</p>}
         <ul className="checks">{gate.checks.map((c) => (

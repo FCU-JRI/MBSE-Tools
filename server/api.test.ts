@@ -314,3 +314,19 @@ test("飛行模擬：執行、結果回寫模型後需求重新判定、OpenRock
   assert.equal(imp.data.sim.inputs.nose.length_m, 0.55);
   assert.equal((await call(`${base}/import-ork`, "POST", { base64: Buffer.from("not a rocket").toString("base64") })).status, 400);
 });
+
+test("審查報告：網頁版含圖與表，Word 版可下載，內容有跳脫", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "t3", name: "報告 <b>測試</b>", kind: "annual" });
+  const html = await (await fetch(`${I}/api/projects/t3/report?gate=cdr`)).text();
+  assert.match(html, /關鍵設計審查/);
+  assert.match(html, /需求驗證矩陣/);
+  assert.match(html, /REQ-SYS-001/);
+  assert.ok((html.match(/<svg/g) ?? []).length >= 3, "應內嵌結構、需求、活動等圖");
+  assert.ok(!html.includes("<b>測試</b>"), "專案名稱必須跳脫");
+  assert.match(html, /報告 &lt;b&gt;測試&lt;\/b&gt;/);
+  const docx = await fetch(`${I}/api/projects/t3/report?gate=cdr&format=docx`);
+  assert.equal(docx.status, 200);
+  const buf = Buffer.from(await docx.arrayBuffer());
+  assert.equal(buf.subarray(0, 2).toString(), "PK");
+  assert.ok(buf.length > 8000);
+});

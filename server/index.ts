@@ -14,6 +14,7 @@ import * as auth from "./auth.ts";
 import * as versions from "./versions.ts";
 import * as pm from "./pm.ts";
 import * as sim from "./sim.ts";
+import { buildReport, renderDocx, renderHtml } from "./report.ts";
 import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -371,6 +372,24 @@ app.get("/api/projects/:id/export.xlsx", wrap(async (req, res) => {
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${v.project.id}-mbse.xlsx"`);
   res.send(buf);
+}));
+
+// 審查報告：?gate=節點代號&format=html|docx。html 可用瀏覽器列印成 PDF。
+app.get("/api/projects/:id/report", wrap(async (req, res) => {
+  const id = pid(req);
+  const v = await view(id);
+  if (!v.analysis.ok) throw new store.UserError("模型目前有錯誤，修正後才能產生報告。");
+  const gate = String(req.query.gate ?? v.gates[0]?.id ?? "");
+  const head = (await store.history(id))[0]?.commit ?? "";
+  const report = buildReport(v.project, v.analysis, v.gates, await pm.readPm(id), await sim.readSim(id), gate, head);
+  if (req.query.format === "docx") {
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${id}-${gate}-report.docx"`);
+    return res.send(await renderDocx(report));
+  }
+  // 報告頁只有自己產生的內容與一個列印按鈕，不載入任何外部資源
+  res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:");
+  res.type("html").send(renderHtml(report));
 }));
 
 const dist = path.join(ROOT, "dist");
