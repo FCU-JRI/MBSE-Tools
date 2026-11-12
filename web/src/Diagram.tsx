@@ -206,7 +206,7 @@ function Canvas({ readOnly, view, meta, def, selectedId, onSelectElement, onSele
   const exportAs = (kind: "svg" | "png") => {
     const placed = (flow.getNodes() as FlowNode[]).map((n) => ({ g: n.data.g, x: n.position.x, y: n.position.y }));
     if (placed.length === 0) return;
-    const svg = toSvg(`${def.code} · ${def.title} — ${view.project.name}`, placed, graph.edges);
+    const svg = toSvg(`${def.code} · ${def.title} — ${view.project.name}`, placed, graph.edges, vertical, straight);
     const name = `${view.project.id}-${def.code}-${def.title}`;
     if (kind === "svg") downloadSvg(svg, name); else downloadPng(svg, name).catch((e) => onError((e as Error).message));
   };
