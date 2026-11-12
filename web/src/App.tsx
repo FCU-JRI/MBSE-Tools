@@ -76,6 +76,18 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
   const [form, setForm] = useState({ id: "", name: "", kind: "annual" as "annual" | "small", gates: ["mdr", "cdr", "trr"] });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<Project | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const archive = async (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!removing) return;
+    setError("");
+    try {
+      await api(`/projects/${removing.id}/archive`, "POST", { confirm: confirmText });
+      setProjects((ps) => (ps ?? []).filter((p) => p.id !== removing.id));
+      setRemoving(null); setConfirmText("");
+    } catch (e) { setError((e as Error).message); }
+  };
   useEffect(() => { api<Project[]>("/projects").then(setProjects).catch((e) => setError(e.message)); }, []);
   const create = async (ev: FormEvent) => {
     ev.preventDefault(); setBusy(true); setError("");
@@ -86,13 +98,24 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
       <section className="section">
         <div className="section-head"><h1 className="section-title">專案</h1><span className="label">{projects?.length ?? 0}</span></div>
         {projects === null ? <p className="label">載入中</p> : projects.length === 0 ? <p className="body muted">{user.caps.createProject ? "還沒有專案。在右側建立第一個。" : "還沒有可以開啟的專案。"}</p> : projects.map((p) => (
-          <button key={p.id} className="proj" onClick={() => onOpen(p.id)}>
-            <span className="heading" style={{ flex: 1 }}>{p.name}</span>
-            <span className="label">{p.kind === "annual" ? "年度計畫" : "小型專案"}</span>
-            <span className="label">{p.gates.length} 節點</span>
-            <span className="label">{p.id}</span>
-          </button>
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <button className="proj" onClick={() => onOpen(p.id)}>
+              <span className="heading" style={{ flex: 1 }}>{p.name}</span>
+              <span className="label">{p.kind === "annual" ? "年度計畫" : "小型專案"}</span>
+              <span className="label">{p.gates.length} 節點</span>
+              <span className="label">{p.id}</span>
+            </button>
+            {user.caps.admin && <button className="tbtn" onClick={() => { setRemoving(p); setConfirmText(""); setError(""); }}>刪除</button>}
+          </div>
         ))}
+        {removing && (
+          <form onSubmit={archive} style={{ marginTop: 24 }}>
+            <div className="section-head"><h2 className="section-title">刪除專案</h2><span className="tag danger">DELETE</span></div>
+            <p className="body" style={{ marginBottom: 12 }}>「{removing.name}」會從列表移除，所有人都無法再開啟。資料會移到這台電腦的封存資料夾，需要時可以請管理員還原。</p>
+            <label className="field"><span className="label">輸入專案名稱「{removing.name}」確認</span><input className="input" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoFocus /></label>
+            <div className="tbtn-row"><button className="tbtn primary" disabled={confirmText.trim() !== removing.name}>確定刪除</button><button type="button" className="tbtn" onClick={() => setRemoving(null)}>取消</button></div>
+          </form>
+        )}
       </section>
       {user.caps.createProject && <form className="section" onSubmit={create}>
         <div className="section-head"><h2 className="section-title">建立專案</h2></div>

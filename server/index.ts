@@ -114,6 +114,12 @@ app.post("/api/projects", auth.need(auth.can.createProject, "建立專案需要�
   res.json(await store.createProject({ id: String(id ?? ""), name: String(name ?? ""), kind: kind === "small" ? "small" : "annual", gates, author: author(req) }));
 }));
 
+// 封存專案（管理員）。資料移到 archive 資料夾，可手動移回來還原。
+app.post("/api/projects/:id/archive", admin, wrap(async (req, res) => {
+  await store.archiveProject(pid(req), String(req.body?.confirm ?? ""));
+  res.json({ archived: true });
+}));
+
 app.get("/api/projects/:id", wrap(async (req, res) => res.json(await view(pid(req)))));
 
 app.get("/api/projects/:id/files", wrap(async (req, res) => res.json(await store.listFiles(pid(req)))));

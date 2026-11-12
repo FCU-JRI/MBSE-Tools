@@ -278,3 +278,14 @@ export async function writeLayout(id: string, layout: Layout): Promise<void> {
   }
   await fs.writeFile(path.join(dirOf(id), "layout.json"), JSON.stringify(clean, null, 1) + "\n", "utf8");
 }
+
+/** 封存專案：整個資料夾移到 archive，不真的刪除。必須輸入專案名稱確認。 */
+export async function archiveProject(id: string, confirmName: string): Promise<string> {
+  const p = await readProject(id);
+  if (confirmName.trim() !== p.name) throw new UserError("輸入的專案名稱不符，未封存。");
+  const archive = path.join(HOME_DIR, "archive");
+  await fs.mkdir(archive, { recursive: true });
+  const target = path.join(archive, `${id}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+  await fs.rename(dirOf(id), target);
+  return target;
+}

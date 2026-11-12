@@ -330,3 +330,14 @@ test("審查報告：網頁版含圖與表，Word 版可下載，內容有跳脫
   assert.equal(buf.subarray(0, 2).toString(), "PK");
   assert.ok(buf.length > 8000);
 });
+
+test("封存專案：名稱不符不動作，封存後從列表消失且資料保留", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "t9", name: "要封存的", kind: "annual" });
+  assert.equal((await call(`${I}/api/projects/t9/archive`, "POST", { confirm: "打錯" })).status, 400);
+  assert.equal((await call(`${I}/api/projects/t9`)).status, 200);
+  assert.equal((await call(`${I}/api/projects/t9/archive`, "POST", { confirm: "要封存的" })).status, 200);
+  assert.equal((await call(`${I}/api/projects/t9`)).status, 400);
+  assert.ok(!(await call(`${I}/api/projects`)).data.some((p: any) => p.id === "t9"));
+  const kept = (await fs.readdir(path.join(home, "archive"))).find((n) => n.startsWith("t9-"));
+  assert.ok(kept && (await fs.stat(path.join(home, "archive", kept, "model", "model.sysml"))).isFile());
+});
