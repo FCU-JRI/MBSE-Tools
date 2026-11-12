@@ -8,9 +8,14 @@ export interface Analysis { ok: boolean; diagnostics: Diagnostic[]; elements: El
 export interface Check { id: string; label: string; hint: string; manual: boolean; pass: boolean; detail: string; missing: { id: string; name: string }[] }
 export interface Gate { id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean; checks: Check[]; done: number; total: number }
 export interface Signoff { gate: string; subsystem: string | null; decision: "APPROVE" | "DENY"; by: string; role: string; comment: string; at: string; commit: string }
-export interface Project { id: string; name: string; kind: "annual" | "small"; createdAt: string; gates: string[]; manual: Record<string, boolean>; signoffs: Signoff[] }
+export interface Project { id: string; name: string; kind: "annual" | "small"; template?: "blank" | "sample" | "guided"; createdAt: string; gates: string[]; manual: Record<string, boolean>; signoffs: Signoff[] }
 export interface Doc { id: string; title: string; type: string; revision: string; url: string; note: string }
-export interface View { project: Project; analysis: Analysis; gates: Gate[]; docs: Doc[]; milestones: Record<string, string> }
+export interface Step {
+  id: string; zh: string; nasa: string; question: string; why: string; example: string; categories: string[];
+  link: { kind: string; to: string[]; zh: string; direction: "out" | "in" } | null; parent: string | null;
+  state: "done" | "current" | "locked"; count: number; issues: { id: string | null; text: string }[];
+}
+export interface View { project: Project; analysis: Analysis; gates: Gate[]; docs: Doc[]; milestones: Record<string, string>; process: Step[] }
 export interface Field { name: string; zh: string; type: "text" | "int" | "real" }
 export interface Category { id: string; zh: string; en: string; pillar: string; prefix: string; pkg: string; keyword: string; help: string; example: string; fields?: Field[] }
 export interface Meta {

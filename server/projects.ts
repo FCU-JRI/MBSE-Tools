@@ -32,6 +32,8 @@ export interface Project {
   kind: "annual" | "small";
   createdAt: string;
   gates: string[];
+  /** blank 空白、sample 範本（附示範內容）、guided 流程範本（逐步引導，不可跳步） */
+  template?: "blank" | "sample" | "guided";
   highPower?: boolean; // 高功率（H 級以上）：TRR／FRR 只有指導老師能核可
   manual: Record<string, boolean>;
   signoffs: Signoff[];
@@ -111,6 +113,16 @@ export async function commit(dir: string, author: string, message: string): Prom
   return git(dir, "rev-parse", "--short", "HEAD");
 }
 
+/** 把分析方法（skill）放進專案儲存庫。成員用 Claude Code 開啟儲存庫時會自動載入，不需另外設定。 */
+async function syncSkill(dir: string): Promise<void> {
+  const src = await fs.readFile(path.join(TEMPLATE_DIR, "skill", "SKILL.md"), "utf8").catch(() => "");
+  if (!src) return;
+  const target = path.join(dir, ".claude", "skills", "jri-mbse", "SKILL.md");
+  if ((await fs.readFile(target, "utf8").catch(() => "")) === src) return;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, src, "utf8");
+}
+
 /** 專案儲存庫一律不轉換換行字元：Windows 預設的 autocrlf 會在還原與合併時把檔案改成 CRLF，
  *  造成工作目錄被視為有變更，原始碼位置的計算也會跟著偏移。 */
 export async function repoConfig(dir: string): Promise<void> {
@@ -142,7 +154,8 @@ async function writeProject(p: Project): Promise<void> {
   await fs.writeFile(path.join(dirOf(p.id), "project.json"), JSON.stringify(p, null, 2) + "\n", "utf8");
 }
 
-export async function createProject(input: { id: string; name: string; kind: "annual" | "small"; gates?: string[]; author: string }): Promise<Project> {
+export async function createProject(input: { id: string; name: string; kind: "annual" | "small"; gates?: string[]; template?: string; author: string }): Promise<Project> {
+  const template: Project["template"] = input.template === "blank" || input.template === "guided" ? input.template : "sample";
   const dir = dirOf(input.id);
   if (!input.name.trim()) throw new UserError("請填專案名稱。");
   if (await fs.stat(dir).catch(() => null)) throw new UserError("這個專案代號已經被使用。");
@@ -152,10 +165,11 @@ export async function createProject(input: { id: string; name: string; kind: "an
 
   await fs.mkdir(path.join(dir, "model"), { recursive: true });
   await fs.mkdir(path.join(dir, "lib"), { recursive: true });
-  await fs.copyFile(path.join(TEMPLATE_DIR, "sounding-rocket", "model.sysml"), path.join(dir, "model", "model.sysml"));
+  await fs.copyFile(path.join(TEMPLATE_DIR, template === "sample" ? "sounding-rocket" : "blank", "model.sysml"), path.join(dir, "model", "model.sysml"));
+  await syncSkill(dir);
   await fs.copyFile(LIBRARY, path.join(dir, "lib", "JRI.sysml"));
   await fs.copyFile(path.join(TEMPLATE_DIR, "CLAUDE.md"), path.join(dir, "CLAUDE.md")).catch(() => {});
-  const project: Project = { id: input.id, name: input.name.trim(), kind: input.kind, createdAt: new Date().toISOString(), gates, manual: {}, signoffs: [] };
+  const project: Project = { id: input.id, name: input.name.trim(), kind: input.kind, template, createdAt: new Date().toISOString(), gates, manual: {}, signoffs: [] };
   await writeProject(project);
   await git(dir, "init", "-b", "main");
   await repoConfig(dir);
@@ -202,6 +216,7 @@ export async function sources(id: string, override?: { file: string; content: st
   const lib = await fs.readFile(LIBRARY, "utf8");
   const copy = path.join(dir, "lib", "JRI.sysml");
   if ((await fs.readFile(copy, "utf8").catch(() => "")) !== lib) await fs.writeFile(copy, lib, "utf8").catch(() => {});
+  await syncSkill(dir).catch(() => {});
   const out: Source[] = [["JRI.sysml", lib]];
   // 共用元件庫：所有專案都看得到，副本放進專案的 lib/ 讓儲存庫自給自足
   for (const f of await listShared()) {

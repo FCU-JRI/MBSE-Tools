@@ -10,6 +10,7 @@ import { Inspector } from "./Inspector.tsx";
 import type { Selection } from "./Inspector.tsx";
 import { GatesView, TableView } from "./Views.tsx";
 import { Dashboard } from "./Dashboard.tsx";
+import { ProcessView } from "./Process.tsx";
 import { Deliverables } from "./Deliverables.tsx";
 import type { DeliverTab } from "./Deliverables.tsx";
 import { VersionsView } from "./Versions.tsx";
@@ -105,9 +106,15 @@ function Login({ github }: { github: boolean }) {
   );
 }
 
+const TEMPLATES: { id: "blank" | "sample" | "guided"; zh: string; help: string }[] = [
+  { id: "guided", zh: "流程範本專案", help: "從利害關係人開始，一步一個問題帶你完成分析。前一步沒完成不能跳到下一步。建議新專案使用。" },
+  { id: "sample", zh: "範本專案", help: "附一份探空火箭的示範內容，可以對照著修改。適合想先看完整範例的人。" },
+  { id: "blank", zh: "空白專案", help: "從空的模型開始，順序自己決定。適合已經熟悉方法的人。" },
+];
+
 function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: string) => void }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
-  const [form, setForm] = useState({ id: "", name: "", kind: "annual" as "annual" | "small", gates: ["mdr", "cdr", "trr"] });
+  const [form, setForm] = useState({ id: "", name: "", kind: "annual" as "annual" | "small", gates: ["mdr", "cdr", "trr"], template: "guided" as "blank" | "sample" | "guided" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<Project | null>(null);
@@ -156,6 +163,15 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
         <label className="field"><span className="label">名稱</span><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="2027 年度探空火箭" /></label>
         <label className="field"><span className="label">代號</span><input className="input" required value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value.toLowerCase() })} placeholder="sr-2027" pattern="[a-z0-9][a-z0-9\-]{1,40}" /></label>
         <p className="caption" style={{ marginBottom: 12 }}>小寫英數與連字號，會成為儲存庫名稱，之後不能改。</p>
+        <fieldset className="choices">
+          <legend className="label">建立方式</legend>
+          {TEMPLATES.map((t) => (
+            <label key={t.id} className={`choice ${form.template === t.id ? "on" : ""}`}>
+              <input type="radio" name="template" checked={form.template === t.id} onChange={() => setForm({ ...form, template: t.id })} />
+              <span><span className="heading">{t.zh}</span><span className="caption">{t.help}</span></span>
+            </label>
+          ))}
+        </fieldset>
         <label className="field"><span className="label">類型</span>
           <select className="input" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as "annual" | "small" })}>
             <option value="annual">年度計畫（全部節點）</option><option value="small">小型專案（自選節點）</option>
@@ -174,8 +190,8 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
   );
 }
 
-type Mode = "home" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history";
-const MODES: [Mode, string][] = [["home", "首頁"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
+type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history";
+const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
 
 function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; user: Me; onHome: () => void; who: React.ReactNode }) {
   const readOnly = !user.caps.edit;
@@ -192,6 +208,13 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
   const setPane = (p: Partial<Panes>) => setPanes((cur) => { const next = { ...cur, ...p }; savePanes(next); return next; });
   const reload = useCallback(() => api<View>(`/projects/${id}`).then(setView).catch((e) => setError(e.message)), [id]);
   useEffect(() => { reload(); }, [reload]);
+  // 流程範本專案在流程走完之前，開啟時直接進入流程
+  const [autoMode, setAutoMode] = useState(false);
+  useEffect(() => {
+    if (!view || autoMode) return;
+    setAutoMode(true);
+    if (view.project.template === "guided" && view.process.some((s) => s.state !== "done")) setMode("process");
+  }, [view, autoMode]);
 
   const diagrams = useMemo(() => (view ? diagramsOf(view.analysis) : []), [view]);
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><button className="tbtn primary" onClick={onHome}>回專案列表</button></div>;
@@ -202,7 +225,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
   const selectedId = sel.type === "element" ? sel.id : null;
   const selectElement = (eid: string | null) => setSel(eid ? { type: "element", id: eid } : { type: "new", category: catId, parentId: null });
   const showSide = mode === "diagram" || mode === "table" || mode === "deliver" || mode === "gates";
-  const showTree = mode !== "home";
+  const showTree = mode !== "home" && mode !== "process";
   // 首頁各區塊點了之後前往對應的頁面
   const go = (m: string, arg?: string) => {
     if (m === "gates" && arg) setGateId(arg);
@@ -240,6 +263,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
             onChanged={(v) => { setView(v); setNotice(""); }} onError={setNotice} />}
           {mode === "table" && <div className="center-scroll"><TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={selectElement} /></div>}
           {mode === "home" && <div className="center-scroll enter"><Dashboard view={view} go={go} /></div>}
+          {mode === "process" && <div className="center-scroll"><ProcessView view={view} meta={meta} user={user} onChanged={setView} onOpen={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); setMode("table"); }} /></div>}
           {mode === "deliver" && <Deliverables view={view} meta={meta} user={user} tab={deliverTab} setTab={setDeliverTab} selectedId={selectedId} onSelect={(eid) => setSel({ type: "element", id: eid })} onChanged={setView} />}
           {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
           {mode === "plan" && <div className="center-scroll"><PlanView view={view} meta={meta} user={user} /></div>}

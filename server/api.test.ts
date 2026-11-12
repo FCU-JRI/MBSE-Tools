@@ -457,3 +457,62 @@ test("來源文件只存連結；元素可標註出處並寫進模型", async ()
   assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
   assert.equal(r.data.analysis.elements.find((x: any) => x.name === "降落傘未展開").attrs.detection, "3");
 });
+
+test("三種建立方式：空白、範本、流程範本；流程範本不可跳步，照順序可以走完前幾步", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "g-blank", name: "空白", kind: "annual", template: "blank" });
+  let b = (await call(`${I}/api/projects/g-blank`)).data;
+  assert.equal(b.analysis.ok, true);
+  assert.equal(b.analysis.elements.filter((e: any) => e.category && !e.shared).length, 0, "空白專案除了共用元件庫之外沒有內容");
+  assert.equal(b.process[0].state, "current");
+  // 空白專案不強制順序
+  assert.equal((await call(`${I}/api/projects/g-blank/elements`, "POST", { category: "SystemRequirement", name: "直接寫需求" })).status, 200);
+
+  const sample = (await call(`${I}/api/projects/t1`)).data;
+  assert.equal(sample.process.length, 17);
+
+  await call(`${I}/api/projects`, "POST", { id: "g1", name: "流程", kind: "annual", template: "guided" });
+  const base = `${I}/api/projects/g1`;
+  let v = (await call(base)).data;
+  assert.equal(v.project.template, "guided");
+  assert.deepEqual(v.process.slice(0, 3).map((s: any) => s.state), ["current", "locked", "locked"]);
+  let r = await call(`${base}/elements`, "POST", { category: "SystemRequirement", name: "跳步的需求" });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /利害關係人/);
+  r = await call(`${base}/elements`, "POST", { category: "Expectation", name: "跳步的期望" });
+  assert.equal(r.status, 400);
+
+  const add = async (body: any) => { const x = await call(`${base}/elements`, "POST", body); assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 200)); v = x.data; return v.analysis.elements.find((e: any) => e.name === body.name); };
+  const link = async (kind: string, from: any, to: any) => { const x = await call(`${base}/relations`, "POST", { kind, from: from.id, to: to.id }); assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 200)); v = x.data; };
+  const state = (id: string) => v.process.find((s: any) => s.id === id).state;
+
+  const stk = await add({ category: "Stakeholder", name: "主辦方" });
+  assert.deepEqual([state("stakeholders"), state("expectations"), state("needs")], ["done", "current", "locked"]);
+  const exp = await add({ category: "Expectation", name: "安全", doc: "不得危及人員。" });
+  assert.equal(state("expectations"), "current", "期望還沒指出是誰的");
+  assert.match(v.process[1].issues[0].text, /誰的期望|任何期望/);
+  await link("trace", exp, stk);
+  assert.deepEqual([state("expectations"), state("needs")], ["done", "current"]);
+  const need = await add({ category: "Need", name: "安全的火箭" }); await link("trace", need, exp);
+  const goal = await add({ category: "Goal", name: "完成飛行" }); await link("derive", goal, need);
+  const obj = await add({ category: "Objective", name: "到達 3000 m" }); await link("derive", obj, goal);
+  assert.equal(state("moes"), "current");
+  const moe = await add({ category: "MOE", name: "高度偏差" }); await link("refine", moe, obj);
+  assert.deepEqual([state("moes"), state("context"), state("usecases")], ["done", "current", "locked"]);
+  assert.equal((await call(`${base}/elements`, "POST", { category: "UseCase", name: "跳步" })).status, 400);
+  // 功能分配的關係要能被辨識（第 12 步的完成條件）
+  const s1 = (await call(`${I}/api/projects/t1`)).data;
+  const fnHost = s1.analysis.elements.find((e: any) => e.name === "任務");
+  let x = await call(`${I}/api/projects/t1/elements`, "POST", { category: "Function", name: "偵測遠地點", parentId: fnHost.id });
+  assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 200));
+  const fn = x.data.analysis.elements.find((e: any) => e.name === "偵測遠地點");
+  const sub = x.data.analysis.elements.find((e: any) => e.name === "航電次系統" && e.kind === "PartDefinition");
+  x = await call(`${I}/api/projects/t1/relations`, "POST", { kind: "allocate", from: fn.id, to: sub.id });
+  assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 300));
+  const al = x.data.analysis.relations.find((q: any) => q.kind === "allocate" && q.from === fn.id);
+  assert.ok(al, "分配關係應被辨識");
+  assert.equal(x.data.analysis.elements.find((e: any) => e.id === al.to).category, "Subsystem", "分配對象是該次系統的零件");
+  assert.equal(x.data.process.find((s: any) => s.id === "functions").issues.some((i: any) => /偵測遠地點/.test(i.text)), false);
+  // 分析方法（skill）隨專案儲存庫提供
+  const skill = await fs.readFile(path.join(home, "projects", "g1", ".claude", "skills", "jri-mbse", "SKILL.md"), "utf8");
+  assert.match(skill, /從利害關係人開始/);
+});

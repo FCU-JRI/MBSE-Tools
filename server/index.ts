@@ -14,6 +14,7 @@ import * as auth from "./auth.ts";
 import * as versions from "./versions.ts";
 import * as pm from "./pm.ts";
 import * as sim from "./sim.ts";
+import { evaluateProcess, stepOfCategory } from "./process.ts";
 import { buildReport, renderDocx, renderHtml } from "./report.ts";
 import type { User } from "./auth.ts";
 
@@ -47,7 +48,7 @@ async function view(id: string) {
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
   const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones };
+  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [] };
 }
 
 app.use((_req, res, next) => {
@@ -110,8 +111,8 @@ app.get("/api/projects", wrap(async (req, res) => {
 }));
 
 app.post("/api/projects", auth.need(auth.can.createProject, "建立專案需要總工程師以上的權限。"), wrap(async (req, res) => {
-  const { id, name, kind, gates } = req.body ?? {};
-  res.json(await store.createProject({ id: String(id ?? ""), name: String(name ?? ""), kind: kind === "small" ? "small" : "annual", gates, author: author(req) }));
+  const { id, name, kind, gates, template } = req.body ?? {};
+  res.json(await store.createProject({ id: String(id ?? ""), name: String(name ?? ""), kind: kind === "small" ? "small" : "annual", gates, template: String(template ?? "sample"), author: author(req) }));
 }));
 
 // 封存專案（管理員）。資料移到 archive 資料夾，可手動移回來還原。
@@ -146,6 +147,16 @@ app.post("/api/projects/:id/elements", wrap(async (req, res) => {
   if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正後再新增。");
   const cat = CATEGORIES.find((c) => c.id === req.body.category);
   if (!cat) throw new store.UserError("未知的元素類別。");
+  // 流程範本專案：前面的步驟沒完成，不能新增後面步驟的項目
+  if ((await store.readProject(id)).template === "guided") {
+    const step = stepOfCategory(cat.id);
+    const status = evaluateProcess(before);
+    const mine = step ? status.find((s) => s.id === step.id) : undefined;
+    if (mine?.state === "locked") {
+      const cur = status.find((s) => s.state === "current");
+      throw new store.UserError(`還不能新增${cat.zh}。請先完成「${cur?.zh ?? "前面的步驟"}」：${cur?.issues[0]?.text ?? ""}`);
+    }
+  }
   const parent0 = req.body.parentId ? before.elements.find((e) => e.id === req.body.parentId) : undefined;
   const file = parent0 ? editable(parent0).file : rootFile(before);
   const content = await store.readFile(id, file);
@@ -182,6 +193,33 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   if (kind === "satisfy" && /Definition$/.test(from.kind)) {
     // satisfy 的滿足者必須是使用（usage）；若選的是定義，就把 satisfy 寫進該定義的主體
     next = insertInside(content, from, (indent) => `${indent}satisfy ${qn(to.qualifiedName)};\n`);
+  } else if (kind === "allocate") {
+    // 分配的兩端都必須是使用（usage）。巢狀在其他使用裡的要用點號路徑；選到定義時改用以它為型別的零件。
+    const byId = new Map(before.elements.map((e) => [e.id, e]));
+    const featureRef = (el: Element): string => {
+      const chain: Element[] = [];
+      for (let cur: Element | undefined = el; cur && cur.kind !== "Package"; cur = byId.get(cur.owner ?? "")) chain.unshift(cur);
+      const pkg = chain[0] ? byId.get(chain[0].owner ?? "")?.qualifiedName ?? "" : "";
+      let out = pkg.split("::").filter(Boolean).map(quote).join("::");
+      chain.forEach((c, i) => { out += (i > 0 && /Usage$/.test(chain[i - 1].kind) ? "." : "::") + quote(c.name); });
+      return out.replace(/^::/, "");
+    };
+    let target = to;
+    if (/Definition$/.test(to.kind)) {
+      const usage = before.elements.find((e) => e.kind === "PartUsage" && e.typeIds.includes(to.id));
+      if (!usage) throw new store.UserError(`「${to.name}」還沒有放進系統的結構，無法分配。請先到結構分解圖把它加為某個系統的零件。`);
+      target = usage;
+    }
+    // 零件若定義在某個系統定義裡，從外面無法直接引用，所以把分配寫進那個定義的主體
+    const host = byId.get(target.owner ?? "");
+    if (host && /Definition$/.test(host.kind)) {
+      if (editable(host).file !== file) throw new store.UserError("功能與分配對象在不同檔案，請到「原始碼」分頁建立分配。");
+      next = insertInside(content, host, (indent) => `${indent}allocate ${featureRef(from)} to ${quote(target.name)};
+`);
+    } else {
+      next = insertInto(content, inFile(before, file), ROOT_PACKAGE, null, (indent) => `${indent}allocate ${featureRef(from)} to ${featureRef(target)};
+`);
+    }
   } else if (kind === "compose") {
     // 結構分解：在上層定義內加入一個以下層定義為型別的零件
     if (from.kind !== "PartDefinition" || to.kind !== "PartDefinition") throw new store.UserError("結構分解只能連接兩個定義（part def）。");

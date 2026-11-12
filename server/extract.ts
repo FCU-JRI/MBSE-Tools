@@ -242,7 +242,12 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
       const req = member ? (generals.get(member) ?? [])[0] ?? null : null;
       push("verify", namedOwner(ref(e.owningRelatedElement)), req, byId.get(member ?? ""));
     } else if (t === "AllocationUsage") {
-      const ends = refs(e.connectorEnd).map((x) => (generals.get(x) ?? [])[0] ?? null);
+      // 端點引用的可能是特徵鏈（mission.detect），取鏈上最後一個才是真正的對象
+      const ends = refs(e.connectorEnd).map((x) => {
+        const g = (generals.get(x) ?? [])[0] ?? null;
+        const chain = g ? refs(byId.get(g)?.chainingFeature) : [];
+        return chain.length ? chain[chain.length - 1] : g;
+      });
       push("allocate", ends[0] ?? null, ends[1] ?? null, e);
     } else if (t === "ConnectionUsage" || t === "InterfaceUsage") {
       const ce = refs(e.relatedFeature);

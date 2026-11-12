@@ -310,3 +310,34 @@ a:not(.tbtn):not(.btn) { color: var(--ink); text-underline-offset: 3px; }
   .tag.done, .tag.warn, .tag.danger { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @page { size: A4 landscape; margin: 12mm; }
 }
+
+/* 建立專案的三種方式：以髮絲線分隔的選項，不用卡片 */
+.choices { border: 0; padding: 0; margin: 0 0 var(--space-4); }
+.choices legend { padding: 0; margin-bottom: var(--space-1); }
+.choice { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; margin: 0; border-top: var(--stroke-hair) solid var(--line); cursor: pointer; color: var(--ink-muted); }
+.choice.on { color: var(--ink); box-shadow: inset var(--stroke-bold) 0 0 var(--ink); padding-left: var(--space-3); }
+.choice input { appearance: none; margin: 4px 0 0; width: 14px; height: 14px; border: var(--stroke-hair) solid var(--line-strong); background: var(--bg); display: grid; place-items: center; flex: none; cursor: pointer; }
+.choice input:checked { border-color: var(--ink); }
+.choice input:checked::after { content: ""; width: 6px; height: 6px; background: var(--ink); box-shadow: var(--glow-ink); }
+.choice > span { display: flex; flex-direction: column; gap: 2px; }
+.choice .heading { font-size: 14px; line-height: 20px; }
+
+/* 流程：左邊步驟、右邊一次一個問題 */
+.proc { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--space-8); max-width: 1180px; margin: 0 auto; align-items: start; }
+.proc-steps { list-style: none; margin: 0; padding: 0; position: sticky; top: 0; }
+.proc-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: var(--space-2); border-bottom: var(--stroke-hair) solid var(--line); margin-bottom: var(--space-1); }
+.proc-step { display: grid; grid-template-columns: 1.6rem 1fr auto; align-items: center; gap: var(--space-2); width: 100%; min-height: 32px; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; color: var(--ink-muted); }
+.proc-step.locked { color: var(--ink-faint); }
+.proc-step.locked .tn { opacity: 0.7; }
+.proc-step[aria-current="true"] { color: var(--ink); font-weight: 600; box-shadow: inset var(--stroke-bold) 0 0 var(--ink); padding-left: var(--space-2); }
+.proc-step:hover { color: var(--ink); }
+.proc-step .tn { font-family: var(--font-sans); font-size: 13px; }
+.proc-step .tc { font-size: 11px; color: var(--ink-faint); }
+.proc-panel { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
+.proc-panel .section + .section { margin-top: 0; }
+.proc-question { font-family: var(--font-sans); font-size: 26px; line-height: 36px; font-weight: 500; margin: var(--space-2) 0 var(--space-3); max-width: 30em; }
+.proc-item { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) auto; gap: var(--space-3); align-items: baseline; width: 100%; min-height: 36px; padding: var(--space-1) 0; border: 0; border-bottom: var(--stroke-hair) solid var(--line); background: none; text-align: left; cursor: pointer; }
+.proc-item:hover { background: var(--surface-1); }
+.proc-item .tid { font-size: 11px; letter-spacing: 0.06em; color: var(--ink-muted); }
+details > summary { list-style: none; cursor: pointer; } details > summary::-webkit-details-marker { display: none; }
+@media (max-width: 860px) { .proc { grid-template-columns: 1fr; gap: var(--space-4); } .proc-steps { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-4); } .proc-head { grid-column: 1 / -1; } .proc-question { font-size: 22px; line-height: 30px; } }
