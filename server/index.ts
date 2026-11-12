@@ -7,7 +7,7 @@ import { ROOT_PACKAGE, shutdown } from "./engine.ts";
 import { evaluateGates, GATES } from "./gates.ts";
 import { CATEGORIES, PILLARS, RELATION_LABELS } from "./metamodel.ts";
 import * as store from "./projects.ts";
-import { deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, snippetFor } from "./edits.ts";
+import { deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, snippetFor } from "./edits.ts";
 import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
 import * as auth from "./auth.ts";
@@ -235,13 +235,15 @@ app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
   let content = await store.readFile(id, file);
   const steps: ((c: string, el: Element, an: typeof a) => string)[] = [];
   const b = req.body ?? {};
+  // 編號最後才改：前面的步驟靠原本的編號找回元素
+  const newId = typeof b.shortName === "string" && b.shortName.trim() && b.shortName.trim() !== (target.shortName ?? "") ? b.shortName.trim() : null;
   if (typeof b.name === "string" && b.name.trim() !== target.name) steps.push((c, el, an) => renameText(c, el, b.name, inFile(an, file), an.relations.filter((r) => r.file === file)));
   if (typeof b.doc === "string" && b.doc.trim() !== target.doc.trim()) steps.push((c, el) => setDocText(c, el, b.doc));
   for (const f of cat?.fields ?? []) {
     const v = b.attrs?.[f.name];
     if (typeof v === "string" && v.trim() !== (target.attrs[f.name] ?? "").trim()) steps.push((c, el) => setAttrText(c, el, f, v));
   }
-  if (steps.length === 0) return res.json({ saved: true, ...(await view(id)) });
+  if (steps.length === 0 && !newId) return res.json({ saved: true, ...(await view(id)) });
   let el: Element = target;
   for (const step of steps) {
     content = step(content, el, a);
@@ -249,6 +251,14 @@ app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
     if (!a.ok) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
     const again = findAgain(a.elements, el);
     if (!again) throw new store.UserError("修改後找不到這個元素，未儲存。請到「原始碼」分頁修改。");
+    el = again;
+  }
+  if (newId) {
+    content = setShortNameText(content, el, newId, a.elements);
+    a = await store.analyzeProject(id, { file, content });
+    if (!a.ok) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
+    const again = a.elements.find((e) => e.shortName === newId && e.kind === el.kind);
+    if (!again) throw new store.UserError("修改編號後找不到這個元素，未儲存。");
     el = again;
   }
   const r = await store.saveFile(id, file, content, author(req), `修改${cat?.zh ?? "元素"}：${el.name}`);

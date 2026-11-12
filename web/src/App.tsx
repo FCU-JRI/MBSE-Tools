@@ -153,6 +153,8 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
   const [catId, setCatId] = useState("SystemRequirement");
   const [gateId, setGateId] = useState<string | null>(null);
   const [sel, setSel] = useState<Selection>({ type: "new", category: "SystemRequirement", parentId: null });
+  const [panes, setPanes] = useState(loadPanes);
+  const setPane = (p: Partial<Panes>) => setPanes((cur) => { const next = { ...cur, ...p }; savePanes(next); return next; });
   const reload = useCallback(() => api<View>(`/projects/${id}`).then(setView).catch((e) => setError(e.message)), [id]);
   useEffect(() => { reload(); }, [reload]);
 
@@ -177,14 +179,15 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
         <a className={`tbtn ${view.analysis.ok ? "" : "disabled"}`} href={view.analysis.ok ? `/api/projects/${id}/export.xlsx` : undefined}>匯出 Excel</a>
         {who}
       </header>
-      <div className={showSide ? "work" : "work wide"}>
-        <aside className="side left">
+      <div className="work">
+        <aside className="side left" style={{ width: panes.leftOpen ? panes.left : 0 }} hidden={!panes.leftOpen}>
           <Tree view={view} meta={meta} diagrams={diagrams} mode={mode} diagramId={def.id} catId={catId} gateId={gateId} selectedId={selectedId}
             onDiagram={(d) => { setDiagramId(d); setMode("diagram"); }}
             onCategory={(c) => { setCatId(c); setMode("table"); setSel({ type: "new", category: c, parentId: null }); }}
             onElement={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); if (mode !== "diagram" && mode !== "table") setMode("table"); }}
             onGate={(g) => { setGateId(g); setMode("gates"); }} />
         </aside>
+        <Resizer side="left" open={panes.leftOpen} width={panes.left} onWidth={(w) => setPane({ left: w })} onToggle={() => setPane({ leftOpen: !panes.leftOpen })} />
         <section className="center">
           {errors.length > 0 && mode !== "source" && (
             <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>
@@ -201,8 +204,44 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
           {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} /></div>}
           {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} onChanged={setView} /></div>}
         </section>
-        {showSide && <aside className="side right"><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}
+        {showSide && <Resizer side="right" open={panes.rightOpen} width={panes.right} onWidth={(w) => setPane({ right: w })} onToggle={() => setPane({ rightOpen: !panes.rightOpen })} />}
+        {showSide && <aside className="side right" style={{ width: panes.rightOpen ? panes.right : 0 }} hidden={!panes.rightOpen}><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}
       </div>
+    </div>
+  );
+}
+
+interface Panes { left: number; right: number; leftOpen: boolean; rightOpen: boolean }
+const DEFAULT_PANES: Panes = { left: 272, right: 320, leftOpen: true, rightOpen: true };
+// 側邊欄寬度是每個人自己的偏好，存在瀏覽器；讀不到就用預設值
+function loadPanes(): Panes {
+  try { return { ...DEFAULT_PANES, ...JSON.parse(localStorage.getItem("jri.panes") ?? "{}") }; } catch { return DEFAULT_PANES; }
+}
+function savePanes(p: Panes): void { try { localStorage.setItem("jri.panes", JSON.stringify(p)); } catch { /* 無法儲存時只在本次有效 */ } }
+
+/** 側邊欄與中間區域之間的分隔條：拖曳調整寬度，按鈕收合或展開；也可用方向鍵調整。 */
+function Resizer({ side, open, width, onWidth, onToggle }: { side: "left" | "right"; open: boolean; width: number; onWidth: (w: number) => void; onToggle: () => void }) {
+  const clamp = (w: number) => Math.min(640, Math.max(180, Math.round(w)));
+  const start = (ev: React.PointerEvent<HTMLDivElement>) => {
+    if (!open || (ev.target as HTMLElement).closest("button")) return;
+    ev.preventDefault();
+    const x0 = ev.clientX, w0 = width;
+    const el = ev.currentTarget;
+    el.setPointerCapture(ev.pointerId);
+    const move = (e: PointerEvent) => onWidth(clamp(w0 + (side === "left" ? e.clientX - x0 : x0 - e.clientX)));
+    const stop = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", stop); el.removeEventListener("pointercancel", stop); };
+    el.addEventListener("pointermove", move); el.addEventListener("pointerup", stop); el.addEventListener("pointercancel", stop);
+  };
+  const key = (e: React.KeyboardEvent) => {
+    if (!open) return;
+    const d = e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0;
+    if (d) { e.preventDefault(); onWidth(clamp(width + (side === "left" ? d : -d))); }
+  };
+  const zh = side === "left" ? "左側欄" : "右側欄";
+  const arrow = (side === "left") === open ? "‹" : "›";
+  return (
+    <div className={`resizer ${side} ${open ? "" : "closed"}`} role="separator" aria-orientation="vertical" aria-label={`調整${zh}寬度`} aria-valuenow={open ? width : 0} aria-valuemin={180} aria-valuemax={640} tabIndex={0} onPointerDown={start} onKeyDown={key}>
+      <button className="resizer-toggle" onClick={onToggle} aria-label={open ? `收合${zh}` : `展開${zh}`} title={open ? `收合${zh}` : `展開${zh}`}>{arrow}</button>
     </div>
   );
 }

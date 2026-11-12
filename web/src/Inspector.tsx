@@ -145,6 +145,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const els = view.analysis.elements;
   const byId = new Map(els.map((e) => [e.id, e]));
   const [name, setName] = useState(el.name);
+  const [sn, setSn] = useState(el.shortName ?? "");
   const [doc, setDoc] = useState(el.doc);
   const [attrs, setAttrs] = useState<Record<string, string>>({ ...el.attrs });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -152,16 +153,16 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [relKind, setRelKind] = useState("derive");
   const [relTo, setRelTo] = useState("");
-  useEffect(() => { setName(el.name); setDoc(el.doc); setAttrs({ ...el.attrs }); }, [el]);
+  useEffect(() => { setName(el.name); setSn(el.shortName ?? ""); setDoc(el.doc); setAttrs({ ...el.attrs }); }, [el]);
 
-  const dirty = name.trim() !== el.name || doc.trim() !== el.doc.trim() || (cat?.fields ?? []).some((f) => (attrs[f.name] ?? "").trim() !== (el.attrs[f.name] ?? "").trim());
+  const dirty = name.trim() !== el.name || sn.trim() !== (el.shortName ?? "") || doc.trim() !== el.doc.trim() || (cat?.fields ?? []).some((f) => (attrs[f.name] ?? "").trim() !== (el.attrs[f.name] ?? "").trim());
   const call = async (fn: () => Promise<View & { selected?: string }>, done?: string) => {
     setBusy(true); setMsg(null);
     try { const v = await fn(); onChanged(v); if (v.selected) setSel({ type: "element", id: v.selected }); if (done) setMsg({ ok: true, text: done }); return true; }
     catch (e) { setMsg({ ok: false, text: (e as Error).message }); return false; }
     finally { setBusy(false); }
   };
-  const save = (ev: FormEvent) => { ev.preventDefault(); call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, name, doc, attrs }), "已寫入。"); };
+  const save = (ev: FormEvent) => { ev.preventDefault(); call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, name, shortName: sn, doc, attrs }), "已寫入。"); };
   const remove = async () => { if (await call(() => api(`/projects/${pid}/elements/delete`, "POST", { id: el.id }))) setSel({ type: "new", category: el.category ?? "SystemRequirement", parentId: null }); };
 
   const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
@@ -174,7 +175,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
     <>
       <form className="section" onSubmit={save}>
         <div className="section-head"><h2 className="section-title">屬性</h2><span className="label">{cat?.zh ?? stereotype(el)}</span></div>
-        <div className="field"><span className="label">編號</span><span className="data">{el.shortName ?? "—"}</span></div>
+        <label className="field"><span className="label">編號</span><input className="input" value={sn} onChange={(e) => setSn(e.target.value)} placeholder={cat ? `${cat.prefix}-001` : ""} spellCheck={false} /></label>
         <label className="field"><span className="label">名稱</span><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="field"><span className="label">{cat?.keyword === "requirement" ? "內容" : "說明"}</span>
           <textarea className="input" rows={4} value={doc} onChange={(e) => setDoc(e.target.value)} />

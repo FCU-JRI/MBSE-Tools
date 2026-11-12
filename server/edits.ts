@@ -220,3 +220,27 @@ export function setRawAttrText(content: string, el: Element, name: string, expre
   const loc = el.attrLoc[name];
   return loc ? replaceLoc(content, loc, text) : insertInside(content, el, (indent) => `${indent}${text}\n`);
 }
+
+/** 修改編號（短名稱 <'...'>）。只改宣告那一行；原本沒有編號就加在名稱前面。 */
+export function setShortNameText(content: string, el: Element, shortName: string, elements: Element[]): string {
+  const sn = shortName.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,30}$/.test(sn)) throw new UserError("編號只能用英數、點、底線與連字號，最長 31 個字，且以英數開頭。");
+  if (elements.some((e) => e.id !== el.id && e.shortName === sn)) throw new UserError(`編號 ${sn} 已被使用。`);
+  if (!el.line) throw new UserError("找不到元素在檔案中的位置。");
+  const lines = content.split("\n");
+  const line = lines[el.line - 1] ?? "";
+  const tok = quote(el.name);
+  let next: string;
+  if (el.shortName) {
+    const old = `<'${el.shortName}'>`, bare = `<${el.shortName}>`;
+    if (line.includes(old)) next = line.replace(old, () => `<'${sn}'>`);
+    else if (line.includes(bare)) next = line.replace(bare, () => `<'${sn}'>`);
+    else throw new UserError("這個元素的編號寫法無法自動修改，請到「原始碼」分頁修改。");
+  } else {
+    const i = line.indexOf(tok);
+    if (i < 0) throw new UserError("這個元素的寫法無法自動加上編號，請到「原始碼」分頁修改。");
+    next = line.slice(0, i) + `<'${sn}'> ` + line.slice(i);
+  }
+  lines[el.line - 1] = next;
+  return lines.join("\n");
+}

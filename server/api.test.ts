@@ -409,3 +409,20 @@ test("圖的資料：使用案例圖畫出利害關係人之間與案例的連�
   assert.match(svg, /<ellipse/);
   assert.ok((svg.match(/<circle/g) ?? []).length >= 2, "火柴人的頭");
 });
+
+test("編號可以自訂：修改、補上、格式與重複檢查", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "t7", name: "編號測試", kind: "annual" });
+  let v7 = (await call(`${I}/api/projects/t7`)).data;
+  const f7 = (name: string, kind?: string) => v7.analysis.elements.find((e: any) => e.name === name && (!kind || e.kind === kind));
+  const patch = async (body: any) => { const r = await call(`${I}/api/projects/t7/elements`, "PATCH", body); if (r.data.analysis) v7 = r.data; return r; };
+  let r = await patch({ id: f7("遠地點高度").id, shortName: "RTC-REQ-010", doc: "火箭應到達 3000 m ± 100 m。" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.equal(f7("遠地點高度").shortName, "RTC-REQ-010");
+  assert.match(f7("遠地點高度").doc, /100 m/);
+  assert.ok(v7.analysis.relations.some((x: any) => x.kind === "verify" && x.to === f7("遠地點高度").id), "關係不受編號影響");
+  r = await patch({ id: f7("火箭", "PartDefinition").id, shortName: "SYS-001" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.equal(f7("火箭", "PartDefinition").shortName, "SYS-001");
+  assert.equal((await patch({ id: f7("總衝量").id, shortName: "RTC-REQ-010" })).status, 400, "重複");
+  assert.equal((await patch({ id: f7("總衝量").id, shortName: "有 空白" })).status, 400, "格式");
+});
