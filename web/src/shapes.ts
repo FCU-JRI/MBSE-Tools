@@ -1,6 +1,7 @@
 // SysML 1.7 圖形記法的繪製。畫面、PNG／SVG 匯出與審查報告共用這一份，確保三者一致。
 import { wrap } from "./model.ts";
 import type { GNode, Shape } from "./model.ts";
+import type { Annotation } from "./api.ts";
 
 export interface Palette { ink: string; bg: string; muted: string }
 export const SCREEN: Palette = { ink: "var(--ink)", bg: "var(--bg)", muted: "var(--ink-muted)" };
@@ -76,10 +77,28 @@ export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth 
   }
 }
 
+/** 標註：註解為折角便箋（SysML comment），外框為帶名稱的框線，文字為純文字。 */
+export function annotationSvg(a: Annotation, x: number, y: number, c: Palette, strokeWidth = 1): string {
+  const { w, h } = a;
+  if (a.type === "frame") {
+    return `<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" fill="none" stroke="${c.muted}" stroke-width="${strokeWidth}" stroke-dasharray="5 4"/>` +
+      text(x + 10, y + 19, one(a.text, Math.floor((w - 20) / 6.5)), 12.5, c.ink, `font-weight="500"`);
+  }
+  const lines = wrap(a.text, Math.max(4, Math.floor((w - 20) / 6.5)), Math.max(1, Math.floor((h - 14) / 17)));
+  if (a.type === "text") return lines.map((l, i) => text(x + 2, y + 16 + i * 17, l, 13, c.ink)).join("");
+  const f = 12; // 折角大小
+  return `<path d="M${x + 0.5} ${y + 0.5} H${x + w - f} L${x + w - 0.5} ${y + f} V${y + h - 0.5} H${x + 0.5} Z" fill="${c.bg}" stroke="${c.ink}" stroke-width="${strokeWidth}"/>` +
+    `<path d="M${x + w - f} ${y + 0.5} V${y + f} H${x + w - 0.5}" fill="none" stroke="${c.ink}" stroke-width="${strokeWidth}"/>` +
+    lines.map((l, i) => text(x + 10, y + 21 + i * 17, l, 12, c.ink)).join("");
+}
+
 /** 工具列用的小圖示（24×24）。 */
-export function iconSvg(shape: Shape | "select" | "line" | "dashed" | "diamond", c: Palette): string {
+export function iconSvg(shape: Shape | "select" | "line" | "dashed" | "diamond" | "note" | "frame" | "text", c: Palette): string {
   const s = `fill="none" stroke="${c.ink}" stroke-width="1.3"`;
   switch (shape) {
+    case "note": return `<path d="M3.5 4.5 H16 L20.5 9 V19.5 H3.5 Z" ${s} stroke-linejoin="round"/><path d="M16 4.5 V9 H20.5" ${s}/>`;
+    case "frame": return `<rect x="2.5" y="4.5" width="19" height="15" ${s} stroke-dasharray="3 2.5"/>`;
+    case "text": return `<path d="M5 7 V5 H19 V7 M12 5 V19 M9.5 19 H14.5" ${s}/>`;
     case "select": return `<path d="M6 4 L6 19 L10 15 L13 21 L15 20 L12 14 L18 14 Z" ${s} stroke-linejoin="round"/>`;
     case "actor": return stickFigure(12, 1, c, 0.34).replace(/stroke-width="1.2"/, `stroke-width="1.3"`);
     case "usecase": return `<ellipse cx="12" cy="12" rx="10" ry="6" ${s}/>`;

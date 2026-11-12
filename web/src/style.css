@@ -112,11 +112,11 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) 0; font
 .side { overflow-y: auto; padding: 0 var(--space-4) var(--space-8); min-height: 0; flex: none; }
 .side[hidden] { display: none; }
 /* 分隔條：本身就是側邊欄的邊線，可拖曳，中間有收合鈕 */
-.resizer { flex: none; width: 9px; position: relative; cursor: col-resize; touch-action: none; background: linear-gradient(var(--line), var(--line)) center / var(--stroke-hair) 100% no-repeat; }
+.resizer { flex: none; width: 13px; position: relative; cursor: col-resize; touch-action: none; background: linear-gradient(var(--line), var(--line)) center / var(--stroke-hair) 100% no-repeat; }
 .resizer:hover, .resizer:focus-visible { background-image: linear-gradient(var(--line-strong), var(--line-strong)); }
-.resizer.closed { cursor: default; width: 18px; }
-.resizer-toggle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 18px; height: 44px; padding: 0; border: var(--stroke-hair) solid var(--line); background: var(--bg); color: var(--ink-muted); cursor: pointer; font-size: 13px; line-height: 1; z-index: 3; }
-.resizer-toggle:hover { color: var(--ink); border-color: var(--line-strong); }
+.resizer.closed { cursor: default; width: 22px; }
+.resizer-toggle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 72px; padding: 0; border: var(--stroke-hair) solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; font-size: 16px; line-height: 1; z-index: 3; border-color: var(--line-strong); }
+.resizer-toggle:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .side .section:first-child .section-head { border-top: 0; }
 .center { min-width: 0; min-height: 0; display: flex; flex-direction: column; flex: 1; }
 .center-scroll { overflow: auto; padding: var(--space-4) var(--space-6) var(--space-8); flex: 1; min-height: 0; }
@@ -341,3 +341,21 @@ a:not(.tbtn):not(.btn) { color: var(--ink); text-underline-offset: 3px; }
 .proc-item .tid { font-size: 11px; letter-spacing: 0.06em; color: var(--ink-muted); }
 details > summary { list-style: none; cursor: pointer; } details > summary::-webkit-details-marker { display: none; }
 @media (max-width: 860px) { .proc { grid-template-columns: 1fr; gap: var(--space-4); } .proc-steps { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-4); } .proc-head { grid-column: 1 / -1; } .proc-question { font-size: 22px; line-height: 30px; } }
+
+/* 工具列：收合成只剩圖示；沒有圖形圖示的工具用一個字元 */
+.tool .glyph { flex: none; width: 20px; height: 20px; display: grid; place-items: center; font-style: normal; font-family: var(--font-grotesk); font-size: 13px; line-height: 1; }
+.toolbox.collapsed { width: 45px; padding-left: var(--space-1); padding-right: var(--space-1); }
+.toolbox.collapsed .tool > span, .toolbox.collapsed .tool-group > .label { display: none; }
+.toolbox.collapsed .tool { justify-content: center; padding: 2px 0; }
+/* 全部工具、加入既有項目：蓋在畫布左側的面板 */
+.canvas-panel { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; width: min(320px, 100%); overflow-y: auto; background: var(--bg); border-right: var(--stroke-hair) solid var(--line-strong); padding: var(--space-3) var(--space-3) var(--space-6); display: flex; flex-direction: column; gap: var(--space-2); }
+.canvas-panel .tool-group { border-top: var(--stroke-hair) solid var(--line); }
+.tool-row { display: flex; align-items: center; }
+.tool-row .tool { flex: 1; min-width: 0; }
+.pin { flex: none; border: 0; background: none; color: var(--ink-faint); cursor: pointer; font-family: var(--font-grotesk); font-size: 10px; letter-spacing: 0.06em; padding: var(--space-1); }
+.pin:hover, .pin[aria-pressed="true"] { color: var(--ink); }
+/* 標註調整大小的把手 */
+.note-resize-line.react-flow__resize-control { border-color: var(--ink-muted); }
+.note-resize-handle.react-flow__resize-control { width: 8px; height: 8px; border-radius: 0; background: var(--ink); border: 0; }
+.side .tbtn { margin-top: var(--space-2); }
+@media (max-width: 860px) { .toolbox.collapsed { width: auto; } .canvas-panel { width: 100%; } }

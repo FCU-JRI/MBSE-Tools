@@ -45,6 +45,9 @@ export async function api<T>(path: string, method = "GET", body?: Record<string,
   return data as T;
 }
 
+/** 圖上的標註：註解、外框、文字。只是說明，不進模型。 */
+export interface Annotation { id: string; type: "note" | "frame" | "text"; x: number; y: number; w: number; h: number; text: string }
+export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]> }
 export type Layout = Record<string, Record<string, { x: number; y: number }>>;
 
 export interface Me {

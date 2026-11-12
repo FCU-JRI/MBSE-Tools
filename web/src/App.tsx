@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, getAuthor, setAuthor } from "./api.ts";
-import type { Me, Meta, MeResponse, Project, View } from "./api.ts";
+import type { Diagrams, Me, Meta, MeResponse, Project, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
 import { diagramsOf, label, listOf } from "./model.ts";
 import type { DiagramDef } from "./model.ts";
@@ -216,7 +216,22 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
     if (view.project.template === "guided" && view.process.some((s) => s.state !== "done")) setMode("process");
   }, [view, autoMode]);
 
-  const diagrams = useMemo(() => (view ? diagramsOf(view.analysis) : []), [view]);
+  // 自訂圖與標註。畫面先更新，稍後一次存檔，避免每打一個字就送出一次
+  const [extra, setExtra] = useState<Diagrams>({ custom: [], notes: {} });
+  const extraTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { api<Diagrams>(`/projects/${id}/diagrams`).then(setExtra).catch(() => {}); }, [id]);
+  const saveExtra = useCallback((next: Diagrams) => {
+    setExtra(next);
+    if (readOnly) return;
+    if (extraTimer.current) clearTimeout(extraTimer.current);
+    extraTimer.current = setTimeout(() => { api(`/projects/${id}/diagrams`, "PUT", { diagrams: next }).catch((e) => setNotice((e as Error).message)); }, 400);
+  }, [id, readOnly]);
+  const addDiagram = (title: string) => {
+    const did = `custom:${Date.now().toString(36)}`;
+    saveExtra({ ...extra, custom: [...extra.custom, { id: did, title: title.trim().slice(0, 60) || "自訂圖", members: [] }] });
+    setDiagramId(did); setMode("diagram");
+  };
+  const diagrams = useMemo(() => (view ? diagramsOf(view.analysis, extra) : []), [view, extra]);
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><button className="tbtn primary" onClick={onHome}>回專案列表</button></div>;
   if (!view) return <div className="page"><p className="label">載入模型中</p></div>;
 
@@ -246,7 +261,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
       </header>
       <div className="work">
         {showTree && <aside className="side left" style={{ width: panes.leftOpen ? panes.left : 0 }} hidden={!panes.leftOpen}>
-          <Tree view={view} meta={meta} diagrams={diagrams} mode={mode} diagramId={def.id} catId={catId} gateId={gateId} selectedId={selectedId}
+          <Tree view={view} meta={meta} diagrams={diagrams} onAddDiagram={readOnly ? undefined : addDiagram} mode={mode} diagramId={def.id} catId={catId} gateId={gateId} selectedId={selectedId}
             onDiagram={(d) => { setDiagramId(d); setMode("diagram"); }}
             onCategory={(c) => { setCatId(c); setMode("table"); setSel({ type: "new", category: c, parentId: null }); }}
             onElement={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); if (mode !== "diagram" && mode !== "table") setMode("table"); }}
@@ -258,7 +273,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
             <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>
           )}
           {notice && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ flex: 1 }}>{notice}</span><button className="tbtn" onClick={() => setNotice("")}>關閉</button></div>}
-          {mode === "diagram" && <Diagram readOnly={readOnly} view={view} meta={meta} def={def} selectedId={selectedId} onSelectElement={selectElement}
+          {mode === "diagram" && <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
             onSelectEdge={(e) => e && setSel({ type: "edge", edge: e })} onNew={(c, parentId) => setSel({ type: "new", category: c, parentId })}
             onChanged={(v) => { setView(v); setNotice(""); }} onError={setNotice} />}
           {mode === "table" && <div className="center-scroll"><TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={selectElement} /></div>}
@@ -315,14 +330,16 @@ function Resizer({ side, open, width, onWidth, onToggle }: { side: "left" | "rig
 
 interface TreeProps {
   view: View; meta: Meta; diagrams: DiagramDef[]; mode: Mode; diagramId: string; catId: string; gateId: string | null; selectedId: string | null;
-  onDiagram: (id: string) => void; onCategory: (id: string) => void; onElement: (id: string, category: string | null) => void; onGate: (id: string) => void;
+  onDiagram: (id: string) => void; onAddDiagram?: (title: string) => void; onCategory: (id: string) => void; onElement: (id: string, category: string | null) => void; onGate: (id: string) => void;
 }
 
 /** 左側欄：圖、模型樹、節點進度。 */
-function Tree({ view, meta, diagrams, mode, diagramId, catId, gateId, selectedId, onDiagram, onCategory, onElement, onGate }: TreeProps) {
+function Tree({ view, meta, diagrams, onAddDiagram, mode, diagramId, catId, gateId, selectedId, onDiagram, onCategory, onElement, onGate }: TreeProps) {
   const [open, setOpen] = useState<Record<string, boolean>>({ requirements: true, structure: true });
   const els = view.analysis.elements;
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  const [naming, setNaming] = useState(false);
+  const finish = (v: string) => { setNaming(false); if (v.trim()) onAddDiagram?.(v); };
   return (
     <>
       <div className="section">
@@ -332,6 +349,10 @@ function Tree({ view, meta, diagrams, mode, diagramId, catId, gateId, selectedId
             <span className="tid">{d.code}</span><span className="tn">{d.title}</span>
           </button></li>
         ))}</ul>
+        {onAddDiagram && (naming
+          ? <input className="input" autoFocus placeholder="圖的名稱，例如：任務總覽" maxLength={60} aria-label="新自訂圖的名稱"
+              onKeyDown={(e) => { if (e.key === "Enter") finish((e.target as HTMLInputElement).value); if (e.key === "Escape") setNaming(false); }} onBlur={(e) => finish(e.target.value)} />
+          : <button className="tbtn" onClick={() => setNaming(true)} title="自己決定放哪些項目的圖，任何類別都能放在一起">＋ 新增自訂圖</button>)}
       </div>
       <div className="section">
         <div className="section-head"><h2 className="section-title">模型</h2><span className="label">{els.filter((e) => e.category).length}</span></div>

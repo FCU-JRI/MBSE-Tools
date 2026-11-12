@@ -336,6 +336,8 @@ app.put("/api/projects/:id/layout", wrap(async (req, res) => {
   await store.writeLayout(pid(req), req.body?.layout ?? {});
   res.json({ saved: true });
 }));
+app.get("/api/projects/:id/diagrams", wrap(async (req, res) => res.json(await store.readDiagrams(pid(req)))));
+app.put("/api/projects/:id/diagrams", wrap(async (req, res) => res.json(await store.writeDiagrams(pid(req), req.body?.diagrams))));
 
 app.post("/api/projects/:id/manual", auth.need(auth.can.confirm, "人工確認需要責任工程師以上的權限。"), wrap(async (req, res) => {
   await store.setManual(pid(req), String(req.body.key), req.body.done === true, author(req));

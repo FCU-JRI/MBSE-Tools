@@ -301,6 +301,53 @@ export async function writeLayout(id: string, layout: Layout): Promise<void> {
   await fs.writeFile(path.join(dirOf(id), "layout.json"), JSON.stringify(clean, null, 1) + "\n", "utf8");
 }
 
+/** 自訂圖與圖上的標註。自訂圖只記錄「放了哪些模型項目」；標註（註解、外框、文字）只是說明，不進模型。 */
+export interface Annotation { id: string; type: "note" | "frame" | "text"; x: number; y: number; w: number; h: number; text: string }
+export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]> }
+
+export async function readDiagrams(id: string): Promise<Diagrams> {
+  const raw = await fs.readFile(path.join(dirOf(id), "diagrams.json"), "utf8").catch(() => "{}");
+  try { return cleanDiagrams(JSON.parse(raw)); } catch { return { custom: [], notes: {} }; }
+}
+
+function cleanDiagrams(input: unknown): Diagrams {
+  const src = (input ?? {}) as { custom?: unknown; notes?: unknown };
+  const str = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+  const num = (v: unknown, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(Number(v) || 0)));
+  const out: Diagrams = { custom: [], notes: {} };
+  const seen = new Set<string>();
+  for (const c of Array.isArray(src.custom) ? src.custom.slice(0, 50) : []) {
+    const cid = str(c?.id, 40);
+    if (!/^custom:[A-Za-z0-9_-]{1,32}$/.test(cid) || seen.has(cid)) continue;
+    seen.add(cid);
+    const members = Array.isArray(c?.members) ? [...new Set<string>(c.members.filter((m: unknown) => typeof m === "string" && m.length <= 400))].slice(0, 500) : [];
+    out.custom.push({ id: cid, title: str(c?.title, 60).trim() || "自訂圖", members });
+  }
+  if (src.notes && typeof src.notes === "object") {
+    for (const [diagram, list] of Object.entries(src.notes as Record<string, unknown>).slice(0, 200)) {
+      if (diagram.length > 400 || !Array.isArray(list)) continue;
+      const ids = new Set<string>();
+      const clean: Annotation[] = [];
+      for (const n of list.slice(0, 200)) {
+        const nid = str(n?.id, 40);
+        if (!/^note:[A-Za-z0-9_-]{1,32}$/.test(nid) || ids.has(nid)) continue;
+        if (n?.type !== "note" && n?.type !== "frame" && n?.type !== "text") continue;
+        ids.add(nid);
+        clean.push({ id: nid, type: n.type, x: num(n.x, -100000, 100000), y: num(n.y, -100000, 100000), w: num(n.w, 48, 4000), h: num(n.h, 24, 4000), text: str(n.text, 500) });
+      }
+      if (clean.length > 0) out.notes[diagram] = clean;
+    }
+  }
+  return out;
+}
+
+export async function writeDiagrams(id: string, input: unknown): Promise<Diagrams> {
+  await readProject(id);
+  const clean = cleanDiagrams(input);
+  await fs.writeFile(path.join(dirOf(id), "diagrams.json"), JSON.stringify(clean, null, 1) + "\n", "utf8");
+  return clean;
+}
+
 /** 封存專案：整個資料夾移到 archive，不真的刪除。必須輸入專案名稱確認。 */
 export async function archiveProject(id: string, confirmName: string): Promise<string> {
   const p = await readProject(id);
@@ -323,12 +370,12 @@ export async function undoLast(id: string, author: string): Promise<void> {
   // 版面的提交不算一步，往前找到最近一次模型修改
   for (let i = 0; i < 5; i++) {
     const names = (await git(dir, "show", "--name-only", "--pretty=format:", target)).split("\n").map((f) => f.trim()).filter(Boolean);
-    if (names.length > 0 && names.every((f) => f === "layout.json" || f.startsWith("lib/"))) target += "~1"; else break;
+    if (names.length > 0 && names.every((f) => f === "layout.json" || f === "diagrams.json" || f.startsWith("lib/"))) target += "~1"; else break;
   }
   const files = (await git(dir, "show", "--name-only", "--pretty=format:", target)).split("\n").map((f) => f.trim()).filter(Boolean);
   const parents = (await git(dir, "rev-list", "--parents", "-n", "1", target)).split(" ").length - 1;
   if (parents !== 1) throw new UserError("上一步是建立專案或合併分支，不能復原。");
-  if (files.length === 0 || !files.every((f) => f.startsWith("model/") || f.startsWith("lib/") || f === "layout.json")) {
+  if (files.length === 0 || !files.every((f) => f.startsWith("model/") || f.startsWith("lib/") || f === "layout.json" || f === "diagrams.json")) {
     throw new UserError("上一步不是模型的修改（可能是簽核、時程或模擬），不能在這裡復原。");
   }
   const subject = await git(dir, "log", "-1", "--pretty=%s", target);

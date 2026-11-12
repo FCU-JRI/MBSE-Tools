@@ -516,3 +516,16 @@ test("三種建立方式：空白、範本、流程範本；流程範本不可�
   const skill = await fs.readFile(path.join(home, "projects", "g1", ".claude", "skills", "jri-mbse", "SKILL.md"), "utf8");
   assert.match(skill, /從利害關係人開始/);
 });
+
+test("自訂圖與標註：可儲存讀回，不合格的內容會被濾掉", async () => {
+  const base = `${I}/api/projects/t1/diagrams`;
+  assert.deepEqual((await call(base)).data, { custom: [], notes: {} });
+  const r = await call(base, "PUT", { diagrams: {
+    custom: [{ id: "custom:a1", title: " 總覽 ", members: ["x", "x", "y", 5] }, { id: "bad id", title: "x", members: [] }],
+    notes: { "custom:a1": [{ id: "note:n1", type: "frame", x: 10.4, y: 20, w: 5, h: 99999, text: "提案委員會" }, { id: "note:n2", type: "script", x: 0, y: 0, w: 100, h: 100, text: "" }] },
+  } });
+  assert.equal(r.status, 200);
+  const d = (await call(base)).data;
+  assert.deepEqual(d.custom, [{ id: "custom:a1", title: "總覽", members: ["x", "y"] }]);
+  assert.deepEqual(d.notes["custom:a1"], [{ id: "note:n1", type: "frame", x: 10, y: 20, w: 48, h: 4000, text: "提案委員會" }]);
+});
