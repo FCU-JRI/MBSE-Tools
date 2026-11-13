@@ -363,3 +363,13 @@ details > summary { list-style: none; cursor: pointer; } details > summary::-web
 .react-flow__node-pkg { pointer-events: none !important; }
 .canvas-hint .tbtn { margin: 0; }
 @media (max-width: 860px) { .toolbox.collapsed { width: auto; } .canvas-panel { width: 100%; } }
+
+/* 右鍵選單與框選 */
+.ctx-menu { position: absolute; z-index: 8; min-width: 176px; display: flex; flex-direction: column; background: var(--bg); border: var(--stroke-hair) solid var(--line-strong); padding: var(--space-1); }
+.ctx-menu button { border: 0; background: none; color: var(--ink); text-align: left; padding: 6px var(--space-2); font-family: var(--font-sans); font-size: 13px; cursor: pointer; }
+.ctx-menu button:hover:not(:disabled) { background: var(--surface-2); }
+.ctx-menu button:disabled { color: var(--ink-faint); cursor: not-allowed; }
+.ctx-menu button.danger { color: var(--danger); }
+.ctx-menu .caption { padding: 4px var(--space-2); }
+.ctx-menu hr { border: 0; border-top: var(--stroke-hair) solid var(--line); margin: var(--space-1) 0; }
+.react-flow__selection, .react-flow__nodesselection-rect { background: rgba(127, 127, 127, 0.12); border: 1px dashed var(--ink-muted); }

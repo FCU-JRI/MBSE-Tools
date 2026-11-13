@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Background, BackgroundVariant, ConnectionMode, Handle, MarkerType, NodeResizer, Position, ReactFlow, ReactFlowProvider, ViewportPortal, useEdgesState, useNodesState, useReactFlow } from "@xyflow/react";
+import { Background, BackgroundVariant, ConnectionMode, Handle, MarkerType, NodeResizer, Position, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, useEdgesState, useNodesState, useReactFlow, useStoreApi } from "@xyflow/react";
 import type { Connection, Edge, Node, NodeProps } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
@@ -183,6 +183,8 @@ function Tool({ on, onClick, icon, glyph, text, sub, disabled, title, danger }: 
 // 每個人自己的偏好，存在瀏覽器；讀不到就用預設值
 const load = <T,>(key: string, fallback: T): T => { try { const v = localStorage.getItem(key); return v ? { ...fallback, ...JSON.parse(v) } : fallback; } catch { return fallback; } };
 const store = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* 無法儲存時只在本次有效 */ } };
+/** 觸控裝置：單指拖曳維持移動畫面，不做框選 */
+const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 const newId = (prefix: string) => `${prefix}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const linkIconOf = (k: string): IconName => (k === "compose" ? "diamond" : ["derive", "refine", "trace"].includes(k) ? "dashed" : "line");
 type Moved = View & { moved: Record<string, string>; packageId: string | null; layout: Layout; diagrams: Diagrams };
@@ -190,6 +192,7 @@ type Moved = View & { moved: Record<string, string>; packageId: string | null; l
 function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError }: DiagramProps) {
   const pid = view.project.id;
   const flow = useReactFlow();
+  const rf = useStoreApi();
   const custom = def.kind === "custom";
   const [layout, setLayout] = useState<Layout | null>(null);
   const catPkgs = useMemo(() => new Set(meta.categories.map((c) => c.pkg)), [meta]);
@@ -200,6 +203,13 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const [tool, setTool] = useState<string>("select"); // "select" 或連線種類
   const [selEdge, setSelEdge] = useState<GEdge | null>(null);
   const [selNote, setSelNote] = useState<string | null>(null);
+  /** 同時選取兩個以上時的節點（元素、套件、草稿標註都算） */
+  const [multi, setMulti] = useState<string[]>([]);
+  const multiRef = useRef<string[]>([]);
+  /** 右鍵選單：位置相對於畫布；ask 為 true 時顯示刪除的確認 */
+  const [menu, setMenu] = useState<null | { x: number; y: number; on: "pane" | "item"; ask?: boolean }>(null);
+  /** 「放進新套件」：套件建立後要搬進去的項目 */
+  const pkgFor = useRef<string[] | null>(null);
   const [confirm, setConfirm] = useState<null | "selection" | "diagram">(null);
   const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg">(null);
   const [withDraft, setWithDraft] = useState(() => load("jri.export", { draft: false }).draft);
@@ -225,7 +235,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const linkTools: LinkTool[] = custom ? ALL_LINKS.filter((t) => pins.links.includes(t.kind)) : allowedLinks;
 
   useEffect(() => { api<Layout>(`/projects/${pid}/layout`).then((l) => { layoutRef.current = l; setLayout(l); }).catch(() => setLayout({})); }, [pid]);
-  useEffect(() => { setTool("select"); setSelEdge(null); setSelNote(null); setConfirm(null); setPanel(null); pending.current = null; }, [def.id]);
+  useEffect(() => { setTool("select"); setSelEdge(null); setSelNote(null); setConfirm(null); setPanel(null); setMenu(null); multiRef.current = []; setMulti([]); pending.current = null; }, [def.id]);
 
   const vertical = graph.direction === "TB" || graph.direction === "BT";
   const straight = false; // 一律走直角折線
@@ -287,13 +297,14 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
       }
       saveLayout({ ...layoutRef.current, [def.id]: pos });
     }
+    const isSel = (id: string, single: boolean) => (multiRef.current.length ? multiRef.current.includes(id) : single);
     const els: FlowNode[] = graph.nodes.map((g0) => {
       const p = pos[g0.id];
-      if (g0.shape !== "package") return { id: g0.id, type: "el", position: { x: p.x, y: p.y }, data: { g: g0 }, selected: g0.id === selectedId, selectable: !!g0.el, width: g0.width, height: g0.height };
+      if (g0.shape !== "package") return { id: g0.id, type: "el", position: { x: p.x, y: p.y }, data: { g: g0 }, selected: isSel(g0.id, g0.id === selectedId), selectable: !!g0.el, width: g0.width, height: g0.height };
       const g = { ...g0, width: p.w ?? g0.width, height: p.h ?? g0.height };
-      return { id: g.id, type: "pkg", position: { x: p.x, y: p.y }, data: { g, editable: !readOnly, onResize: onPkgResize }, selected: g.id === selectedId, connectable: false, width: g.width, height: g.height, zIndex: -1 };
+      return { id: g.id, type: "pkg", position: { x: p.x, y: p.y }, data: { g, editable: !readOnly, onResize: onPkgResize }, selected: isSel(g.id, g.id === selectedId), connectable: false, width: g.width, height: g.height, zIndex: -1 };
     });
-    const marks: FlowNode[] = notes.map((a) => ({ id: a.id, type: "note", position: { x: a.x, y: a.y }, data: { a, editable: !readOnly, onResize }, selected: a.id === selNote, draggable: !readOnly, connectable: false, width: a.w, height: a.h, zIndex: a.type === "frame" ? -1 : 2 }));
+    const marks: FlowNode[] = notes.map((a) => ({ id: a.id, type: "note", position: { x: a.x, y: a.y }, data: { a, editable: !readOnly, onResize }, selected: isSel(a.id, a.id === selNote), draggable: !readOnly, connectable: false, width: a.w, height: a.h, zIndex: a.type === "frame" ? -1 : 2 }));
     setNodes([...marks.filter((n) => n.data.a!.type === "frame"), ...els, ...marks.filter((n) => n.data.a!.type !== "frame")]);
     setEdges(graph.edges.map((e) => toEdge(e, boxes(els), vertical, straight)));
     // selectedId 的變化由下一個 effect 處理，避免重排版面
@@ -301,9 +312,22 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   }, [graph, layout, def.id, notes]);
 
   useEffect(() => {
-    const want = (n: FlowNode) => (n.data.a ? n.id === selNote : n.id === selectedId);
+    const want = (n: FlowNode) => (multiRef.current.length ? multiRef.current.includes(n.id) : n.data.a ? n.id === selNote : n.id === selectedId);
     setNodes((ns) => ns.map((n) => (n.selected === want(n) ? n : { ...n, selected: want(n) })));
   }, [selectedId, selNote, setNodes]);
+
+  // 框選或 Ctrl／Shift 加選：兩個以上就進入多選，右側不顯示單一項目
+  const onSelectionChange = useCallback(({ nodes: ns }: { nodes: Node[] }) => {
+    const ids = ns.map((n) => n.id);
+    const next = ids.length > 1 ? ids : [];
+    const was = multiRef.current;
+    if (next.join("|") === was.join("|")) return;
+    multiRef.current = next; setMulti(next);
+    if (next.length) { setSelEdge(null); setSelNote(null); setConfirm(null); onSelectEdge(null); onSelectElement(null); return; }
+    // 從多選減到剩一個：當成單選
+    const one = ns[0] as FlowNode | undefined;
+    if (one?.data.a) setSelNote(one.id); else if (one?.data.g?.el) onSelectElement(one.id);
+  }, [onSelectEdge, onSelectElement]);
 
   const act = useCallback(async (fn: () => Promise<View>) => {
     setBusy(true);
@@ -391,6 +415,28 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   }, [readOnly, tool, linkTools, pid, act]);
 
   const clearSel = () => { setSelEdge(null); setSelNote(null); setConfirm(null); onSelectEdge(null); };
+  /** 結束多選，只留下指定的節點（或都不選） */
+  const only = (id: string | null) => {
+    multiRef.current = []; setMulti([]);
+    rf.setState({ nodesSelectionActive: false });
+    setNodes((ns) => ns.map((n) => (n.selected === (n.id === id) ? n : { ...n, selected: n.id === id })));
+  };
+  const pick = (n: FlowNode) => {
+    if (n.data.a) { setSelEdge(null); setConfirm(null); onSelectEdge(null); onSelectElement(null); setSelNote(n.id); return; }
+    if (!n.data.g?.el) return;
+    clearSel(); onSelectElement(n.id);
+  };
+  const openMenu = (e: { clientX: number; clientY: number; preventDefault: () => void }, on: "pane" | "item") => {
+    e.preventDefault();
+    const r = canvasRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setPanel(null);
+    setMenu({ x: Math.max(4, Math.min(e.clientX - r.left, r.width - 200)), y: Math.max(4, Math.min(e.clientY - r.top, r.height - 220)), on });
+  };
+  const selectAll = () => {
+    // 只改節點的選取狀態；多選的狀態由 onSelectionChange 統一接手
+    setNodes((ns) => ns.map((n) => (n.selectable === false || n.selected ? n : { ...n, selected: true })));
+  };
   const newElement = (c: string) => {
     setTool("select"); setPanel(null); setSelNote(null);
     if (custom) pending.current = new Set(modelItems(view.analysis.elements).map((e) => e.id));
@@ -423,9 +469,19 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   };
   const addPackage = async (name: string) => {
     setPanel(null);
+    const ids = pkgFor.current; pkgFor.current = null;
     if (!name.trim()) return;
-    const id = await createPackage(name, { ...center(360, 240), w: 360, h: 240 });
-    if (id) { clearSel(); onSelectElement(id); }
+    // 「放進新套件」：框包住選取的項目，建立後把它們搬進去
+    const inside = ids ? (flow.getNodes() as FlowNode[]).filter((n) => ids.includes(n.id)) : [];
+    const spot = inside.length ? boxAround(inside.map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g!.width, h: n.data.g!.height }))) : { ...center(360, 240), w: 360, h: 240 };
+    const id = await createPackage(name, spot);
+    if (!id) return;
+    if (inside.length) {
+      multiRef.current = []; setMulti([]);
+      const r = await moveTo(inside.map((n) => n.id), id);
+      if (r?.packageId && r.packageId !== id) { place(r.packageId, spot); clearSel(); onSelectElement(r.packageId); return; }
+    }
+    clearSel(); onSelectElement(id);
   };
   /** 草稿外框轉成套件：框裡的項目一起搬進去。 */
   const frameToPackage = async (a: Annotation) => {
@@ -465,18 +521,51 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
 
   const selectedEl = selectedId ? view.analysis.elements.find((e) => e.id === selectedId) : undefined;
   const selectedNode = selectedId ? graph.nodes.find((n) => n.id === selectedId) : undefined;
+  // 多選時：可以搬動的模型項目（套件裡外的元素）、要刪的草稿標註
+  const multiNodes = multi.map((id) => graph.nodes.find((n) => n.id === id)).filter((n): n is GNode => !!n?.el);
+  const multiNotes = multi.filter((id) => notes.some((n) => n.id === id));
+  const multiItems = multiNodes.filter((n) => n.shape !== "package" && n.shape !== "comment" && byId.get(n.el!.owner ?? "")?.kind === "Package");
+  const outIds = multi.length ? multiNodes.filter((n) => n.parent).map((n) => n.id) : selectedNode?.parent ? [selectedNode.id] : [];
+  /** 把選取的項目移回上一層套件，排在原本套件的右邊。 */
   const moveOut = async () => {
-    if (!selectedNode?.parent) return;
-    const box = (flow.getNodes() as FlowNode[]).find((n) => n.id === selectedNode.parent);
-    const r = await moveTo([selectedNode.id], null);
-    const nid = r?.moved[selectedNode.id];
-    if (r && nid && box) place(nid, { x: snap(box.position.x + (box.data.g?.width ?? 0) + 24), y: snap(box.position.y + PKG_TAB) });
+    if (outIds.length === 0) return;
+    const all = flow.getNodes() as FlowNode[];
+    const from = new Map(outIds.map((id) => [id, all.find((n) => n.id === graph.nodes.find((g) => g.id === id)?.parent)]));
+    multiRef.current = []; setMulti([]);
+    const r = await moveTo(outIds, null);
+    if (!r) return;
+    const next = { ...(layoutRef.current[def.id] ?? {}) };
+    const used = new Map<string, number>();
+    for (const id of outIds) {
+      const nid = r.moved[id], box = from.get(id);
+      if (!nid || !box) continue;
+      const k = used.get(box.id) ?? 0; used.set(box.id, k + 1);
+      next[nid] = { ...next[nid], x: snap(box.position.x + (box.data.g?.width ?? 0) + 24), y: snap(box.position.y + PKG_TAB + k * 96) };
+    }
+    applyLayout({ ...layoutRef.current, [def.id]: next });
   };
   const note = selNote ? notes.find((n) => n.id === selNote) : undefined;
   const onThisDiagram = !!selectedEl && graph.nodes.some((n) => n.id === selectedEl.id);
-  const canDelete = !readOnly && !!(note || (selEdge && selEdge.remove && selEdge.kind !== "verify") || (selectedEl && !selectedEl.shared));
+  const multiDel = multiNodes.filter((n) => !n.el!.shared && !(n.shape === "package" && catPkgs.has(n.el!.name)));
+  const delCount = multiDel.length + multiNotes.length;
+  const canDelete = !readOnly && (multi.length ? delCount > 0 : !!(note || (selEdge && selEdge.remove && selEdge.kind !== "verify") || (selectedEl && !selectedEl.shared)));
   const doDelete = async () => {
     setConfirm(null);
+    if (multi.length) {
+      const ids = [...multiDel].sort((a, b) => Number(a.shape === "package") - Number(b.shape === "package")).map((n) => n.id); // 套件最後刪，裡面要先清空
+      if (multiNotes.length) setNotes((l) => l.filter((n) => !multiNotes.includes(n.id)));
+      multiRef.current = []; setMulti([]);
+      setBusy(true);
+      try {
+        let last: View | null = null;
+        for (const id of ids) {
+          if (last && !last.analysis.elements.some((e) => e.id === id)) continue; // 已經跟著上層一起刪掉
+          last = await api<View>(`/projects/${pid}/elements/delete`, "POST", { id });
+          onChanged(last);
+        }
+      } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+      return;
+    }
     if (note) { setNotes((l) => l.filter((n) => n.id !== note.id)); setSelNote(null); return; }
     if (selEdge?.remove) {
       const r = selEdge.remove;
@@ -522,7 +611,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const onKey = (e: React.KeyboardEvent) => {
     if ((e.target as HTMLElement).closest("input,textarea,select")) return;
     if ((e.key === "Delete" || e.key === "Backspace") && canDelete) { e.preventDefault(); setConfirm("selection"); }
-    if (e.key === "Escape") { setTool("select"); setConfirm(null); setPanel(null); }
+    if (e.key === "Escape") { setTool("select"); setConfirm(null); setPanel(null); setMenu(null); pkgFor.current = null; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") { e.preventDefault(); selectAll(); }
   };
 
   const catOf = (c: string | null) => meta.categories.find((x) => x.id === c);
@@ -539,7 +629,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         <div className="tool-group">
           <span className="label">{def.code} · {def.title}</span>
           <Tool onClick={toggleCollapsed} glyph={collapsed ? "»" : "«"} text={collapsed ? "展開工具列" : "收合工具列"} />
-          <Tool on={tool === "select"} onClick={() => setTool("select")} icon="select" text="選取" sub="Shift 拖曳可框選" title="點選、拖曳移動。按住 Shift 拖曳可以框選多個一起移動；按住 Ctrl 點選可以加選。" />
+          <Tool on={tool === "select"} onClick={() => setTool("select")} icon="select" text="選取" sub="拖曳空白處框選" title="點選、拖曳移動。在空白處拖曳可以框選多個一起移動；按住 Ctrl 或 Shift 點選可以加選；Ctrl+A 全選。按右鍵有快速功能。要移動畫面：按住滑鼠右鍵或中鍵拖曳，或按住空白鍵拖曳。" />
         </div>
         {!readOnly && elTools.length > 0 && (
           <div className="tool-group">
@@ -572,8 +662,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
             <span className="label">編輯</span>
             {confirm === "selection"
               ? <><Tool danger onClick={doDelete} disabled={busy} glyph="✓" text="確定刪除" /><Tool onClick={() => setConfirm(null)} glyph="×" text="取消" /></>
-              : <Tool disabled={!canDelete || busy} onClick={() => setConfirm("selection")} glyph="✕" text="刪除選取" title={note ? "刪除選取的標註（Delete 鍵）" : "從模型刪除選取的元素或連線（Delete 鍵）"} />}
-            {selectedNode?.parent && <Tool disabled={busy} onClick={moveOut} glyph="⇱" text="移出套件" title="把選取的項目移回上一層套件（也可以直接把它拖出框外）" />}
+              : <Tool disabled={!canDelete || busy} onClick={() => setConfirm("selection")} glyph="✕" text={multi.length ? `刪除選取（${delCount}）` : "刪除選取"} title={note ? "刪除選取的標註（Delete 鍵）" : "從模型刪除選取的元素或連線（Delete 鍵）"} />}
+            {outIds.length > 0 && <Tool disabled={busy} onClick={moveOut} glyph="⇱" text="移出套件" title="把選取的項目移回上一層套件（也可以直接把它拖出框外）" />}
             {custom && <Tool disabled={!onThisDiagram} onClick={() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); }} glyph="−" text="移出此圖" title="只從這張圖拿掉，模型裡仍然保留" />}
             <Tool disabled={busy} onClick={undo} glyph="↶" text="復原上一步" title="還原上一次對模型的修改；再按一次會還原這次的還原" />
           </div>
@@ -627,8 +717,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           <div className="canvas-hint">
             <span className="tag">套件</span>
             <input className="input" style={{ width: 240 }} placeholder="套件名稱，例如：射場作業" maxLength={60} aria-label="新套件的名稱" autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") addPackage((e.target as HTMLInputElement).value); if (e.key === "Escape") setPanel(null); }} />
-            <span className="caption">按 Enter 建立</span>
+              onKeyDown={(e) => { if (e.key === "Enter") addPackage((e.target as HTMLInputElement).value); if (e.key === "Escape") { pkgFor.current = null; setPanel(null); } }} />
+            <span className="caption">{pkgFor.current ? `按 Enter 建立，並把選取的 ${pkgFor.current.length} 個項目放進去` : "按 Enter 建立"}</span>
           </div>
         )}
         {panel === "rename" && (
@@ -694,6 +784,38 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
               ))}</ul>)}
           </div>
         )}
+        {menu && (() => {
+          const close = () => setMenu(null);
+          const run = (fn: () => void) => () => { close(); fn(); };
+          const Item = ({ text, onClick, disabled, danger }: { text: string; onClick: () => void; disabled?: boolean; danger?: boolean }) => <button role="menuitem" className={danger ? "danger" : ""} disabled={disabled} onClick={onClick}>{text}</button>;
+          const delText = multi.length ? `刪除 ${delCount} 個` : selEdge ? "刪除連線" : note ? "刪除標註" : "刪除";
+          const commentable = !multi.length && !!selectedEl && onThisDiagram && selectedEl.kind !== "Comment" && selectedEl.kind !== "Package";
+          return (
+            <div className="ctx-menu" role="menu" style={{ left: menu.x, top: menu.y }} onContextMenu={(e) => e.preventDefault()}>
+              {menu.ask ? <>
+                <span className="caption">{multi.length ? `確定刪除選取的 ${delCount} 個？` : "確定刪除？"}</span>
+                <Item danger text="確定刪除" onClick={run(doDelete)} />
+                <Item text="取消" onClick={close} />
+              </> : menu.on === "pane" ? <>
+                {!readOnly && elTools.map((c) => <Item key={c} text={`新增${catOf(c)?.zh ?? c}`} onClick={run(() => newElement(c))} />)}
+                {!readOnly && <Item text="新增套件" onClick={run(() => { pkgFor.current = null; setPanel("pkg"); })} />}
+                {!readOnly && <Item text="新增註解" onClick={run(() => addComment("註解"))} />}
+                {!readOnly && <hr />}
+                <Item text="全選　Ctrl+A" onClick={run(selectAll)} />
+                <Item text="全覽" onClick={run(() => flow.fitView({ padding: 0.15, maxZoom: 1 }))} />
+                <Item text="自動排列" onClick={run(resetLayout)} />
+              </> : readOnly ? <Item text="全覽" onClick={run(() => flow.fitView({ padding: 0.15, maxZoom: 1 }))} /> : <>
+                {multi.length > 0 && <span className="caption">已選取 {multi.length} 個</span>}
+                {commentable && <Item text="加上註解" onClick={run(() => addComment("註解", undefined, selectedEl!.id))} />}
+                {multiItems.length > 0 && <Item text="放進新套件" onClick={run(() => { pkgFor.current = multiItems.map((n) => n.id); setPanel("pkg"); })} />}
+                {outIds.length > 0 && <Item text="移出套件" disabled={busy} onClick={run(moveOut)} />}
+                {note?.type === "frame" && <Item text="轉成套件" disabled={busy} onClick={run(() => frameToPackage(note))} />}
+                {custom && !multi.length && onThisDiagram && <Item text="移出此圖" onClick={run(() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); })} />}
+                <Item danger text={delText} disabled={!canDelete || busy} onClick={() => setMenu({ ...menu, ask: true })} />
+              </>}
+            </div>
+          );
+        })()}
         <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
           <defs>
             <marker id="jri-diamond" viewBox="0 0 20 12" markerWidth="20" markerHeight="12" refX="1" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
@@ -711,13 +833,14 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
             onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
             onSelectionDragStart={(e, ns) => onNodeDragStart(e, ns[0] as FlowNode, ns as FlowNode[])} onSelectionDrag={(e, ns) => onNodeDrag(e, ns[0] as FlowNode, ns as FlowNode[])} onSelectionDragStop={(e, ns) => onNodeDragStop(e, ns[0] as FlowNode, ns as FlowNode[])} onConnect={onConnect} connectionMode={ConnectionMode.Loose} nodesConnectable={!readOnly} deleteKeyCode={null}
             snapToGrid snapGrid={[SNAP, SNAP]} fitView fitViewOptions={{ padding: 0.22, maxZoom: 1 }} minZoom={0.15}
-            onNodeClick={(_e, n) => {
-              if (n.data.a) { setSelEdge(null); setConfirm(null); onSelectEdge(null); onSelectElement(null); setSelNote(n.id); return; }
-              if (!n.data.g?.el) return;
-              clearSel(); onSelectElement(n.id);
-            }}
+            onSelectionChange={onSelectionChange} selectionOnDrag={!coarse} panOnDrag={coarse ? true : [1, 2]} selectionMode={SelectionMode.Full} multiSelectionKeyCode={["Control", "Meta", "Shift"]}
+            onNodeClick={(e, n) => { setMenu(null); if (e.ctrlKey || e.metaKey || e.shiftKey) return; pick(n); }}
+            onNodeContextMenu={(e, n) => { if (!multiRef.current.includes(n.id)) { only(n.id); pick(n); } openMenu(e, "item"); }}
+            onSelectionContextMenu={(e) => openMenu(e, "item")}
+            onEdgeContextMenu={(e, ed) => { const g = (ed.data as { g: GEdge }).g; if (!g.remove) { e.preventDefault(); return; } only(null); setSelNote(null); onSelectElement(null); setSelEdge(g); onSelectEdge(g); openMenu(e, "item"); }}
+            onPaneContextMenu={(e) => openMenu(e as MouseEvent, "pane")} onMoveStart={() => setMenu(null)}
             onEdgeClick={(_e, ed) => { const g = (ed.data as { g: GEdge }).g; if (!g.remove) return; setSelNote(null); setSelEdge(g); setConfirm(null); onSelectEdge(g); }}
-            onPaneClick={() => { clearSel(); onSelectElement(null); }}
+            onPaneClick={() => { setMenu(null); clearSel(); onSelectElement(null); }}
             style={{ color: "var(--ink)" }} proOptions={{ hideAttribution: true }}>
             <Background id="minor" variant={BackgroundVariant.Dots} gap={GRID} size={1.5} color="var(--grid-dot)" />
             <Background id="major" variant={BackgroundVariant.Cross} gap={GRID * 5} size={7} lineWidth={1} color="var(--grid-cross)" />
