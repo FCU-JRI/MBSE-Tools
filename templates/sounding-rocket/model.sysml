@@ -98,7 +98,7 @@ package Project {
 
         requirement <'REQ-SYS-001'> '遠地點高度' : SystemRequirement {
             doc /* 火箭應到達 3000 m ± 150 m 的遠地點高度。 */
-            subject r : '火箭' = rocket;
+            subject r : '火箭';
             require constraint { r.apogee >= 2850 [m] and r.apogee <= 3150 [m] }
         }
         #derive dependency from '遠地點高度' to NGOs::'遠地點達 3000 m';
