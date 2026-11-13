@@ -7,7 +7,7 @@ import { ROOT_PACKAGE, shutdown } from "./engine.ts";
 import { evaluateGates, GATES } from "./gates.ts";
 import { CATEGORIES, PILLARS, RELATION_LABELS } from "./metamodel.ts";
 import * as store from "./projects.ts";
-import { deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, setSourceText, snippetFor } from "./edits.ts";
+import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, setSourceText, snippetFor } from "./edits.ts";
 import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
 import * as auth from "./auth.ts";
@@ -28,6 +28,10 @@ function editable(el: Element): Element {
   if (el.shared) throw new store.UserError("這是共用元件庫的內容，不能在專案內修改。請管理員到「管理」頁修改。");
   return el;
 }
+/** 使用者自己建的套件：專案內、不是根套件、也不是工具依類別自動建立的那幾個。 */
+const CAT_PKGS = new Set(CATEGORIES.map((c) => c.pkg));
+const isUserPackage = (e: Element | undefined): e is Element =>
+  !!e && e.kind === "Package" && !e.shared && e.qualifiedName !== ROOT_PACKAGE && !(e.qualifiedName.split("::").length === 2 && CAT_PKGS.has(e.name));
 const app = express();
 app.use(express.json({ limit: "5mb" }));
 
@@ -303,8 +307,10 @@ app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
     if (!again) throw new store.UserError("修改編號後找不到這個元素，未儲存。");
     el = again;
   }
-  const r = await store.saveFile(id, file, content, author(req), `修改${cat?.zh ?? "元素"}：${el.name}`);
+  const r = await store.saveFile(id, file, content, author(req), `修改${cat?.zh ?? (target.kind === "Package" ? "套件" : "元素")}：${el.name}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+  // 改名後識別碼會變，圖上的位置要跟著換
+  if (el.id !== target.id) await store.remapIds(id, [[target.id, el.id]], [[target.qualifiedName, el.qualifiedName]]);
   res.json({ saved: true, selected: el.id, ...(await view(id)) });
 }));
 
@@ -318,8 +324,137 @@ app.post("/api/projects/:id/elements/delete", wrap(async (req, res) => {
   const file = editable(el).file;
   const outside = before.relations.filter((r) => (r.from === el.id || r.to === el.id) && r.file !== file);
   if (outside.length) throw new store.UserError(`還有 ${outside.length} 條寫在其他檔案（${[...new Set(outside.map((r) => r.file))].join("、")}）的關係指向它，請先移除。`);
-  const next = deleteElementText(await store.readFile(id, file), el, before.elements, before.relations.filter((r) => r.file === file));
+  let next: string;
+  if (el.kind === "Package") {
+    if (!isUserPackage(el)) throw new store.UserError("這是工具依類別建立的套件，不能刪除。");
+    if (before.elements.some((e) => e.owner === el.id)) throw new store.UserError(`「${el.name}」裡面還有項目，請先把它們移出來。`);
+    next = deletePackageText(await store.readFile(id, file), el, before.elements.find((e) => e.id === el.owner));
+  } else next = deleteElementText(await store.readFile(id, file), el, before.elements, before.relations.filter((r) => r.file === file));
   const r = await store.saveFile(id, file, next, author(req), `刪除：${el.shortName ?? ""} ${el.name}`.trim());
+  if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+  res.json({ saved: true, ...(await view(id)) });
+}));
+
+// 套件：建立。先放在根套件；第一次把項目拖進來時，會搬到那個項目所在的套件底下。
+app.post("/api/projects/:id/packages", wrap(async (req, res) => {
+  const id = pid(req);
+  const before = await store.analyzeProject(id);
+  if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+  const file = rootFile(before);
+  const root = before.elements.find((e) => e.kind === "Package" && e.qualifiedName === ROOT_PACKAGE);
+  if (!root) throw new store.UserError(`模型中找不到根套件 ${ROOT_PACKAGE}。`);
+  const name = String(req.body?.name ?? "").trim();
+  if (before.elements.some((e) => e.kind === "Package" && e.name === name)) throw new store.UserError(`已經有叫「${name}」的套件。`);
+  const next = insertBody(await store.readFile(id, file), root, (indent) => packageText(name, before.elements.filter((e) => e.owner === root.id), indent));
+  const r = await store.saveFile(id, file, next, author(req), `新增套件：${name}`);
+  if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+  const v = await view(id);
+  res.json({ saved: true, created: v.analysis.elements.find((e) => e.kind === "Package" && e.name === name && e.owner === root.id)?.id ?? null, ...v });
+}));
+
+// 套件：把項目搬進（packageId）或搬出（packageId 為 null）。一次可搬多個，全部成功才儲存。
+app.post("/api/projects/:id/elements/move", wrap(async (req, res) => {
+  const id = pid(req);
+  let a = await store.analyzeProject(id);
+  if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+  const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 200) : [];
+  let pkgId: string | null = req.body?.packageId ? String(req.body.packageId) : null;
+  const pairs: [string, string][] = [], qnames: [string, string][] = [];
+  const find = (x: string | null | undefined) => a.elements.find((e) => e.id === x);
+  const first = find(ids[0]);
+  if (!first) throw new store.UserError("找不到要搬移的項目。");
+  const file = editable(first).file;
+  let content = await store.readFile(id, file);
+  const step = async (next: string) => {
+    content = next;
+    a = await store.analyzeProject(id, { file, content });
+    return a.ok;
+  };
+  const names: string[] = [];
+  for (const eid of ids) {
+    const el = find(eid);
+    if (!el) throw new store.UserError("找不到要搬移的項目。");
+    if (editable(el).file !== file) throw new store.UserError("要搬移的項目在不同檔案，請分次處理。");
+    const owner = find(el.owner);
+    if (owner?.kind !== "Package") throw new store.UserError(`「${el.name}」寫在「${owner?.name ?? "別的項目"}」裡面，不能單獨搬進套件。`);
+    let target: Element;
+    if (pkgId) {
+      let pkg = find(pkgId);
+      if (!isUserPackage(pkg)) throw new store.UserError("找不到這個套件。");
+      if (pkg.file !== file) throw new store.UserError("套件和項目在不同檔案，請到「原始碼」分頁處理。");
+      if (el.owner === pkg.id || el.id === pkg.id) continue;
+      if (el.kind === "Package") throw new store.UserError("目前不支援把套件放進另一個套件，請到「原始碼」分頁處理。");
+      // 項目原本所在的命名空間：若它已在某個使用者套件裡，取那個套件的上層
+      const home = isUserPackage(owner) ? find(owner.owner) : owner;
+      if (!home) throw new store.UserError("找不到項目所在的套件。");
+      if (pkg.owner !== home.id) {
+        const oldPkg: Element = pkg;
+        if (a.elements.some((e) => e.owner === oldPkg.id)) {
+          throw new store.UserError(`「${oldPkg.name}」在「${find(oldPkg.owner)?.name ?? ""}」裡，只能放同樣在那裡的項目。「${el.name}」在「${home.name}」裡，請另建一個套件。`);
+        }
+        // 空套件：搬到項目所在的命名空間底下
+        if (!(await step(deletePackageText(content, oldPkg, find(oldPkg.owner))))) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
+        const home2 = find(home.id);
+        if (!home2) throw new store.UserError("搬移套件時找不到目的地，未儲存。");
+        if (!(await step(insertBody(content, home2, (indent) => packageText(oldPkg.name, a.elements.filter((e) => e.owner === home2.id), indent))))) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
+        pkg = a.elements.find((e) => e.kind === "Package" && e.name === oldPkg.name && e.owner === home.id);
+        if (!pkg) throw new store.UserError("搬移套件後找不到它，未儲存。");
+        pairs.push([oldPkg.id, pkg.id]); qnames.push([oldPkg.qualifiedName, pkg.qualifiedName]);
+        pkgId = pkg.id;
+      }
+      const cur = find(el.id), parent = find(pkg.owner);
+      if (!cur || !parent) throw new store.UserError("搬移時找不到項目，未儲存。");
+      if (!(await step(moveIntoPackage(content, cur, pkg, parent)))) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
+      target = pkg;
+    } else {
+      if (!isUserPackage(owner)) continue;
+      const parent = find(owner.owner);
+      if (!parent) throw new store.UserError("找不到上層套件。");
+      if (!(await step(moveOutOfPackage(content, el, parent, owner)))) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
+      target = parent;
+    }
+    const again = a.elements.find((e) => e.owner === target.id && e.name === el.name && e.kind === el.kind);
+    if (!again) throw new store.UserError("搬移後找不到這個項目，未儲存。");
+    pairs.push([el.id, again.id]); qnames.push([el.qualifiedName, again.qualifiedName]);
+    names.push(el.name);
+  }
+  if (names.length === 0) return res.json({ saved: true, moved: {}, packageId: pkgId, layout: await store.readLayout(id), diagrams: await store.readDiagrams(id), ...(await view(id)) });
+  const pkgName = pkgId ? find(pkgId)?.name ?? "" : "";
+  const r = await store.saveFile(id, file, content, author(req), `${pkgId ? `放進套件「${pkgName}」` : "移出套件"}：${names.slice(0, 5).join("、")}${names.length > 5 ? ` 等 ${names.length} 項` : ""}`);
+  if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+  await store.remapIds(id, pairs, qnames);
+  res.json({ saved: true, moved: Object.fromEntries(pairs), packageId: pkgId, layout: await store.readLayout(id), diagrams: await store.readDiagrams(id), ...(await view(id)) });
+}));
+
+// 註解（SysML comment）：建立。有對象時寫在對象所在的地方，沒有就寫在根套件。
+app.post("/api/projects/:id/comments", wrap(async (req, res) => {
+  const id = pid(req);
+  const before = await store.analyzeProject(id);
+  if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+  const about = req.body?.aboutId ? before.elements.find((e) => e.id === req.body.aboutId) : undefined;
+  const host = (about ? before.elements.find((e) => e.id === about.owner) : undefined) ?? before.elements.find((e) => e.kind === "Package" && e.qualifiedName === ROOT_PACKAGE);
+  if (!host) throw new store.UserError(`模型中找不到根套件 ${ROOT_PACKAGE}。`);
+  const file = editable(host).file;
+  const used = new Set(before.elements.map((e) => e.name));
+  let n = 1;
+  while (used.has(`Note${n}`)) n++;
+  const name = `Note${n}`;
+  const next = insertBody(await store.readFile(id, file), host, (indent) => commentText(name, about && about.owner === host.id ? about.name : null, String(req.body?.text ?? ""), indent));
+  const r = await store.saveFile(id, file, next, author(req), `新增註解${about ? `：${about.name}` : ""}`);
+  if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+  const v = await view(id);
+  res.json({ saved: true, created: v.analysis.elements.find((e) => e.kind === "Comment" && e.name === name)?.id ?? null, ...v });
+}));
+
+// 註解：改內容
+app.patch("/api/projects/:id/comments", wrap(async (req, res) => {
+  const id = pid(req);
+  const before = await store.analyzeProject(id);
+  if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+  const el = before.elements.find((e) => e.id === req.body?.id && e.kind === "Comment");
+  if (!el) throw new store.UserError("找不到這則註解。");
+  const file = editable(el).file;
+  const r = await store.saveFile(id, file, setCommentText(await store.readFile(id, file), el, String(req.body?.text ?? "")), author(req), "修改註解");
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));

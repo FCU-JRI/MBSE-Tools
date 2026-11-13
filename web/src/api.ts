@@ -1,6 +1,8 @@
 export interface Element {
   id: string; kind: string; category: string | null; name: string; shortName: string | null; qualifiedName: string;
   owner: string | null; doc: string; types: string[]; typeIds: string[]; file: string; shared: boolean; attrs: Record<string, string>; tags: string[]; line: number | null;
+  /** 註解（Comment）所說明的元素 */
+  about?: string[];
 }
 export interface Relation { kind: string; from: string; to: string; line: number | null }
 export interface Diagnostic { severity: string; message: string; file: string; line: number; column: number }
@@ -48,7 +50,7 @@ export async function api<T>(path: string, method = "GET", body?: Record<string,
 /** 圖上的標註：註解、外框、文字。只是說明，不進模型。 */
 export interface Annotation { id: string; type: "note" | "frame" | "text"; x: number; y: number; w: number; h: number; text: string }
 export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]> }
-export type Layout = Record<string, Record<string, { x: number; y: number }>>;
+export type Layout = Record<string, Record<string, { x: number; y: number; w?: number; h?: number }>>;
 
 export interface Me {
   kind: "local" | "member" | "viewer"; login: string; name: string; rank: string | null; rankZh: string; subsystems: string[]; project: string | null;

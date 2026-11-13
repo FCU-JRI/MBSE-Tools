@@ -281,7 +281,29 @@ export async function history(id: string): Promise<{ commit: string; author: str
   });
 }
 
-export type Layout = Record<string, Record<string, { x: number; y: number }>>;
+/** w、h 只有套件用：套件在圖上是一個可調大小的框。 */
+export type Layout = Record<string, Record<string, { x: number; y: number; w?: number; h?: number }>>;
+
+/**
+ * 元素搬進或搬出套件後，它（與它裡面的東西）的識別碼會跟著完整名稱改變。
+ * 把版面與自訂圖裡的舊識別碼換成新的，位置與成員才不會遺失。pairs：[舊, 新]，id 與完整名稱都可以。
+ */
+export async function remapIds(id: string, pairs: [string, string][], qnames: [string, string][]): Promise<void> {
+  if (pairs.length === 0) return;
+  const swap = (s: string, list: [string, string][], sep: string) => {
+    for (const [a, b] of list) { if (s === a) return b; if (s.startsWith(a + sep)) return b + s.slice(a.length); }
+    return s;
+  };
+  const node = (s: string) => swap(s, pairs, "__");
+  const diagram = (s: string) => { const m = s.match(/^(ibd|stm|act):(.*)$/s); return m ? `${m[1]}:${swap(m[2], qnames, "::")}` : s; };
+  const layout = await readLayout(id);
+  const nextLayout: Layout = {};
+  for (const [d, nodes] of Object.entries(layout)) nextLayout[diagram(d)] = Object.fromEntries(Object.entries(nodes).map(([n, p]) => [node(n), p]));
+  await fs.writeFile(path.join(dirOf(id), "layout.json"), JSON.stringify(nextLayout, null, 1) + "\n", "utf8");
+  const dg = await readDiagrams(id);
+  const next: Diagrams = { custom: dg.custom.map((c) => ({ ...c, members: c.members.map(node) })), notes: Object.fromEntries(Object.entries(dg.notes).map(([d, list]) => [diagram(d), list])) };
+  await fs.writeFile(path.join(dirOf(id), "diagrams.json"), JSON.stringify(next, null, 1) + "\n", "utf8");
+}
 
 export async function readLayout(id: string): Promise<Layout> {
   const raw = await fs.readFile(path.join(dirOf(id), "layout.json"), "utf8").catch(() => "{}");
@@ -295,7 +317,9 @@ export async function writeLayout(id: string, layout: Layout): Promise<void> {
     if (typeof nodes !== "object" || nodes === null) continue;
     clean[diagram] = {};
     for (const [node, pos] of Object.entries(nodes)) {
-      if (Number.isFinite(pos?.x) && Number.isFinite(pos?.y)) clean[diagram][node] = { x: Math.round(pos.x), y: Math.round(pos.y) };
+      if (!Number.isFinite(pos?.x) || !Number.isFinite(pos?.y)) continue;
+      clean[diagram][node] = { x: Math.round(pos.x), y: Math.round(pos.y) };
+      if (Number.isFinite(pos.w) && Number.isFinite(pos.h)) Object.assign(clean[diagram][node], { w: Math.min(8000, Math.max(96, Math.round(pos.w as number))), h: Math.min(8000, Math.max(64, Math.round(pos.h as number))) });
     }
   }
   await fs.writeFile(path.join(dirOf(id), "layout.json"), JSON.stringify(clean, null, 1) + "\n", "utf8");

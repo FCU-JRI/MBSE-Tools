@@ -23,6 +23,7 @@ export interface Element {
   metaLoc: Record<string, Loc>; // 寫在主體內的標記（@Source 等）的位置
   attrs: Record<string, string>;
   tags: string[]; // 標記（metadata），例如 TPM
+  about: string[]; // 註解（Comment）所說明的元素
   line: number | null;
   endLine: number | null;
 }
@@ -155,7 +156,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
     }
   }
 
-  const NAMED = /(Definition|Usage|Package)$/;
+  const NAMED = /(Definition|Usage|Package|^Comment)$/;
   const elements: Element[] = [];
   for (const e of raw) {
     if (!e.declaredName || !NAMED.test(e["@type"]) || !inProject(e)) continue;
@@ -194,7 +195,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
       shortName: e.declaredShortName ?? null,
       qualifiedName: e["sysx:mappingQualifiedName"] ?? e.qualifiedName ?? e.declaredName,
       owner: ref(e.owner),
-      doc: docs.get(id) ?? "",
+      doc: e["@type"] === "Comment" ? String(e.body ?? "").trim() : docs.get(id) ?? "",
       types: (generals.get(id) ?? []).map((g) => qn(g).split("::").pop() ?? "").filter(Boolean),
       typeIds: generals.get(id) ?? [],
       file: fileOf(e),
@@ -205,6 +206,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
       metaLoc,
       attrs,
       tags: [...new Set(tagsOf.get(id) ?? [])],
+      about: e["@type"] === "Comment" ? refs(e.annotatedElement) : [],
       line: e["sysx:sourceLine"] ?? null,
       endLine: e["sysx:sourceEndLine"] ?? null,
     });

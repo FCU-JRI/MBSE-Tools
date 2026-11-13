@@ -208,6 +208,10 @@ export function renameText(content: string, el: Element, newName: string, elemen
   if (el.line) lineSet.add(el.line);
   for (const r of relations) if ((r.from === el.id || r.to === el.id) && r.loc) for (let l = r.loc.line; l <= r.loc.endLine; l++) lineSet.add(l);
   for (const x of elements) if (x.typeIds.includes(el.id) && x.line) lineSet.add(x.line);
+  // 套件改名時，上層為它加的 public import 也要跟著改
+  if (el.kind === "Package") content.split("\n").forEach((l, i) => { if (importLine(el.name).test(l) || l.includes(`${quote(el.name)}::`)) lineSet.add(i + 1); });
+  // 註解的 about 引用了它
+  for (const x of elements) if (x.about?.includes(el.id) && x.line) lineSet.add(x.line);
   const escaped = oldTok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = oldTok.startsWith("'") ? new RegExp(escaped, "g") : new RegExp(`(?<![A-Za-z0-9_'])${escaped}(?![A-Za-z0-9_'])`, "g");
   const lines = content.split("\n");
@@ -260,4 +264,116 @@ export function setSourceText(content: string, el: Element, doc: string, ref: st
   if (loc) return replaceLoc(content, loc, text);
   if (!text) return content;
   return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
+// ───────── 套件與註解 ─────────
+
+interface LineEdit { at: number; remove: number; insert: string[] } // at 為行的索引（從 0 起算）
+
+/** 由後往前套用，位置不會互相影響；同一行上「取代」先於「插入」。 */
+function applyEdits(content: string, edits: LineEdit[]): string {
+  const lines = content.split("\n");
+  const sorted = [...edits].sort((a, b) => b.at - a.at || b.remove - a.remove);
+  for (const e of sorted) lines.splice(e.at, e.remove, ...e.insert);
+  return lines.join("\n");
+}
+
+/** 元素的宣告必須獨占整行（前後沒有別的內容），才能整段搬移。 */
+function wholeLines(lines: string[], el: Element): { first: number; last: number } {
+  if (!el.loc) throw new UserError("找不到元素在檔案中的位置。");
+  const first = lines[el.loc.line - 1] ?? "", last = lines[el.loc.endLine - 1] ?? "";
+  const before = first.slice(0, charIndex(first, el.loc.col)), after = last.slice(charIndex(last, el.loc.endCol));
+  if (before.trim() || after.trim()) throw new UserError(`「${el.name}」和其他內容寫在同一行，無法自動搬移，請到「原始碼」分頁處理。`);
+  return { first: el.loc.line - 1, last: el.loc.endLine - 1 };
+}
+
+/** 在套件（或任何有主體的元素）結尾前插入幾行；沒有主體（以分號結尾）就展開成大括號。 */
+function insertEdit(lines: string[], target: Element, make: (indent: string) => string[]): LineEdit {
+  if (!target.endLine) throw new UserError("找不到套件在檔案中的位置。");
+  const i = target.endLine - 1;
+  const last = lines[i] ?? "";
+  const startIndent = (lines[(target.line ?? target.endLine) - 1] ?? "").match(/^\s*/)?.[0] ?? "";
+  const body = make(startIndent + "    ");
+  if (/^\s*\}\s*$/.test(last)) return { at: i, remove: 0, insert: body };
+  if (/\{\s*\}\s*$/.test(last)) return { at: i, remove: 1, insert: [last.replace(/\{\s*\}\s*$/, "{"), ...body, `${startIndent}}`] };
+  if (/;\s*$/.test(last)) return { at: i, remove: 1, insert: [last.replace(/;\s*$/, " {"), ...body, `${startIndent}}`] };
+  throw new UserError("這個套件的寫法無法自動插入，請到「原始碼」分頁手動修改。");
+}
+
+const reindent = (block: string[], indent: string): string[] => {
+  const common = Math.min(...block.filter((l) => l.trim()).map((l) => l.match(/^\s*/)?.[0].length ?? 0));
+  return block.map((l) => (l.trim() ? indent + l.slice(common) : ""));
+};
+
+const importLine = (name: string) => new RegExp(`^\\s*public\\s+import\\s+${quote(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}::\\*;\\s*$`);
+
+/** 在元素或套件的主體結尾插入幾行（空主體 { } 與分號結尾都能處理）。 */
+export function insertBody(content: string, target: Element, make: (indent: string) => string): string {
+  return applyEdits(content, [insertEdit(content.split("\n"), target, (indent) => make(indent).replace(/\n$/, "").split("\n"))]);
+}
+
+/** 新套件的文字。 */
+export function packageText(name: string, siblings: Element[], indent: string): string {
+  const n = name.trim();
+  if (!n) throw new UserError("請填套件名稱。");
+  if (/[\r\n]/.test(n) || n.length > 60) throw new UserError("套件名稱不能換行，最長 60 個字。");
+  if (siblings.some((e) => e.name === n)) throw new UserError(`這裡已經有叫「${n}」的項目。`);
+  return `${indent}package ${quote(n)} { }\n`;
+}
+
+/**
+ * 把元素搬進套件。套件必須直接位於元素目前所在的命名空間之下（或與元素目前的套件同層），
+ * 這樣元素主體內原有的引用都還看得到；並在上層加上 public import，讓外面原本的引用繼續有效。
+ */
+export function moveIntoPackage(content: string, el: Element, pkg: Element, parent: Element): string {
+  const lines = content.split("\n");
+  const { first, last } = wholeLines(lines, el);
+  const edits: LineEdit[] = [{ at: first, remove: last - first + 1, insert: [] }];
+  edits.push(insertEdit(lines, pkg, (indent) => reindent(lines.slice(first, last + 1), indent)));
+  if (pkg.line && parent.line && parent.endLine) {
+    const has = lines.slice(parent.line - 1, parent.endLine).some((l) => importLine(pkg.name).test(l));
+    if (!has) edits.push({ at: pkg.line - 1, remove: 0, insert: [`${(lines[pkg.line - 1] ?? "").match(/^\s*/)?.[0] ?? ""}public import ${quote(pkg.name)}::*;`] });
+  }
+  return applyEdits(content, edits);
+}
+
+/** 把元素從套件移回上一層。 */
+export function moveOutOfPackage(content: string, el: Element, parent: Element, pkg?: Element): string {
+  const lines = content.split("\n");
+  const { first, last } = wholeLines(lines, el);
+  const out = applyEdits(content, [
+    { at: first, remove: last - first + 1, insert: [] },
+    insertEdit(lines, parent, (indent) => reindent(lines.slice(first, last + 1), indent)),
+  ]);
+  // 之前以「套件::名稱」引用它的地方改回只寫名稱
+  return pkg ? out.split(`${quote(pkg.name)}::${quote(el.name)}`).join(quote(el.name)) : out;
+}
+
+/** 刪除空套件，連同上層為它加的 public import。 */
+export function deletePackageText(content: string, pkg: Element, parent: Element | undefined): string {
+  const lines = content.split("\n");
+  const { first, last } = wholeLines(lines, pkg);
+  const edits: LineEdit[] = [{ at: first, remove: last - first + 1, insert: [] }];
+  if (parent?.line && parent.endLine) {
+    for (let i = parent.line - 1; i < parent.endLine; i++) if (importLine(pkg.name).test(lines[i] ?? "") && (i < first || i > last)) edits.push({ at: i, remove: 1, insert: [] });
+  }
+  return applyEdits(content, edits);
+}
+
+const commentBody = (s: string) => s.replace(/\*\//g, "* /").replace(/\r?\n/g, " ").trim().slice(0, 500) || "註解";
+
+/** 註解（SysML comment）。about 為被註解元素的名稱（與註解寫在同一個命名空間內，不需完整名稱）。 */
+export function commentText(name: string, about: string | null, body: string, indent: string): string {
+  return `${indent}comment ${quote(name)}${about ? ` about ${quote(about)}` : ""} /* ${commentBody(body)} */\n`;
+}
+
+/** 改註解的內容：只換掉 comment 那一段裡的本文。 */
+export function setCommentText(content: string, el: Element, body: string): string {
+  if (!el.loc) throw new UserError("找不到註解在檔案中的位置。");
+  const lines = content.split("\n");
+  const first = lines[el.loc.line - 1] ?? "", last = lines[el.loc.endLine - 1] ?? "";
+  const a = charIndex(first, el.loc.col), b = charIndex(last, el.loc.endCol);
+  const src = el.loc.line === el.loc.endLine ? first.slice(a, b) : [first.slice(a), ...lines.slice(el.loc.line, el.loc.endLine - 1), last.slice(0, b)].join("\n");
+  if (!/\/\*[\s\S]*\*\//.test(src)) throw new UserError("這則註解的寫法無法自動修改，請到「原始碼」分頁修改。");
+  return replaceLoc(content, el.loc, src.replace(/\/\*[\s\S]*\*\//, () => `/* ${commentBody(body)} */`).replace(/\n$/, ""));
 }

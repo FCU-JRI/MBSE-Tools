@@ -381,33 +381,128 @@ test("重複的關係被拒絕；復原上一步會還原模型修改", async ()
   assert.equal(count(redone.data), count(withRel), "再按一次會還原這次的還原");
 });
 
-test("圖的資料：使用案例圖畫出利害關係人之間與案例的連線，活動圖有起訖節點", async () => {
-  const { buildGraph, diagramsOf } = await import("../web/src/model.ts");
+test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字與連線樣式", async () => {
+  const { buildGraph, diagramsOf, frameLabel } = await import("../web/src/model.ts");
   const { toSvg } = await import("../web/src/exportSvg.ts");
   const a = (await call(`${I}/api/projects/t6`)).data.analysis;
   const name = (id: string) => a.elements.find((e: any) => e.id === id)?.name;
-  const g = (kind: string) => buildGraph(diagramsOf(a).find((d: any) => d.kind === kind) as any, a);
+  const defs = diagramsOf(a);
+  const g = (kind: string) => buildGraph(defs.find((d: any) => d.kind === kind) as any, a);
+  // 圖框：«view» 名稱 : 標準檢視定義
+  assert.equal(frameLabel(defs.find((d: any) => d.kind === "bdd") as any), "«view» 結構分解 : GeneralView");
+  assert.deepEqual(["ibd", "act", "stm"].map((k) => defs.find((d: any) => d.kind === k)?.viewDef), ["InterconnectionView", "ActionFlowView", "StateTransitionView"]);
   const uc = g("uc");
-  assert.ok(uc.nodes.filter((n: any) => n.shape === "actor").length >= 2, "利害關係人應畫成火柴人");
-  assert.ok(uc.nodes.some((n: any) => n.shape === "usecase"), "使用案例應畫成橢圓");
-  const assoc = uc.edges.find((e: any) => name(e.source) === "執行發射");
-  assert.deepEqual([assoc?.kind, assoc?.dashed, assoc?.head], ["association", false, "none"]);
+  assert.ok(uc.nodes.some((n: any) => n.keyword === "«use case»" && n.shape === "usage"), "使用案例是圓角的 «use case»");
+  assert.ok(uc.nodes.filter((n: any) => n.keyword === "«part»" && / : Stakeholder$/.test(n.title.join(""))).length >= 2, "利害關係人是 «part»");
+  const tr = uc.edges.find((e: any) => name(e.source) === "執行發射");
+  assert.deepEqual([tr?.kind, tr?.dashed, tr?.head, tr?.label], ["trace", true, "open", "«trace»"]);
   const req = g("req");
-  assert.ok(req.edges.some((e: any) => e.label === "«deriveReqt»" && e.dashed && e.head === "open"));
-  assert.ok(req.edges.some((e: any) => e.label === "«satisfy»") && req.edges.some((e: any) => e.label === "«verify»"));
-  assert.ok(req.nodes.some((n: any) => n.keyword === "«requirement»" && n.compartments[0]?.[0].startsWith('id = "REQ-')));
-  assert.ok(req.nodes.some((n: any) => n.keyword === "«testCase»"));
+  assert.ok(req.edges.some((e: any) => e.label === "«derive»" && e.dashed && e.head === "open"), "相依為虛線開放箭頭");
+  assert.ok(req.edges.some((e: any) => e.label === "«satisfy»" && !e.dashed) && req.edges.some((e: any) => e.label === "«verify»" && !e.dashed), "satisfy、verify 為實線");
+  const r1 = req.nodes.find((n: any) => n.keyword === "«requirement»" && n.title.join("").startsWith("<REQ-"));
+  assert.ok(r1 && r1.shape === "usage" && r1.compartments[0]?.[0] === "doc", "需求顯示編號與 doc 隔間");
+  assert.ok(req.nodes.some((n: any) => n.keyword === "«verification»"));
   const bdd = g("bdd");
-  assert.ok(bdd.nodes.every((n: any) => n.keyword === "«block»"));
-  assert.ok(bdd.edges.every((e: any) => e.tail === "diamond" && !e.dashed));
+  assert.ok(bdd.nodes.filter((n: any) => n.shape === "def").every((n: any) => n.keyword === "«part def»"));
+  // 組成：定義 ◆— 零件（使用），零件再以「defined by」指向它的定義
+  const comp = bdd.edges.filter((e: any) => e.kind === "compose");
+  assert.ok(comp.length >= 3 && comp.every((e: any) => e.tail === "diamond" && bdd.nodes.find((n: any) => n.id === e.target)?.keyword === "«part»"));
+  assert.ok(bdd.edges.filter((e: any) => e.kind === "define").every((e: any) => e.head === "typing" && bdd.nodes.find((n: any) => n.id === e.target)?.shape === "def"));
   const act = g("act");
-  assert.deepEqual([act.nodes[0].shape, act.nodes[act.nodes.length - 1].shape], ["initial", "final"]);
-  assert.ok(act.nodes.filter((n: any) => n.el).every((n: any) => n.shape === "action"));
+  assert.deepEqual([act.nodes[0].shape, act.nodes[act.nodes.length - 1].shape], ["start", "done"]);
+  assert.ok(act.nodes.filter((n: any) => n.el).every((n: any) => n.keyword === "«action»" && n.shape === "usage"));
   const stm = g("stm");
-  assert.ok(stm.nodes.some((n: any) => n.shape === "state") && stm.nodes.some((n: any) => n.shape === "initial"));
-  const svg = toSvg({ code: "UC", text: "t" }, uc.nodes.map((n: any, i: number) => ({ g: n, x: i * 220, y: 0 })), uc.edges);
-  assert.match(svg, /<ellipse/);
-  assert.ok((svg.match(/<circle/g) ?? []).length >= 2, "火柴人的頭");
+  assert.ok(stm.nodes.some((n: any) => n.keyword === "«state»") && stm.nodes.some((n: any) => n.shape === "start"));
+  const svg = toSvg("«view» t : GeneralView", bdd.nodes.map((n: any, i: number) => ({ g: n, x: i * 240, y: 0 })), bdd.edges);
+  assert.match(svg, /«view» t : GeneralView/);
+  assert.match(svg, /rx="10"/);
+  assert.match(svg, /url\(#typ\)/);
+});
+
+test("套件：建立、搬進搬出、原有引用不受影響、版面識別碼跟著換", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "p1", name: "套件測試", kind: "annual", template: "sample" });
+  const base = `${I}/api/projects/p1`;
+  let r = await call(`${base}/packages`, "POST", { name: "JRI 團隊" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  const pkg0 = r.data.created;
+  assert.ok(pkg0);
+  assert.equal((await call(`${base}/packages`, "POST", { name: "JRI 團隊" })).status, 400, "同名套件被拒絕");
+  const els = () => call(base).then((x) => x.data.analysis.elements as any[]);
+  const teacher = (await els()).find((e) => e.name === "指導老師");
+  const sys = (await els()).find((e) => e.name === "火箭" && e.kind === "PartDefinition");
+  // 版面與自訂圖裡記著舊的識別碼
+  await call(`${base}/layout`, "PUT", { layout: { uc: { [teacher.id]: { x: 100, y: 200 }, [pkg0]: { x: 0, y: 0, w: 400, h: 300 } } } });
+  await call(`${base}/diagrams`, "PUT", { diagrams: { custom: [{ id: "custom:c1", title: "總覽", members: [teacher.id, sys.id] }], notes: {} } });
+  r = await call(`${base}/elements/move`, "POST", { ids: [teacher.id], packageId: pkg0 });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  const moved = r.data.moved[teacher.id];
+  const pkg = r.data.packageId;
+  assert.ok(moved && moved !== teacher.id, "搬進套件後識別碼改變");
+  const after = r.data.analysis.elements.find((e: any) => e.id === moved);
+  assert.equal(after.qualifiedName, "Project::Stakeholders::JRI 團隊::指導老師", "空套件會搬到項目所在的套件底下");
+  assert.equal(after.category, "Stakeholder");
+  // 原本以名稱與「Stakeholders::名稱」引用它的兩條關係都還在
+  assert.equal(r.data.analysis.relations.filter((q: any) => q.to === moved && q.kind === "trace").length, 2);
+  assert.deepEqual(r.data.layout.uc[moved], { x: 100, y: 200 });
+  assert.deepEqual(r.data.layout.uc[pkg], { x: 0, y: 0, w: 400, h: 300 });
+  assert.deepEqual(r.data.diagrams.custom[0].members, [moved, sys.id]);
+  const src = (await call(`${base}/files/model.sysml`)).data.content as string;
+  assert.match(src, /public import 'JRI 團隊'::\*;\s+package 'JRI 團隊' \{\s+part <'STK-002'> '指導老師' : Stakeholder/);
+  // 別的類別套件裡的項目放不進來；有成員的套件不能刪
+  r = await call(`${base}/elements/move`, "POST", { ids: [sys.id], packageId: pkg });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /請另建一個套件/);
+  r = await call(`${base}/elements/delete`, "POST", { id: pkg });
+  assert.match(r.data.error, /裡面還有項目/);
+  // 搬進套件之後才建立的關係會用完整名稱；移出時要一起改回來
+  const uc2 = (await els()).find((e) => e.name === "尋回火箭");
+  assert.equal((await call(`${base}/relations`, "POST", { kind: "trace", from: uc2.id, to: moved })).status, 200);
+  // 改名：import 與引用一起改，位置不遺失
+  r = await call(`${base}/elements`, "PATCH", { id: pkg, name: "團隊" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  const pkg2 = r.data.selected;
+  const lay = (await call(`${base}/layout`)).data;
+  assert.deepEqual(lay.uc[pkg2], { x: 0, y: 0, w: 400, h: 300 });
+  const moved2 = (await els()).find((e) => e.name === "指導老師").id;
+  assert.deepEqual(lay.uc[moved2], { x: 100, y: 200 });
+  // 移出
+  r = await call(`${base}/elements/move`, "POST", { ids: [moved2], packageId: null });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.moved[moved2], teacher.id, "移出後回到原本的識別碼");
+  assert.equal(r.data.analysis.relations.filter((q: any) => q.to === teacher.id && q.kind === "trace").length, 3);
+  assert.deepEqual(r.data.layout.uc[teacher.id], { x: 100, y: 200 });
+  // 空套件可以刪，連同 import
+  r = await call(`${base}/elements/delete`, "POST", { id: pkg2 });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.doesNotMatch((await call(`${base}/files/model.sysml`)).data.content, /'團隊'/);
+  // 工具依類別建立的套件不能刪
+  const stk = (await els()).find((e) => e.kind === "Package" && e.name === "Stakeholders");
+  assert.match((await call(`${base}/elements/delete`, "POST", { id: stk.id })).data.error, /不能刪除/);
+});
+
+test("註解寫進模型：comment about 對象，可修改與刪除", async () => {
+  const base = `${I}/api/projects/p1`;
+  const teacher = (await call(base)).data.analysis.elements.find((e: any) => e.name === "指導老師");
+  let r = await call(`${base}/comments`, "POST", { text: "負責安全 */ 審查", aboutId: teacher.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  const c = r.data.analysis.elements.find((e: any) => e.id === r.data.created);
+  assert.deepEqual([c.kind, c.about, c.doc], ["Comment", [teacher.id], "負責安全 * / 審查"]);
+  assert.match((await call(`${base}/files/model.sysml`)).data.content, /comment Note1 about '指導老師' \/\* 負責安全 \* \/ 審查 \*\//);
+  r = await call(`${base}/comments`, "PATCH", { id: c.id, text: "改過的內容" });
+  assert.equal(r.data.analysis.elements.find((e: any) => e.id === c.id).doc, "改過的內容");
+  // 沒有對象的註解寫在根套件
+  r = await call(`${base}/comments`, "POST", { text: "整體說明" });
+  const c2 = r.data.analysis.elements.find((e: any) => e.id === r.data.created);
+  assert.deepEqual([c2.name, c2.about.length <= 1], ["Note2", true]);
+  // 圖上：註解節點與虛線連到對象
+  const { buildGraph, diagramsOf } = await import("../web/src/model.ts");
+  const a = r.data.analysis;
+  const g = buildGraph(diagramsOf(a).find((d: any) => d.kind === "uc") as any, a, { packages: new Set(["Stakeholders"]), shown: new Set() });
+  assert.ok(g.nodes.some((n: any) => n.id === c.id && n.shape === "comment"));
+  assert.ok(g.edges.some((e: any) => e.kind === "annotate" && e.source === c.id && e.target === teacher.id && e.dashed && e.head === "none"));
+  r = await call(`${base}/elements/delete`, "POST", { id: c.id });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.analysis.elements.some((e: any) => e.id === c.id), false);
 });
 
 test("編號可以自訂：修改、補上、格式與重複檢查", async () => {

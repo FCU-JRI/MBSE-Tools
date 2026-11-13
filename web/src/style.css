@@ -358,4 +358,8 @@ details > summary { list-style: none; cursor: pointer; } details > summary::-web
 .note-resize-line.react-flow__resize-control { border-color: var(--ink-muted); }
 .note-resize-handle.react-flow__resize-control { width: 8px; height: 8px; border-radius: 0; background: var(--ink); border: 0; }
 .side .tbtn { margin-top: var(--space-2); }
+/* 套件：只有框線與標籤頁可以點，裡面的節點才點得到 */
+.sysml-node.pkg { pointer-events: none; } .sysml-node.pkg svg rect, .sysml-node.pkg svg text, .sysml-node.pkg.is-selected { pointer-events: auto; }
+.react-flow__node-pkg { pointer-events: none !important; }
+.canvas-hint .tbtn { margin: 0; }
 @media (max-width: 860px) { .toolbox.collapsed { width: auto; } .canvas-panel { width: 100%; } }

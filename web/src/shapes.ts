@@ -1,5 +1,5 @@
-// SysML 1.7 圖形記法的繪製。畫面、PNG／SVG 匯出與審查報告共用這一份，確保三者一致。
-import { wrap } from "./model.ts";
+// SysML v2 圖形記法（規範 8.2.3）的繪製。畫面、PNG／SVG 匯出與審查報告共用這一份，確保三者一致。
+import { PKG_TAB, wrap } from "./model.ts";
 import type { GNode, Shape } from "./model.ts";
 import type { Annotation } from "./api.ts";
 
@@ -11,17 +11,10 @@ export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
 const FONT = `font-family="'Noto Sans TC','Microsoft JhengHei',sans-serif"`;
 const text = (x: number, y: number, s: string, size: number, fill: string, extra = "") => `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" ${FONT} ${extra}>${esc(s)}</text>`;
 const one = (s: string, units: number) => wrap(s, units, 1)[0] ?? "";
+const textWidth = (s: string, cjk: number, latin: number) => [...s].reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? cjk : latin), 0);
 
-/** 火柴人（actor）。cx 為中心，y 為頂端，高約 64。 */
-export function stickFigure(cx: number, y: number, c: Palette, scale = 1): string {
-  const s = (v: number) => (v * scale).toFixed(1);
-  return `<g fill="none" stroke="${c.ink}" stroke-width="1.2" stroke-linecap="round">` +
-    `<circle cx="${cx}" cy="${y + 9 * scale}" r="${s(8)}" fill="${c.bg}"/>` +
-    `<line x1="${cx}" y1="${y + 17 * scale}" x2="${cx}" y2="${y + 42 * scale}"/>` +
-    `<line x1="${cx - 15 * scale}" y1="${y + 26 * scale}" x2="${cx + 15 * scale}" y2="${y + 26 * scale}"/>` +
-    `<line x1="${cx}" y1="${y + 42 * scale}" x2="${cx - 13 * scale}" y2="${y + 62 * scale}"/>` +
-    `<line x1="${cx}" y1="${y + 42 * scale}" x2="${cx + 13 * scale}" y2="${y + 62 * scale}"/></g>`;
-}
+/** 套件標籤頁的寬度（依名稱長度）。 */
+export const pkgTabWidth = (name: string, w: number) => Math.min(w, Math.max(72, Math.ceil(textWidth(name, 13, 7.4) + 24)));
 
 /** 在 (x, y) 畫出一個節點，大小取自節點本身。 */
 export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth = 1): string {
@@ -29,45 +22,37 @@ export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth 
   const cx = x + w / 2;
   const sw = `stroke="${c.ink}" stroke-width="${strokeWidth}"`;
   switch (n.shape) {
-    case "initial":
+    case "start":
       return `<circle cx="${cx}" cy="${y + h / 2}" r="9" fill="${c.ink}"/>`;
-    case "final":
+    case "done":
       return `<circle cx="${cx}" cy="${y + h / 2}" r="11" fill="${c.bg}" ${sw}/><circle cx="${cx}" cy="${y + h / 2}" r="6" fill="${c.ink}"/>`;
-    case "actor": {
-      const lines = wrap(n.name, 14, 2);
-      return stickFigure(cx, y + 2, c) + lines.map((l, i) => text(cx, y + 82 + i * 15, l, 12.5, c.ink, `text-anchor="middle"`)).join("");
+    case "package": {
+      // 資料夾：名稱寫在標籤頁，成員畫在主體裡。主體不填色，才看得到也點得到裡面的節點。
+      const tw = pkgTabWidth(n.name, w);
+      return `<rect x="${x + 0.5}" y="${y + PKG_TAB - 0.5}" width="${w - 1}" height="${h - PKG_TAB}" fill="none" ${sw}/>` +
+        `<rect x="${x + 0.5}" y="${y + 0.5}" width="${tw - 1}" height="${PKG_TAB - 1}" fill="${c.bg}" ${sw}/>` +
+        text(x + 10, y + 17, one(n.name, Math.floor((tw - 16) / 6.5)), 12.5, c.ink, `font-weight="600"`);
     }
-    case "usecase": {
-      const lines = wrap(n.name, 20, 2);
-      const top = y + h / 2 + 4 - (lines.length - 1) * 8;
-      return `<ellipse cx="${cx}" cy="${y + h / 2}" rx="${w / 2 - 1}" ry="${h / 2 - 1}" fill="${c.bg}" ${sw}/>` + lines.map((l, i) => text(cx, top + i * 16, l, 13, c.ink, `text-anchor="middle"`)).join("");
+    case "comment": {
+      const f = 12; // 折角大小
+      return `<path d="M${x + 0.5} ${y + 0.5} H${x + w - f} L${x + w - 0.5} ${y + f} V${y + h - 0.5} H${x + 0.5} Z" fill="${c.bg}" ${sw}/>` +
+        `<path d="M${x + w - f} ${y + 0.5} V${y + f} H${x + w - 0.5}" fill="none" ${sw}/>` +
+        text(cx, y + 16, n.keyword, 10.5, c.ink, `text-anchor="middle"`) +
+        n.title.map((l, i) => text(x + 10, y + 36 + i * 16, l, 11.5, c.ink)).join("");
     }
-    case "action":
-    case "state": {
-      let out = `<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="14" fill="${c.bg}" ${sw}/>`;
-      const rows = n.compartments.flat();
-      out += text(cx, rows.length ? y + 24 : y + h / 2 + 4.5, one(n.name, 20), 13, c.ink, `text-anchor="middle" font-weight="500"`);
-      if (rows.length) {
-        out += `<line x1="${x}" y1="${y + 36}" x2="${x + w}" y2="${y + 36}" stroke="${c.ink}" stroke-width="1"/>`;
-        rows.forEach((l, i) => { out += text(x + 10, y + 52 + i * 16, one(l, 22), 10.5, c.muted); });
-      }
-      return out;
-    }
-    case "part":
-      return `<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" fill="${c.bg}" ${sw}/>` + text(cx, y + h / 2 + 4.5, one(n.name, 24), 12.5, c.ink, `text-anchor="middle"`);
     default: {
-      // block、requirement、testCase：關鍵字、名稱、隔間
-      let out = `<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" fill="${c.bg}" ${sw}/>`;
+      // 定義為方角、使用為圓角：«關鍵字»、名稱、隔間
+      let out = `<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="${n.shape === "usage" ? 10 : 0}" fill="${c.bg}" ${sw}/>`;
       out += text(cx, y + 17, n.keyword, 10.5, c.ink, `text-anchor="middle"`);
-      out += text(cx, y + 34, one(n.name, Math.floor(w / 8)), 13, c.ink, `text-anchor="middle" font-weight="600"`);
-      let ty = y + 44;
+      n.title.forEach((l, i) => { out += text(cx, y + 34 + i * 16, l, 12.5, c.ink, `text-anchor="middle" font-weight="600"`); });
+      let ty = y + 26 + n.title.length * 16 + 4;
       for (const comp of n.compartments) {
         out += `<line x1="${x}" y1="${ty}" x2="${x + w}" y2="${ty}" stroke="${c.ink}" stroke-width="1"/>`;
         ty += 4;
         comp.forEach((l, i) => {
           ty += 16;
-          // 隔間標題（values）置中斜體，其餘靠左
-          if (i === 0 && l === "values") out += text(cx, ty - 3, l, 10, c.muted, `text-anchor="middle" font-style="italic"`);
+          // 隔間標題置中斜體，其餘靠左
+          if (i === 0) out += text(cx, ty - 3, l, 10, c.muted, `text-anchor="middle" font-style="italic"`);
           else out += text(x + 8, ty - 3, one(l, Math.floor((w - 16) / 6.2)), 10.5, c.ink);
         });
         ty += 5;
@@ -77,7 +62,7 @@ export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth 
   }
 }
 
-/** 標註：註解為折角便箋（SysML comment），外框為帶名稱的框線，文字為純文字。 */
+/** 草稿標註（不進模型）：便箋、虛線外框、純文字。 */
 export function annotationSvg(a: Annotation, x: number, y: number, c: Palette, strokeWidth = 1): string {
   const { w, h } = a;
   if (a.type === "frame") {
@@ -86,9 +71,8 @@ export function annotationSvg(a: Annotation, x: number, y: number, c: Palette, s
   }
   const lines = wrap(a.text, Math.max(4, Math.floor((w - 20) / 6.5)), Math.max(1, Math.floor((h - 14) / 17)));
   if (a.type === "text") return lines.map((l, i) => text(x + 2, y + 16 + i * 17, l, 13, c.ink)).join("");
-  const f = 12; // 折角大小
-  return `<path d="M${x + 0.5} ${y + 0.5} H${x + w - f} L${x + w - 0.5} ${y + f} V${y + h - 0.5} H${x + 0.5} Z" fill="${c.bg}" stroke="${c.ink}" stroke-width="${strokeWidth}"/>` +
-    `<path d="M${x + w - f} ${y + 0.5} V${y + f} H${x + w - 0.5}" fill="none" stroke="${c.ink}" stroke-width="${strokeWidth}"/>` +
+  const f = 12;
+  return `<path d="M${x + 0.5} ${y + 0.5} H${x + w - f} L${x + w - 0.5} ${y + f} V${y + h - 0.5} H${x + 0.5} Z" fill="${c.bg}" stroke="${c.muted}" stroke-width="${strokeWidth}" stroke-dasharray="5 4"/>` +
     lines.map((l, i) => text(x + 10, y + 21 + i * 17, l, 12, c.ink)).join("");
 }
 
@@ -96,14 +80,13 @@ export function annotationSvg(a: Annotation, x: number, y: number, c: Palette, s
 export function iconSvg(shape: Shape | "select" | "line" | "dashed" | "diamond" | "note" | "frame" | "text", c: Palette): string {
   const s = `fill="none" stroke="${c.ink}" stroke-width="1.3"`;
   switch (shape) {
-    case "note": return `<path d="M3.5 4.5 H16 L20.5 9 V19.5 H3.5 Z" ${s} stroke-linejoin="round"/><path d="M16 4.5 V9 H20.5" ${s}/>`;
+    case "comment": return `<path d="M3.5 4.5 H16 L20.5 9 V19.5 H3.5 Z" ${s} stroke-linejoin="round"/><path d="M16 4.5 V9 H20.5" ${s}/>`;
+    case "note": return `<path d="M3.5 4.5 H16 L20.5 9 V19.5 H3.5 Z" ${s} stroke-linejoin="round" stroke-dasharray="3 2.5"/>`;
+    case "package": return `<rect x="2.5" y="8.5" width="19" height="11" ${s}/><rect x="2.5" y="4.5" width="9" height="4" ${s}/>`;
     case "frame": return `<rect x="2.5" y="4.5" width="19" height="15" ${s} stroke-dasharray="3 2.5"/>`;
     case "text": return `<path d="M5 7 V5 H19 V7 M12 5 V19 M9.5 19 H14.5" ${s}/>`;
     case "select": return `<path d="M6 4 L6 19 L10 15 L13 21 L15 20 L12 14 L18 14 Z" ${s} stroke-linejoin="round"/>`;
-    case "actor": return stickFigure(12, 1, c, 0.34).replace(/stroke-width="1.2"/, `stroke-width="1.3"`);
-    case "usecase": return `<ellipse cx="12" cy="12" rx="10" ry="6" ${s}/>`;
-    case "action": case "state": return `<rect x="2.5" y="6.5" width="19" height="11" rx="5" ${s}/>`;
-    case "requirement": case "testcase": return `<rect x="2.5" y="4.5" width="19" height="15" ${s}/><line x1="2.5" y1="10" x2="21.5" y2="10" ${s}/>`;
+    case "usage": return `<rect x="2.5" y="6.5" width="19" height="11" rx="4" ${s}/>`;
     case "line": return `<line x1="3" y1="18" x2="20" y2="6" ${s}/><path d="M14 6 L20 6 L20 12" ${s}/>`;
     case "dashed": return `<line x1="3" y1="18" x2="20" y2="6" ${s} stroke-dasharray="3 2.5"/><path d="M14 6 L20 6 L20 12" ${s}/>`;
     case "diamond": return `<line x1="9" y1="15" x2="21" y2="4" ${s}/><path d="M3 20 L5 14 L10 15 L8 20 Z" fill="${c.ink}" stroke="${c.ink}"/>`;
@@ -111,12 +94,14 @@ export function iconSvg(shape: Shape | "select" | "line" | "dashed" | "diamond" 
   }
 }
 
-/** 圖框：包住整張圖的矩形，左上角的標籤寫「圖的類型 [專案] 圖名」，標籤右下切角。 */
+/**
+ * 圖框（規範 8.2.3.26 view-frame）：圓角外框，左上角的名稱隔間寫「«view» 名稱 : 檢視定義」，隔間右下為圓角。
+ */
 export const FRAME_HEAD = 28;
-export function frameSvg(code: string, text: string, x: number, y: number, w: number, h: number, p: Palette): string {
-  const width = (s: string, cjk: number, latin: number) => [...s].reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? cjk : latin), 0);
-  const tw = Math.min(w, Math.ceil(width(code, 14, 8.5) + width(text, 13, 7.2) + 34));
-  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${p.ink}" stroke-width="1"/>`
-    + `<path d="M${x} ${y} H${x + tw} V${y + FRAME_HEAD - 8} L${x + tw - 8} ${y + FRAME_HEAD} H${x} Z" fill="${p.bg}" stroke="${p.ink}" stroke-width="1"/>`
-    + `<text x="${x + 10}" y="${y + 19}" font-size="13" fill="${p.ink}" ${FONT}><tspan font-weight="700">${esc(code)}</tspan><tspan dx="8">${esc(text)}</tspan></text>`;
+export function frameSvg(label: string, x: number, y: number, w: number, h: number, p: Palette): string {
+  const tw = Math.min(w, Math.ceil(textWidth(label, 13, 7.2) + 26));
+  const r = 10;
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="none" stroke="${p.ink}" stroke-width="1"/>`
+    + `<path d="M${x} ${y + r} Q${x} ${y} ${x + r} ${y} H${x + tw} V${y + FRAME_HEAD - 8} Q${x + tw} ${y + FRAME_HEAD} ${x + tw - 8} ${y + FRAME_HEAD} H${x} Z" fill="${p.bg}" stroke="${p.ink}" stroke-width="1"/>`
+    + `<text x="${x + 12}" y="${y + 19}" font-size="13" fill="${p.ink}" ${FONT}>${esc(label)}</text>`;
 }

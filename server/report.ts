@@ -10,7 +10,7 @@ import { PRIORITY_ZH } from "./pm.ts";
 import type { Project } from "./projects.ts";
 import type { SimFile } from "./sim.ts";
 // 圖的資料與 SVG 繪製和前端共用同一份程式
-import { buildGraph, diagramsOf } from "../web/src/model.ts";
+import { buildGraph, diagramsOf, frameLabel } from "../web/src/model.ts";
 import { toSvg } from "../web/src/exportSvg.ts";
 
 interface Section { heading: string; level: 1 | 2; paragraphs: string[]; table?: { head: string[]; rows: string[][] }; svg?: string; breakBefore?: boolean }
@@ -19,7 +19,7 @@ export interface Report { title: string; subtitle: string; meta: [string, string
 const METHOD: Record<string, string> = { "Method::byTest": "測試", "Method::byAnalysis": "分析", "Method::byInspection": "檢查", "Method::byDemonstration": "展示" };
 const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
 
-function diagramSvg(title: string, a: Analysis, id: string): string | null {
+function diagramSvg(_title: string, a: Analysis, id: string): string | null {
   const def = diagramsOf(a as any).find((d) => d.id === id || d.kind === id);
   if (!def) return null;
   const g = buildGraph(def, a as any);
@@ -31,7 +31,7 @@ function diagramSvg(title: string, a: Analysis, id: string): string | null {
   for (const e of g.edges) if (e.source !== e.target) dg.setEdge(e.source, e.target);
   dagre.layout(dg);
   const placed = g.nodes.map((n) => { const p = dg.node(n.id); return { g: n, x: p.x - n.width / 2, y: p.y - n.height / 2 }; });
-  return toSvg({ code: def.code, text: `[${title}] ${def.title}` }, placed, g.edges);
+  return toSvg(frameLabel(def), placed, g.edges);
 }
 
 export function buildReport(project: Project, a: Analysis, gates: GateStatus[], plan: Pm, sim: SimFile, gateId: string, commit: string): Report {

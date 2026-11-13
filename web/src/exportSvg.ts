@@ -11,7 +11,7 @@ function edgePoint(n: Placed, tx: number, ty: number): [number, number] {
   const cx = n.x + w / 2, cy = n.y + h / 2;
   const dx = tx - cx, dy = ty - cy;
   if (dx === 0 && dy === 0) return [cx, cy];
-  if (n.g.shape === "usecase" || n.g.shape === "initial" || n.g.shape === "final") {
+  if (n.g.shape === "start" || n.g.shape === "done") {
     const k = 1 / Math.sqrt((dx / (w / 2)) ** 2 + (dy / (h / 2)) ** 2);
     return [cx + dx * k, cy + dy * k];
   }
@@ -37,7 +37,7 @@ function ortho(a: Placed, b: Placed, vertical: boolean): { pts: [number, number]
   return vertical ? v() ?? h() : h() ?? v();
 }
 
-export function toSvg(frame: { code: string; text: string }, nodes: Placed[], edges: GEdge[], vertical = true, straight = false, notes: Annotation[] = []): string {
+export function toSvg(frame: string, nodes: Placed[], edges: GEdge[], vertical = true, straight = false, notes: Annotation[] = []): string {
   const m = 12, pad = 32 + m, head = FRAME_HEAD;
   const all = [...nodes.map((n) => ({ x: n.x, y: n.y, w: n.g.width, h: n.g.height })), ...notes];
   const minX = Math.min(...all.map((n) => n.x)), minY = Math.min(...all.map((n) => n.y));
@@ -48,17 +48,20 @@ export function toSvg(frame: { code: string; text: string }, nodes: Placed[], ed
   const out: string[] = [];
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`);
   out.push(`<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#111" stroke-width="1.2"/></marker>`);
-  out.push(`<marker id="dia" viewBox="0 0 20 12" refX="1" refY="6" markerWidth="18" markerHeight="11" orient="auto"><path d="M1 6 L10 1 L19 6 L10 11 Z" fill="#111"/></marker></defs>`);
+  out.push(`<marker id="dia" viewBox="0 0 20 12" refX="1" refY="6" markerWidth="18" markerHeight="11" orient="auto"><path d="M1 6 L10 1 L19 6 L10 11 Z" fill="#111"/></marker>`);
+  out.push(`<marker id="typ" viewBox="0 0 20 14" refX="19" refY="7" markerWidth="20" markerHeight="14" markerUnits="userSpaceOnUse" orient="auto"><circle cx="3" cy="3" r="1.4" fill="#111"/><circle cx="3" cy="11" r="1.4" fill="#111"/><path d="M6 1 L19 7 L6 13 Z" fill="#fff" stroke="#111" stroke-width="1"/></marker></defs>`);
   out.push(`<rect width="${W}" height="${H}" fill="#fff"/>`);
-  out.push(frameSvg(frame.code, frame.text, m, m, W - m * 2, H - m * 2, PRINT));
+  out.push(frameSvg(frame, m, m, W - m * 2, H - m * 2, PRINT));
   for (const a of notes) if (a.type === "frame") out.push(annotationSvg(a, a.x + ox, a.y + oy, PRINT));
+  // 套件畫在最底層，成員與連線疊在上面
+  for (const n of nodes) if (n.g.shape === "package") out.push(nodeSvg(n.g, n.x + ox, n.y + oy, PRINT));
   for (const e of edges) {
     const a = by.get(e.source), b = by.get(e.target);
     if (!a || !b) continue;
     const o = straight ? null : ortho(a, b, vertical);
     const [x1, y1] = edgePoint(a, b.x + b.g.width / 2, b.y + b.g.height / 2);
     const [x2, y2] = edgePoint(b, a.x + a.g.width / 2, a.y + a.g.height / 2);
-    const marks = `${e.tail === "diamond" ? `marker-start="url(#dia)"` : ""} ${e.head === "open" ? `marker-end="url(#arr)"` : ""}`;
+    const marks = `${e.tail === "diamond" ? `marker-start="url(#dia)"` : ""} ${e.head === "open" ? `marker-end="url(#arr)"` : e.head === "typing" ? `marker-end="url(#typ)"` : ""}`;
     if (o) out.push(`<path d="${o.pts.map(([x, y], i) => `${i ? "L" : "M"}${(x + ox).toFixed(1)} ${(y + oy).toFixed(1)}`).join(" ")}" fill="none" stroke="#111" stroke-width="1" ${e.dashed ? `stroke-dasharray="6 4"` : ""} ${marks}/>`);
     else out.push(`<line x1="${(x1 + ox).toFixed(1)}" y1="${(y1 + oy).toFixed(1)}" x2="${(x2 + ox).toFixed(1)}" y2="${(y2 + oy).toFixed(1)}" stroke="#111" stroke-width="1" ${e.dashed ? `stroke-dasharray="6 4"` : ""} ${marks}/>`);
     if (e.label) {
@@ -68,7 +71,7 @@ export function toSvg(frame: { code: string; text: string }, nodes: Placed[], ed
       out.push(`<text x="${mx.toFixed(1)}" y="${(my + 3).toFixed(1)}" font-size="10" fill="#333" text-anchor="middle" font-family="'Noto Sans TC','Microsoft JhengHei',sans-serif">${esc(e.label)}</text>`);
     }
   }
-  for (const n of nodes) out.push(nodeSvg(n.g, n.x + ox, n.y + oy, PRINT));
+  for (const n of nodes) if (n.g.shape !== "package") out.push(nodeSvg(n.g, n.x + ox, n.y + oy, PRINT));
   for (const a of notes) if (a.type !== "frame") out.push(annotationSvg(a, a.x + ox, a.y + oy, PRINT));
   out.push(`</svg>`);
   return out.join("");
