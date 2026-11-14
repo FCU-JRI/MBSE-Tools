@@ -99,7 +99,7 @@ sudo /opt/jri-mbse/scripts/linux/install-service.sh
 ## 已知限制
 
 - GitHub 登入需要管理員先建立 OAuth App 並在「管理」頁填入。
-- 專案的 GitHub 儲存庫要先手動建立，再到「版本」頁填網址。
+- 專案的 GitHub 儲存庫：在「管理 → 專案儲存庫」開啟自動建立後，新增專案時會用 GitHub CLI 建立 `擁有者/專案代號` 並設為推送目標。執行網站的帳號要先 `gh auth login`（登入該擁有者）並 `gh auth setup-git`；未開啟時要先手動建立，再到「版本」頁填網址。
 - Word 報告不含圖；含圖請用網頁版列印成 PDF。
 - `.ork` 匯入只讀幾何（鼻錐、箭體、梯形尾翼、降落傘），質量與引擎需手動填。匯出的 `.ork` 尚未在 OpenRocket 實際開啟驗證。
 - 模擬為標準大氣、無風。

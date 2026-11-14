@@ -102,6 +102,31 @@ export async function setRemote(id: string, url: string): Promise<SyncState> {
   return syncState(id);
 }
 
+// ───────── 自動建立 GitHub 儲存庫（F-23）─────────
+// 用伺服器帳號已登入的 GitHub CLI（gh auth login）建立。憑證只存在 gh 自己的設定裡，工具不經手。
+const GH = process.env.JRI_GH || "gh";
+export const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+export interface AutoRepo { enabled: boolean; owner: string; visibility: "public" | "private" }
+const errText = (e: unknown) => String((e as { stderr?: string }).stderr || (e as Error).message).split("\n").map((s) => s.trim()).filter(Boolean).slice(-2).join(" ").slice(0, 300);
+
+/** 在 GitHub 建立 擁有者/專案代號 並設為推送目標。失敗不丟例外，錯誤記在同步狀態，「版本」頁會顯示。 */
+export async function createRepo(id: string, description: string, opt: AutoRepo): Promise<SyncState> {
+  const dir = dirOf(id);
+  await readProject(id);
+  try {
+    if (!GITHUB_OWNER.test(opt.owner)) throw new Error("管理頁的 GitHub 擁有者名稱不合法。");
+    if (await git(dir, "remote", "get-url", "origin").catch(() => "")) throw new Error("這個專案已經設定儲存庫。");
+    const { stdout } = await run(GH, ["repo", "create", `${opt.owner}/${id}`, opt.visibility === "private" ? "--private" : "--public", "--description", description.slice(0, 200)],
+      { windowsHide: true, timeout: 60_000, env: { ...process.env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0" } });
+    const url = stdout.trim().split("\n").pop()?.trim() || `https://github.com/${opt.owner}/${id}`;
+    return await setRemote(id, url);
+  } catch (e) {
+    const st = await syncState(id);
+    st.error = `自動建立 GitHub 儲存庫失敗：${errText(e)}`;
+    return st;
+  }
+}
+
 export async function commit(dir: string, author: string, message: string): Promise<string> {
   await git(dir, "add", "-A");
   const status = await git(dir, "status", "--porcelain");
