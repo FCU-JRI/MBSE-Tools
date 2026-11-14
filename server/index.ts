@@ -130,7 +130,7 @@ app.post("/api/admin/shares", admin, wrap(async (req, res) => {
 app.post("/api/admin/shares/delete", admin, wrap(async (req, res) => { await auth.revokeShare(String(req.body?.id ?? "")); res.json({ shares: await auth.listShares() }); }));
 app.get("/api/admin/config", admin, wrap(async (_req, res) => {
   const c = await auth.getConfig();
-  res.json({ publicUrl: c.publicUrl, clientId: c.github.clientId, hasSecret: !!c.github.clientSecret, tailscaleAdmins: c.tailscaleAdmins });
+  res.json({ publicUrl: c.publicUrl, clientId: c.github.clientId, hasSecret: !!c.github.clientSecret, tailscaleAdmins: c.tailscaleAdmins, autoRepo: c.autoRepo });
 }));
 app.post("/api/admin/config", admin, wrap(async (req, res) => { await auth.updateConfig(req.body ?? {}); res.json({ saved: true }); }));
 
@@ -161,7 +161,11 @@ app.get("/api/projects", wrap(async (req, res) => {
 
 app.post("/api/projects", auth.need(auth.can.createProject, "建立專案需要總工程師以上的權限。"), wrap(async (req, res) => {
   const { id, name, kind, gates, template } = req.body ?? {};
-  res.json(await store.createProject({ id: String(id ?? ""), name: String(name ?? ""), kind: kind === "small" ? "small" : "annual", gates, template: String(template ?? "sample"), author: author(req) }));
+  const project = await store.createProject({ id: String(id ?? ""), name: String(name ?? ""), kind: kind === "small" ? "small" : "annual", gates, template: String(template ?? "sample"), author: author(req) });
+  // 自動建立 GitHub 儲存庫：失敗不影響專案建立，錯誤顯示在「版本」頁
+  const { autoRepo } = await auth.getConfig();
+  if (autoRepo.enabled) await store.createRepo(project.id, project.name, autoRepo);
+  res.json(project);
 }));
 
 // 封存專案（管理員）。資料移到 archive 資料夾，可手動移回來還原。
@@ -618,6 +622,12 @@ app.post("/api/projects/:id/sim/apply", wrap(async (req, res) => {
 // ───────── 版本：GitHub 同步、分支審查、基線比較 ─────────
 app.get("/api/projects/:id/sync", wrap(async (req, res) => res.json(await store.syncState(pid(req)))));
 app.post("/api/projects/:id/remote", admin, wrap(async (req, res) => res.json(await store.setRemote(pid(req), String(req.body?.url ?? "")))));
+app.post("/api/projects/:id/remote/create", admin, wrap(async (req, res) => {
+  const { autoRepo } = await auth.getConfig();
+  if (!autoRepo.owner) throw new store.UserError("請先到「管理」頁填 GitHub 擁有者。");
+  const p = await store.readProject(pid(req));
+  res.json(await store.createRepo(p.id, p.name, autoRepo));
+}));
 app.get("/api/projects/:id/branches", wrap(async (req, res) => res.json(await versions.listBranches(pid(req)))));
 app.get("/api/projects/:id/branches/diff", wrap(async (req, res) => res.json(await versions.branchDiff(pid(req), String(req.query.name ?? "")))));
 app.post("/api/projects/:id/branches/merge", auth.need(auth.can.merge, "合併分支需要責任工程師以上的權限。"), wrap(async (req, res) => {

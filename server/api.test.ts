@@ -12,6 +12,7 @@ const PORT = 18787, PUB = 18788;
 const I = `http://127.0.0.1:${PORT}`, P = `http://127.0.0.1:${PUB}`;
 let server: ChildProcess;
 let home: string;
+let fakeGh: string;
 
 type Res = { status: number; data: any; cookies: string[]; location: string | null };
 async function call(url: string, method = "GET", body?: unknown, headers: Record<string, string> = {}): Promise<Res> {
@@ -24,7 +25,10 @@ async function call(url: string, method = "GET", body?: unknown, headers: Record
 
 before(async () => {
   home = await fs.mkdtemp(path.join(os.tmpdir(), "jri-test-"));
-  server = spawn(process.execPath, ["server/index.ts"], { env: { ...process.env, PORT: String(PORT), PUBLIC_PORT: String(PUB), JRI_HOME: home }, stdio: "ignore" });
+  // 假的 gh：記錄參數；擁有者 fail-owner 模擬未登入
+  fakeGh = path.join(home, "fake-gh.sh");
+  await fs.writeFile(fakeGh, `#!/bin/sh\necho "$@" >> "${path.join(home, "gh-calls.txt")}"\ncase "$3" in fail-owner/*) echo "HTTP 401: Bad credentials" >&2; exit 1;; esac\necho "https://github.com/$3"\n`, { mode: 0o755 });
+  server = spawn(process.execPath, ["server/index.ts"], { env: { ...process.env, PORT: String(PORT), PUBLIC_PORT: String(PUB), JRI_HOME: home, JRI_GH: fakeGh }, stdio: "ignore" });
   for (let i = 0; i < 100; i++) {
     try { if ((await fetch(`${I}/api/me`)).ok) return; } catch { /* 尚未啟動 */ }
     await new Promise((r) => setTimeout(r, 200));
@@ -255,6 +259,42 @@ test("基線比較：列出節點核可後的變更", async () => {
 test("GitHub 儲存庫網址只接受 github.com", async () => {
   assert.equal((await call(`${I}/api/projects/t1/remote`, "POST", { url: "ext::sh -c whoami" })).status, 400);
   assert.equal((await call(`${I}/api/projects/t1/sync`)).data.remote, "");
+});
+
+test("新增專案自動建立 GitHub 儲存庫；失敗不擋專案建立，可在版本頁重試", { skip: process.platform === "win32" ? "假的 gh 是 shell 腳本，Windows 略過" : false }, async () => {
+  const cfg = (body: unknown) => call(`${I}/api/admin/config`, "POST", { autoRepo: body });
+  // 移除遠端，避免背景推送真的連到 GitHub
+  const unlink = (id: string) => call(`${I}/api/projects/${id}/remote`, "POST", { url: "" });
+  assert.equal((await cfg({ enabled: true, owner: "bad owner" })).status, 400, "擁有者名稱不合法要拒絕");
+  assert.equal((await cfg({ enabled: true, owner: "" })).status, 400, "開啟時擁有者不能空白");
+  assert.equal((await cfg({ enabled: true, owner: "jri-test", visibility: "private" })).status, 200);
+  assert.deepEqual((await call(`${I}/api/admin/config`)).data.autoRepo, { enabled: true, owner: "jri-test", visibility: "private" });
+
+  let r = await call(`${I}/api/projects`, "POST", { id: "t-auto", name: "自動建立測試", kind: "small", gates: ["mdr"], template: "blank" });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  let s = (await call(`${I}/api/projects/t-auto/sync`)).data;
+  await unlink("t-auto");
+  assert.equal(s.remote, "https://github.com/jri-test/t-auto");
+  assert.equal(s.error, null);
+  const calls = await fs.readFile(path.join(home, "gh-calls.txt"), "utf8");
+  assert.match(calls, /^repo create jri-test\/t-auto --private --description 自動建立測試$/m);
+
+  await cfg({ enabled: true, owner: "fail-owner", visibility: "public" });
+  r = await call(`${I}/api/projects`, "POST", { id: "t-fail", name: "失敗測試", kind: "small", gates: ["mdr"], template: "blank" });
+  assert.equal(r.status, 200, "gh 失敗時專案照樣建立");
+  s = (await call(`${I}/api/projects/t-fail/sync`)).data;
+  assert.equal(s.remote, "");
+  assert.match(s.error, /自動建立 GitHub 儲存庫失敗.*Bad credentials/);
+
+  await cfg({ enabled: false, owner: "jri-test" });
+  r = await call(`${I}/api/projects/t-fail/remote/create`, "POST", {});
+  await unlink("t-fail");
+  assert.equal(r.status, 200);
+  assert.equal(r.data.remote, "https://github.com/jri-test/t-fail", "關閉自動建立仍可手動重試");
+  assert.match(await fs.readFile(path.join(home, "gh-calls.txt"), "utf8"), /^repo create jri-test\/t-fail --public /m);
+
+  assert.equal((await call(`${I}/api/projects`, "POST", { id: "t-off", name: "關閉時", kind: "small", gates: ["mdr"], template: "blank" })).status, 200);
+  assert.doesNotMatch(await fs.readFile(path.join(home, "gh-calls.txt"), "utf8"), /t-off/, "關閉時不呼叫 gh");
 });
 
 test("專案管理：任務、成本、人員；優先級依職級限制", async () => {
