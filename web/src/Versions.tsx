@@ -56,13 +56,14 @@ export function VersionsView({ id, user, onChanged }: { id: string; user: Me; on
       {msg && <p className="msg" role="status">{!msg.ok && <span className="tag danger">ERR</span>}{msg.text}</p>}
       <section className="section">
         <div className="section-head"><h1 className="section-title">GitHub 同步</h1><span className="label">{!sync?.remote ? "未設定" : sync.pushing ? "推送中" : sync.error ? "ERR" : "已同步"}</span></div>
-        <p className="body muted" style={{ marginBottom: 12 }}>設定後，每次儲存都會自動推送到這個儲存庫。儲存庫要先在 GitHub 的 FCU-JRI 組織下建立（空的即可）。</p>
-        {sync?.error && <p className="msg"><span className="tag danger">ERR</span>推送失敗：{sync.error}</p>}
+        <p className="body muted" style={{ marginBottom: 12 }}>設定後，每次儲存都會自動推送到這個儲存庫。管理頁開啟「自動建立」時，新專案會自動建好；否則先在 GitHub 建立空的儲存庫再把網址填在這裡。</p>
+        {sync?.error && <p className="msg"><span className="tag danger">ERR</span>{sync.error.startsWith("自動建立") ? sync.error : `推送失敗：${sync.error}`}</p>}
         {sync?.lastPushAt && <p className="caption" style={{ marginBottom: 8 }}>上次推送　{when(sync.lastPushAt)}</p>}
         {user.caps.admin ? (
           <div className="row">
             <label className="field"><span className="label">儲存庫網址</span><input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/FCU-JRI/專案代號" /></label>
-            <div className="tbtn-row" style={{ marginBottom: 12 }}><button className="tbtn primary" onClick={() => run(async () => setSync(await api<Sync>(`/projects/${id}/remote`, "POST", { url })), "已儲存，開始推送。")}>儲存</button></div>
+            <div className="tbtn-row" style={{ marginBottom: 12 }}><button className="tbtn primary" onClick={() => run(async () => setSync(await api<Sync>(`/projects/${id}/remote`, "POST", { url })), "已儲存，開始推送。")}>儲存</button>
+              {!sync?.remote && <button className="tbtn" onClick={() => run(async () => { const s = await api<Sync>(`/projects/${id}/remote/create`, "POST", {}); setSync(s); setUrl(s.remote); if (s.error) throw new Error(s.error); }, "已在 GitHub 建立儲存庫，開始推送。")}>在 GitHub 建立</button>}</div>
           </div>
         ) : <p className="caption">{sync?.remote || "尚未設定儲存庫。"}</p>}
       </section>

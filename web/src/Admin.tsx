@@ -5,7 +5,8 @@ import type { Project } from "./api.ts";
 
 interface Member { login: string; name: string; rank: string; subsystems: string[]; admin: boolean; tailscale?: string }
 interface Share { id: string; project: string; label: string; createdBy: string; createdAt: string; expiresAt: string }
-interface Cfg { publicUrl: string; clientId: string; hasSecret: boolean }
+interface AutoRepo { enabled: boolean; owner: string; visibility: "public" | "private" }
+interface Cfg { publicUrl: string; clientId: string; hasSecret: boolean; autoRepo: AutoRepo }
 
 const blank: Member = { login: "", name: "", rank: "C-II", subsystems: [], admin: false };
 
@@ -15,7 +16,7 @@ export function Admin() {
   const [ranks, setRanks] = useState<{ id: string; zh: string }[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [cfg, setCfg] = useState<Cfg>({ publicUrl: "", clientId: "", hasSecret: false });
+  const [cfg, setCfg] = useState<Cfg>({ publicUrl: "", clientId: "", hasSecret: false, autoRepo: { enabled: false, owner: "", visibility: "public" } });
   const [secret, setSecret] = useState("");
   const [form, setForm] = useState<Member>(blank);
   const [share, setShare] = useState({ project: "", label: "", days: "14" });
@@ -58,7 +59,10 @@ export function Admin() {
     setSharedFiles((await api<{ files: { file: string; content: string }[] }>("/shared")).files);
   }, "已儲存共用元件庫。所有專案立即可用。"); };
   const rankZh = (id: string) => ranks.find((r) => r.id === id)?.zh ?? id;
-  const callback = `${cfg.publicUrl || "（先填公開網址）"}/auth/github/callback`;
+  const repo = cfg.autoRepo;
+  const setRepo = (patch: Partial<AutoRepo>) => setCfg({ ...cfg, autoRepo: { ...repo, ...patch } });
+  const saveRepo = (ev: FormEvent) => { ev.preventDefault(); run(async () => { await api("/admin/config", "POST", { autoRepo: repo }); setCfg(await api<Cfg>("/admin/config")); }, "已儲存儲存庫設定。"); };
+  const callback =`${cfg.publicUrl || "（先填公開網址）"}/auth/github/callback`;
 
   return (
     <main className="page" style={{ width: "100%" }}>
@@ -139,6 +143,19 @@ export function Admin() {
             <label className="field"><span className="label">Client secret{cfg.hasSecret ? "（已儲存，留空不變）" : ""}</span><input className="input" type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} /></label>
           </div>
           <button className="tbtn primary">儲存設定</button>
+        </form>
+      </section>
+
+      <section className="section">
+        <div className="section-head"><h2 className="section-title">專案儲存庫</h2><span className="label">{repo.enabled ? "自動建立" : "手動"}</span></div>
+        <p className="body muted" style={{ marginBottom: 12 }}>開啟後，新增專案時會在 GitHub 的擁有者底下建立同名儲存庫（github.com/擁有者/專案代號），並設為推送目標。需要這台電腦上執行網站的帳號先用 <span className="data">gh auth login</span> 登入該擁有者，並執行 <span className="data">gh auth setup-git</span>。建立失敗不影響專案，錯誤會顯示在專案的「版本」頁。</p>
+        <form onSubmit={saveRepo}>
+          <div className="row">
+            <label className="field"><span className="label">GitHub 擁有者</span><input className="input" value={repo.owner} onChange={(e) => setRepo({ owner: e.target.value })} placeholder="FCU-JRI" /></label>
+            <label className="field" style={{ flex: "0 0 10rem" }}><span className="label">可見性</span><select className="input" value={repo.visibility} onChange={(e) => setRepo({ visibility: e.target.value === "private" ? "private" : "public" })}><option value="public">公開</option><option value="private">私人</option></select></label>
+          </div>
+          <div className="tbtn-row"><label className="check"><input type="checkbox" checked={repo.enabled} onChange={(e) => setRepo({ enabled: e.target.checked })} /><span className="caption">新增專案時自動建立儲存庫</span></label>
+            <button className="tbtn primary">儲存設定</button></div>
         </form>
       </section>
     </main>

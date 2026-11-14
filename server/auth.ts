@@ -6,6 +6,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextFunction, Request, Response } from "express";
+import { GITHUB_OWNER, UserError } from "./projects.ts";
+import type { AutoRepo } from "./projects.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = path.resolve(process.env.JRI_HOME ?? path.join(ROOT, "data"));
@@ -40,6 +42,7 @@ export interface Config {
   publicUrl: string; // 公開網址，例如 https://jri-mbse.xxx.ts.net:8443
   github: { clientId: string; clientSecret: string };
   tailscaleAdmins: string[]; // 這些 Tailscale 登入視為管理員
+  autoRepo: AutoRepo; // 新專案自動在 GitHub 建立儲存庫
 }
 
 export interface User {
@@ -107,12 +110,21 @@ export async function getConfig(): Promise<Config> {
     publicUrl: c.publicUrl ?? "",
     github: { clientId: c.github?.clientId ?? "", clientSecret: c.github?.clientSecret ?? "" },
     tailscaleAdmins: c.tailscaleAdmins ?? [],
+    autoRepo: { enabled: c.autoRepo?.enabled === true, owner: c.autoRepo?.owner ?? "", visibility: c.autoRepo?.visibility === "private" ? "private" : "public" },
   };
   if (!c.sessionSecret) await writeJson(CONFIG_FILE, config);
   return config;
 }
-export async function updateConfig(patch: { publicUrl?: string; clientId?: string; clientSecret?: string }): Promise<void> {
+export async function updateConfig(patch: { publicUrl?: string; clientId?: string; clientSecret?: string; autoRepo?: Partial<AutoRepo> }): Promise<void> {
   const c = await getConfig();
+  if (patch.autoRepo && typeof patch.autoRepo === "object") {
+    const a = patch.autoRepo;
+    const owner = typeof a.owner === "string" ? a.owner.trim() : c.autoRepo.owner;
+    const enabled = typeof a.enabled === "boolean" ? a.enabled : c.autoRepo.enabled;
+    if (owner && !GITHUB_OWNER.test(owner)) throw new UserError("GitHub 擁有者只能用英數與連字號。");
+    if (enabled && !owner) throw new UserError("開啟自動建立前要先填 GitHub 擁有者。");
+    c.autoRepo = { enabled, owner, visibility: a.visibility === "private" ? "private" : a.visibility === "public" ? "public" : c.autoRepo.visibility };
+  }
   // 空白不覆蓋既有設定，避免表單沒帶到值時把公開網址清掉
   if (typeof patch.publicUrl === "string" && patch.publicUrl.trim()) c.publicUrl = patch.publicUrl.trim().replace(/\/+$/, "");
   if (typeof patch.clientId === "string") c.github.clientId = patch.clientId.trim();
