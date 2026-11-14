@@ -383,39 +383,68 @@ export async function archiveProject(id: string, confirmName: string): Promise<s
   return target;
 }
 
-/** 還原最近一次提交，限於只動到模型檔的提交；還原後模型必須仍能解析。 */
-export async function undoLast(id: string, author: string): Promise<void> {
+// ───────── 復原與重做 ─────────
+// 每一次對模型的修改都是一次提交。復原＝把 model/ 換回上一步的內容再提交一次，重做＝換回下一步。
+// 歷史本身不會被改寫；走到哪一步記在 .git/jri-undo.json（不進版本紀錄）。
+interface Hist { tip: string; snaps: string[]; pos: number }
+const HIST_MAX = 200;
+const histFile = (dir: string) => path.join(dir, ".git", "jri-undo.json");
+const lastModelCommit = (dir: string) => git(dir, "log", "-1", "--first-parent", "--pretty=%H", "HEAD", "--", "model").catch(() => "");
+
+async function loadHist(dir: string): Promise<Hist> {
+  const tip = await lastModelCommit(dir);
+  let h: Hist | null = null;
+  try { h = JSON.parse(await fs.readFile(histFile(dir), "utf8")) as Hist; } catch { /* 還沒有紀錄 */ }
+  if (h && h.tip === tip && h.snaps?.[h.pos]) return h;
+  const list = async (...range: string[]) => (await git(dir, "log", "--first-parent", "--reverse", "--pretty=%H", ...range, "--", "model").catch(() => "")).split("\n").filter(Boolean);
+  let snaps: string[];
+  if (h && h.snaps?.[h.pos] && await git(dir, "merge-base", "--is-ancestor", h.tip, "HEAD").then(() => true, () => false)) {
+    // 復原之後又做了新的修改：丟掉可以重做的部分，接上新的步驟
+    snaps = [...h.snaps.slice(0, h.pos + 1), ...(await list(`${h.tip}..HEAD`))];
+  } else snaps = await list("-n", String(HIST_MAX), "HEAD");
+  snaps = snaps.slice(-HIST_MAX);
+  const next = { tip, snaps, pos: snaps.length - 1 };
+  await fs.writeFile(histFile(dir), JSON.stringify(next), "utf8").catch(() => undefined);
+  return next;
+}
+
+/** 目前能不能復原、重做。 */
+export async function historyState(id: string): Promise<{ undo: boolean; redo: boolean }> {
+  const h = await loadHist(dirOf(id)).catch(() => null);
+  return { undo: !!h && h.pos > 0, redo: !!h && h.pos < h.snaps.length - 1 };
+}
+
+/** 復原（step = -1）或重做（step = 1）一步。只換 model/ 的內容；簽核、時程等其他資料不受影響。 */
+export async function stepHistory(id: string, author: string, step: -1 | 1): Promise<void> {
   const dir = dirOf(id);
   await readProject(id);
   await repoConfig(dir);
-  // 先把未提交的變更（例如圖的版面）存起來，再判斷上一步是什麼
+  // 先把未提交的變更（例如圖的版面）存起來
   if (await git(dir, "status", "--porcelain")) await commit(dir, author, "儲存圖的版面");
-  let target = "HEAD";
-  // 版面的提交不算一步，往前找到最近一次模型修改
-  for (let i = 0; i < 5; i++) {
-    const names = (await git(dir, "show", "--name-only", "--pretty=format:", target)).split("\n").map((f) => f.trim()).filter(Boolean);
-    if (names.length > 0 && names.every((f) => f === "layout.json" || f === "diagrams.json" || f.startsWith("lib/"))) target += "~1"; else break;
-  }
-  const files = (await git(dir, "show", "--name-only", "--pretty=format:", target)).split("\n").map((f) => f.trim()).filter(Boolean);
-  const parents = (await git(dir, "rev-list", "--parents", "-n", "1", target)).split(" ").length - 1;
-  if (parents !== 1) throw new UserError("上一步是建立專案或合併分支，不能復原。");
-  if (files.length === 0 || !files.every((f) => f.startsWith("model/") || f.startsWith("lib/") || f === "layout.json" || f === "diagrams.json")) {
-    throw new UserError("上一步不是模型的修改（可能是簽核、時程或模擬），不能在這裡復原。");
-  }
-  const subject = await git(dir, "log", "-1", "--pretty=%s", target);
-  const name = author.trim() || "JRI MBSE";
-  try {
-    await git(dir, "-c", `user.name=${name}`, "-c", "user.email=mbse@jri.local", "revert", "--no-commit", target);
-  } catch {
-    await git(dir, "revert", "--abort").catch(() => "");
-    throw new UserError("無法自動復原上一步。");
-  }
+  const h = await loadHist(dir);
+  const tree = (rev: string) => git(dir, "rev-parse", `${rev}:model`).catch(() => "");
+  const cur = await tree("HEAD");
+  let to = h.pos + step;
+  while (h.snaps[to] && (await tree(h.snaps[to])) === cur) to += step; // 內容相同的步驟直接跳過
+  if (!h.snaps[to]) throw new UserError(step < 0 ? "沒有可以復原的步驟了。" : "沒有可以重做的步驟。");
+  const subject = await git(dir, "log", "-1", "--pretty=%s", h.snaps[step < 0 ? to + 1 : to]);
+  const before = { layout: await readLayout(id), diagrams: await readDiagrams(id) };
+  const putBack = () => git(dir, "restore", "--source=HEAD", "--staged", "--worktree", "--", "model").catch(() => "");
+  try { await git(dir, "restore", `--source=${h.snaps[to]}`, "--staged", "--worktree", "--", "model"); }
+  catch { await putBack(); throw new UserError("無法回到那一步。"); }
   const a = await analyzeProject(id);
-  if (!a.ok) {
-    await git(dir, "revert", "--abort").catch(() => "");
-    await git(dir, "checkout", "--", ".").catch(() => "");
-    throw new UserError("復原後的模型會有錯誤，已取消。");
+  if (!a.ok) { await putBack(); throw new UserError(`${step < 0 ? "復原" : "重做"}後的模型會有錯誤，已取消。`); }
+  // 圖的位置與自訂圖的成員：保留現在的，只把那一步有、現在沒有的補回來（被刪掉又救回來的項目才會回到原位）
+  const old = async <T>(file: string, fallback: T): Promise<T> => { try { return JSON.parse(await git(dir, "show", `${h.snaps[to]}:${file}`)) as T; } catch { return fallback; } };
+  const layout = before.layout;
+  for (const [d, nodes] of Object.entries(await old<Layout>("layout.json", {}))) {
+    if (typeof nodes !== "object" || nodes === null) continue;
+    layout[d] = { ...nodes, ...(layout[d] ?? {}) };
   }
-  await git(dir, "-c", `user.name=${name}`, "-c", "user.email=mbse@jri.local", "commit", "-m", `復原：${subject}`.slice(0, 200));
-  pushLater(dir);
+  await writeLayout(id, layout);
+  const ids = new Set(a.elements.map((e) => e.id));
+  const was = new Map((await old<Partial<Diagrams>>("diagrams.json", {})).custom?.map((c) => [c.id, c.members ?? []]) ?? []);
+  await writeDiagrams(id, { ...before.diagrams, custom: before.diagrams.custom.map((c) => ({ ...c, members: [...c.members, ...(was.get(c.id) ?? []).filter((m) => ids.has(m) && !c.members.includes(m))] })) });
+  await commit(dir, author, `${step < 0 ? "復原" : "重做"}：${subject}`.slice(0, 200));
+  await fs.writeFile(histFile(dir), JSON.stringify({ tip: await lastModelCommit(dir), snaps: h.snaps, pos: to }), "utf8");
 }

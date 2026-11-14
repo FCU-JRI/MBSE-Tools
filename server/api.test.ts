@@ -377,8 +377,11 @@ test("重複的關係被拒絕；復原上一步會還原模型修改", async ()
   const undone = await call(`${I}/api/projects/t6/undo`, "POST", {});
   assert.equal(undone.status, 200, JSON.stringify(undone.data).slice(0, 200));
   assert.equal(count(undone.data), count(withRel) - 1);
-  const redone = await call(`${I}/api/projects/t6/undo`, "POST", {});
-  assert.equal(count(redone.data), count(withRel), "再按一次會還原這次的還原");
+  assert.equal(undone.data.history.redo, true);
+  const redone = await call(`${I}/api/projects/t6/redo`, "POST", {});
+  assert.equal(count(redone.data), count(withRel), "重做把那一步做回來");
+  assert.equal(redone.data.history.redo, false);
+  assert.equal((await call(`${I}/api/projects/t6/redo`, "POST", {})).status, 400, "沒有可以重做的步驟");
 });
 
 test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字與連線樣式", async () => {
@@ -623,4 +626,50 @@ test("自訂圖與標註：可儲存讀回，不合格的內容會被濾掉", as
   const d = (await call(base)).data;
   assert.deepEqual(d.custom, [{ id: "custom:a1", title: "總覽", members: ["x", "y"] }]);
   assert.deepEqual(d.notes["custom:a1"], [{ id: "note:n1", type: "frame", x: 10, y: 20, w: 48, h: 4000, text: "提案委員會" }]);
+});
+
+test("復原與重做：可以連續往回、往前；誤刪的項目回到原位；新的修改會清掉重做", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "u1", name: "復原測試", kind: "annual", template: "sample" });
+  const base = `${I}/api/projects/u1`;
+  const first = (await call(base)).data;
+  const names = (d: any) => d.analysis.elements.map((e: any) => e.name);
+  const find = (d: any, n: string) => d.analysis.elements.find((e: any) => e.name === n);
+  const uc = find(first, "尋回火箭");
+  const teacher = find(first, "指導老師");
+  assert.ok(uc && teacher);
+  await call(`${base}/layout`, "PUT", { layout: { uc: { [uc.id]: { x: 320, y: 480 } } } });
+  // 三步：刪掉使用案例、建套件、把老師搬進套件
+  assert.equal((await call(`${base}/elements/delete`, "POST", { id: uc.id })).status, 200);
+  const pkg = (await call(`${base}/packages`, "POST", { name: "團隊" })).data.created;
+  let r = await call(`${base}/elements/move`, "POST", { ids: [teacher.id], packageId: pkg });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.deepEqual(r.data.history, { undo: true, redo: false });
+  // 往回三步：回到一開始
+  r = await call(`${base}/undo`, "POST", {});
+  assert.equal(find(r.data, "指導老師").id, teacher.id, "老師回到套件外");
+  r = await call(`${base}/undo`, "POST", {});
+  assert.ok(!names(r.data).includes("團隊"));
+  r = await call(`${base}/undo`, "POST", {});
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.ok(names(r.data).includes("尋回火箭"), "誤刪的項目救回來");
+  assert.deepEqual(r.data.layout.uc[uc.id], { x: 320, y: 480 }, "回到原本的位置");
+  assert.equal(r.data.analysis.relations.length, first.analysis.relations.length);
+  assert.equal(r.data.history.redo, true);
+  // 往前兩步，再往回一步
+  r = await call(`${base}/redo`, "POST", {});
+  assert.ok(!names(r.data).includes("尋回火箭"));
+  r = await call(`${base}/redo`, "POST", {});
+  assert.ok(names(r.data).includes("團隊"));
+  r = await call(`${base}/undo`, "POST", {});
+  assert.ok(!names(r.data).includes("團隊") && !names(r.data).includes("尋回火箭"));
+  // 做了新的修改：不能再重做；復原會先退掉這次修改，再往更早走
+  r = await call(`${base}/comments`, "POST", { text: "新的修改" });
+  assert.deepEqual(r.data.history, { undo: true, redo: false });
+  assert.equal((await call(`${base}/redo`, "POST", {})).status, 400);
+  r = await call(`${base}/undo`, "POST", {});
+  assert.ok(!names(r.data).includes("Note1") && !names(r.data).includes("尋回火箭"));
+  r = await call(`${base}/undo`, "POST", {});
+  assert.ok(names(r.data).includes("尋回火箭"), "再往回是刪除之前，不是把復原過的步驟做回來");
+  assert.equal(r.data.history.undo, false, "已經回到建立專案時");
+  assert.equal((await call(`${base}/undo`, "POST", {})).status, 400);
 });

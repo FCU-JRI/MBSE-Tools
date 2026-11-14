@@ -17,7 +17,7 @@ export interface Step {
   link: { kind: string; to: string[]; zh: string; direction: "out" | "in" } | null; parent: string | null;
   state: "done" | "current" | "locked"; count: number; issues: { id: string | null; text: string }[];
 }
-export interface View { project: Project; analysis: Analysis; gates: Gate[]; docs: Doc[]; milestones: Record<string, string>; process: Step[] }
+export interface View { project: Project; analysis: Analysis; gates: Gate[]; docs: Doc[]; milestones: Record<string, string>; process: Step[]; history?: { undo: boolean; redo: boolean } }
 export interface Field { name: string; zh: string; type: "text" | "int" | "real" }
 export interface Category { id: string; zh: string; en: string; pillar: string; prefix: string; pkg: string; keyword: string; help: string; example: string; fields?: Field[] }
 export interface Meta {

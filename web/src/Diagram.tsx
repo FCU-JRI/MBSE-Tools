@@ -574,7 +574,35 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
       if (await act(() => api<View>(`/projects/${pid}/elements/delete`, "POST", { id: selectedEl.id }))) onSelectElement(null);
     }
   };
-  const undo = () => act(() => api<View>(`/projects/${pid}/undo`, "POST", {}));
+  /** 復原或重做一步。伺服器會把救回來的項目的位置一起帶回來。 */
+  const stepHistory = async (dir: "undo" | "redo") => {
+    if (readOnly || busy || !view.history?.[dir]) return;
+    setBusy(true);
+    try {
+      await lastSave.current;
+      const r = await api<View & { layout: Layout; diagrams: Diagrams }>(`/projects/${pid}/${dir}`, "POST", {});
+      multiRef.current = []; setMulti([]); setMenu(null); clearSel(); onSelectElement(null);
+      applyLayout(r.layout, false);
+      extraRef.current = r.diagrams; onExtra(r.diagrams);
+      onChanged(r);
+    } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+  };
+  const stepRef = useRef(stepHistory); stepRef.current = stepHistory;
+  // Ctrl+Z 復原、Ctrl+Y 或 Ctrl+Shift+Z 重做；正在打字時交給輸入框自己處理
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("input,textarea,select,[contenteditable],.cm-editor")) return;
+      const k = e.key.toLowerCase();
+      const dir = k === "z" ? (e.shiftKey ? "redo" : "undo") : k === "y" ? "redo" : null;
+      if (!dir) return;
+      e.preventDefault();
+      stepRef.current(dir);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const deleteDiagram = () => {
     const cur = extraRef.current;
     const rest = { ...cur.notes }; delete rest[def.id];
@@ -665,7 +693,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
               : <Tool disabled={!canDelete || busy} onClick={() => setConfirm("selection")} glyph="✕" text={multi.length ? `刪除選取（${delCount}）` : "刪除選取"} title={note ? "刪除選取的標註（Delete 鍵）" : "從模型刪除選取的元素或連線（Delete 鍵）"} />}
             {outIds.length > 0 && <Tool disabled={busy} onClick={moveOut} glyph="⇱" text="移出套件" title="把選取的項目移回上一層套件（也可以直接把它拖出框外）" />}
             {custom && <Tool disabled={!onThisDiagram} onClick={() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); }} glyph="−" text="移出此圖" title="只從這張圖拿掉，模型裡仍然保留" />}
-            <Tool disabled={busy} onClick={undo} glyph="↶" text="復原上一步" title="還原上一次對模型的修改；再按一次會還原這次的還原" />
+            <Tool disabled={busy || !view.history?.undo} onClick={() => stepHistory("undo")} glyph="↶" text="復原" sub="Ctrl+Z" title="回到上一步（對模型的修改）。可以連續按，一步一步往回。" />
+            <Tool disabled={busy || !view.history?.redo} onClick={() => stepHistory("redo")} glyph="↷" text="重做" sub="Ctrl+Y" title="把剛才復原的那一步做回來。復原之後若做了新的修改，就不能再重做。" />
           </div>
         )}
         <div className="tool-group">

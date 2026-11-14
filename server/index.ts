@@ -52,7 +52,7 @@ async function view(id: string) {
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
   const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [] };
+  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id) };
 }
 
 app.use((_req, res, next) => {
@@ -459,11 +459,14 @@ app.patch("/api/projects/:id/comments", wrap(async (req, res) => {
   res.json({ saved: true, ...(await view(id)) });
 }));
 
-// 復原：還原上一次對模型檔的修改。再按一次會還原這次的還原。
-app.post("/api/projects/:id/undo", wrap(async (req, res) => {
-  await store.undoLast(pid(req), author(req));
-  res.json({ saved: true, ...(await view(pid(req))) });
-}));
+// 復原與重做：一步一步往回或往前。回傳版面與自訂圖，救回來的項目才會出現在原本的位置。
+for (const [name, step] of [["undo", -1], ["redo", 1]] as const) {
+  app.post(`/api/projects/:id/${name}`, wrap(async (req, res) => {
+    const id = pid(req);
+    await store.stepHistory(id, author(req), step);
+    res.json({ saved: true, ...(await view(id)), layout: await store.readLayout(id), diagrams: await store.readDiagrams(id) });
+  }));
+}
 
 // 圖的版面（節點位置）。不影響模型，隨下一次儲存一併提交。
 app.get("/api/projects/:id/layout", wrap(async (req, res) => res.json(await store.readLayout(pid(req)))));
