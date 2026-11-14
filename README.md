@@ -54,6 +54,40 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
 
 `install-service.ps1` 註冊登入時自動啟動的排程工作，伺服器結束會自動重啟。更新版本用 `scripts\deploy.ps1`。紀錄在 `JRI_HOME\logs`。
 
+## 部署（Linux／Raspberry Pi）
+
+在 Raspberry Pi 4（4GB，Raspberry Pi OS Lite 64-bit，Debian 13）上測試過。程式放在 `/opt/jri-mbse`，資料放在 `/srv/jri-mbse-data`，由系統帳號 `jri` 執行。
+
+先安裝 Git、Python 與 Node.js 24（NodeSource 套件庫）：
+
+```bash
+sudo apt-get install -y git build-essential curl ca-certificates python3-venv python3-dev
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+sudo apt-get update && sudo apt-get install -y nodejs
+```
+
+建立帳號、取得程式並建置：
+
+```bash
+sudo useradd --system --create-home --home-dir /var/lib/jri --shell /usr/sbin/nologin jri
+sudo install -d -o jri -g jri /opt/jri-mbse /srv/jri-mbse-data
+sudo -u jri git clone -b raspberry-pi https://github.com/FCU-JRI/MBSE-Tools.git /opt/jri-mbse
+sudo -u jri npm ci --prefix /opt/jri-mbse
+sudo -u jri npm run --prefix /opt/jri-mbse build
+```
+
+```bash
+sudo /opt/jri-mbse/scripts/linux/setup-python.sh
+```
+
+```bash
+sudo /opt/jri-mbse/scripts/linux/install-service.sh
+```
+
+服務開機自動啟動、結束後 5 秒重啟，不需要有人登入。更新版本用 `sudo /opt/jri-mbse/scripts/linux/deploy.sh`。紀錄用 `journalctl -u jri-mbse` 查看。對外存取同上表，以 `tailscale serve`／`tailscale funnel` 轉到 8787／8788。
+
 ## 結構
 
 - `server/`：後端。`engine.ts` 呼叫 OpenSysML 解析，`extract.ts` 歸類元素，`gates.ts` 節點檢查，`edits.ts` 把操作轉成 SysML 文字，`auth.ts` 身分與權限，`versions.ts` 分支與基線，`pm.ts` 專案管理，`sim.ts` 模擬，`report.ts` 報告。

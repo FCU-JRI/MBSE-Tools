@@ -1,0 +1,36 @@
+# systemd unit for the JRI MBSE server on Linux (Raspberry Pi OS / Debian).
+# Installed by scripts/linux/install-service.sh, which fills in the paths.
+# Unlike the Windows scheduled task, this starts at boot without anyone logging on.
+[Unit]
+Description=JRI MBSE web tool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@ROOT@
+Environment=JRI_HOME=@DATA@
+Environment=JRI_PYTHON=@DATA@/pyenv/bin/python
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server/index.ts
+Restart=always
+RestartSec=5
+# Logs go to the journal: journalctl -u jri-mbse
+
+# Hardening: the server only needs to write its data folder.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# The service user's home holds git and matplotlib settings (e.g. ~/.ssh for pushing).
+ReadWritePaths=@DATA@ @HOME@
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
