@@ -104,16 +104,21 @@ export function parseThrust(text: string): [number, number][] {
 
 // ───────── OpenRocket .ork ─────────
 
+const ORK_MAX = 50 * 1024 * 1024;
 async function orkXml(buf: Buffer): Promise<string> {
   if (buf[0] === 0x50 && buf[1] === 0x4b) {
     const zip = await JSZip.loadAsync(buf);
     const entry = zip.file("rocket.ork") ?? Object.values(zip.files).find((f) => !f.dir && /\.ork$|\.xml$/i.test(f.name));
     if (!entry) throw new UserError("這個 .ork 檔裡找不到火箭資料。");
-    return entry.async("string");
+    // 先看解壓後有多大，避免很小的壓縮檔展開成幾 GB
+    if (Number((entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0) > ORK_MAX) throw new UserError("檔案解壓後太大。");
+    const text = await entry.async("string");
+    if (text.length > ORK_MAX) throw new UserError("檔案解壓後太大。");
+    return text;
   }
   if (buf[0] === 0x1f && buf[1] === 0x8b) {
     const { gunzipSync } = await import("node:zlib");
-    return gunzipSync(buf).toString("utf8");
+    try { return gunzipSync(buf, { maxOutputLength: ORK_MAX }).toString("utf8"); } catch { throw new UserError("檔案無法解壓，或解壓後太大。"); }
   }
   return buf.toString("utf8");
 }

@@ -66,6 +66,38 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await fs.rename(tmp, file);
 }
 
+// ───────── 主機名稱 ─────────
+// 只回應自己的名字。否則別的網站可以把自己的網域指到 127.0.0.1（DNS 重新綁定），
+// 借使用者的瀏覽器以「本機管理員」的身分讀寫資料。
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const EXTRA_HOSTS = new Set((process.env.JRI_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean));
+const hostOf = (req: Request) => String(req.headers.host ?? "").toLowerCase().replace(/:\d+$/, "");
+const isLocalHost = (req: Request) => LOCAL_HOSTS.has(hostOf(req));
+export function hostGuard(req: Request, res: Response, next: NextFunction): void {
+  getConfig().then((c) => {
+    const host = hostOf(req);
+    let pub = "";
+    try { pub = new URL(c.publicUrl).hostname.toLowerCase(); } catch { /* 還沒設定公開網址 */ }
+    // *.ts.net 由 Tailscale 管理，外人無法把它指到這台電腦的 127.0.0.1
+    if (LOCAL_HOSTS.has(host) || (pub && host === pub) || host.endsWith(".ts.net") || EXTRA_HOSTS.has(host)) return next();
+    res.status(421).type("text").send("Unknown host.");
+  }).catch(next);
+}
+
+/** 簡單的頻率限制：同一來源在一段時間內的次數上限。用在登入與唯讀連結，擋猜測與灌爆。 */
+const hits = new Map<string, { n: number; until: number }>();
+export function rateLimit(max: number, windowMs: number) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const now = Date.now();
+    if (hits.size > 5000) for (const [k, v] of hits) if (v.until < now) hits.delete(k);
+    const key = `${req.socket.localPort}|${String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim()}`;
+    const h = hits.get(key);
+    if (!h || h.until < now) { hits.set(key, { n: 1, until: now + windowMs }); return next(); }
+    if (++h.n > max) { res.status(429).type("text").send("請求太頻繁，請稍後再試。"); return; }
+    next();
+  };
+}
+
 let config: Config | undefined;
 export async function getConfig(): Promise<Config> {
   if (config) return config;
@@ -188,7 +220,7 @@ async function identify(req: Request): Promise<User | null> {
 
   if (!req.isPublic) {
     // 內部埠。沒有經過代理（無 X-Forwarded-For）就是這台電腦本機。
-    if (!req.headers["x-forwarded-for"]) {
+    if (!req.headers["x-forwarded-for"] && isLocalHost(req)) {
       const name = decodeURIComponent(String(req.headers["x-author"] ?? "")).slice(0, 60) || "本機管理員";
       return { kind: "local", login: "local", name, rank: "D-VII", subsystems: [], admin: true, project: null };
     }
@@ -277,6 +309,9 @@ export function need(check: (u: User) => boolean, message: string) {
 export function mountAuthRoutes(app: import("express").Express): void {
   const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
   const isSecure = (req: Request) => req.socket.localPort === PUBLIC_PORT || !!req.headers["x-forwarded-for"];
+
+  const limited = rateLimit(30, 60_000);
+  app.use(["/auth", "/s"], limited);
 
   app.get("/auth/github", wrap(async (req, res) => {
     const c = await getConfig();

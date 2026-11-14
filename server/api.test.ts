@@ -673,3 +673,41 @@ test("復原與重做：可以連續往回、往前；誤刪的項目回到原�
   assert.equal(r.data.history.undo, false, "已經回到建立專案時");
   assert.equal((await call(`${base}/undo`, "POST", {})).status, 400);
 });
+
+test("主機名稱不符的請求被拒絕；修改會排隊；版面可以只存一張圖；回應有壓縮", async () => {
+  const raw = (pathname: string, init: RequestInit = {}) => fetch(`${I}${pathname}`, init);
+  // 別的網域指到這台電腦（DNS 重新綁定）時，Host 會是對方的名字
+  const { request } = await import("node:http");
+  const status = await new Promise<number>((resolve, reject) => {
+    const u = new URL(I);
+    const r = request({ host: u.hostname, port: u.port, path: "/api/projects", headers: { host: "evil.example:8787" } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+    r.on("error", reject); r.end();
+  });
+  assert.equal(status, 421);
+  assert.equal((await raw("/api/projects")).status, 200);
+
+  await call(`${I}/api/projects`, "POST", { id: "q1", name: "排隊測試", kind: "annual", template: "sample" });
+  const base = `${I}/api/projects/q1`;
+  // 同時送出八個新增：全部都要成功，而且八個都在
+  const rs = await Promise.all(Array.from({ length: 8 }, (_, i) => call(`${base}/comments`, "POST", { text: `同時 ${i}` })));
+  assert.deepEqual(rs.map((r) => r.status), Array(8).fill(200), String(JSON.stringify(rs.find((r) => r.status !== 200)?.data)).slice(0, 200));
+  const els = (await call(base)).data.analysis.elements;
+  assert.equal(els.filter((e: any) => e.kind === "Comment").length, 8);
+
+  // 兩個人各存一張圖，互不影響
+  await call(`${base}/layout`, "PATCH", { diagram: "uc", nodes: { a: { x: 1, y: 2 } } });
+  await call(`${base}/layout`, "PATCH", { diagram: "req", nodes: { b: { x: 3, y: 4 } } });
+  assert.deepEqual((await call(`${base}/layout`)).data, { uc: { a: { x: 1, y: 2 } }, req: { b: { x: 3, y: 4 } } });
+  await call(`${base}/layout`, "PATCH", { diagram: "uc", nodes: null });
+  assert.deepEqual(Object.keys((await call(`${base}/layout`)).data), ["req"]);
+
+  const res = await raw("/api/projects/q1", { headers: { "accept-encoding": "gzip" } });
+  assert.equal(res.headers.get("content-encoding"), "gzip");
+  assert.equal((await res.json()).project.id, "q1");
+  assert.match(String(res.headers.get("content-security-policy")), /default-src 'self'/);
+  assert.equal(res.headers.get("x-powered-by"), null);
+
+  // 不存在的專案不會留下空資料夾
+  assert.equal((await call(`${I}/api/projects/ghost-zz/elements/delete`, "POST", { id: "x" })).status, 400);
+  assert.equal((await call(`${I}/api/projects`)).data.some((p: any) => p.id === "ghost-zz"), false);
+});

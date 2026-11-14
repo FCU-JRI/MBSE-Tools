@@ -212,6 +212,7 @@ export async function saveShared(file: string, content: string): Promise<{ saved
 
 export async function sources(id: string, override?: { file: string; content: string }): Promise<Source[]> {
   const dir = dirOf(id);
+  await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
 // 元模型庫以工具內的版本為準；專案內的副本（給 Claude 與離線閱讀用）不同時就更新，隨下一次儲存提交
   const lib = await fs.readFile(LIBRARY, "utf8");
   const copy = path.join(dir, "lib", "JRI.sysml");

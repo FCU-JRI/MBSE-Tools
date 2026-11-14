@@ -242,8 +242,9 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const saveLayout = useCallback((next: Layout) => {
     layoutRef.current = next;
     if (readOnly) return; // 唯讀時位置只留在這次瀏覽
-    lastSave.current = api(`/projects/${pid}/layout`, "PUT", { layout: next }).catch((e) => onError((e as Error).message));
-  }, [pid, onError, readOnly]);
+    // 只送這張圖：別人同時在排別張圖時不會互相蓋掉
+    lastSave.current = api(`/projects/${pid}/layout`, "PATCH", { diagram: def.id, nodes: next[def.id] ?? null }).catch((e) => onError((e as Error).message));
+  }, [pid, onError, readOnly, def.id]);
   /** 位置存檔並重畫（新增套件或註解、伺服器換過識別碼之後） */
   const applyLayout = useCallback((next: Layout, save = true) => { if (save) saveLayout(next); else layoutRef.current = next; setLayout(next); }, [saveLayout]);
   const onPkgResize = useCallback((id: string, b: { x: number; y: number; w: number; h: number }) => {

@@ -28,10 +28,15 @@ async function analyzeAt(dir: string, sha: string): Promise<Analysis> {
 
 export interface BranchInfo { name: string; remote: boolean; ahead: number; behind: number; author: string; date: string; subject: string; ok: boolean; errors: number; firstError: string }
 
+const fetched = new Map<string, number>();
 export async function listBranches(id: string): Promise<BranchInfo[]> {
   const dir = dirOf(id);
   await readProject(id);
-  if (await git(dir, "remote", "get-url", "origin").catch(() => "")) await git(dir, "fetch", "--prune", "origin").catch(() => "");
+  // 向 GitHub 抓一次要一秒左右，一分鐘內不重抓
+  if (Date.now() - (fetched.get(dir) ?? 0) > 60_000 && await git(dir, "remote", "get-url", "origin").catch(() => "")) {
+    fetched.set(dir, Date.now());
+    await git(dir, "fetch", "--prune", "origin").catch(() => "");
+  }
   const raw = await git(dir, "for-each-ref", "--format=%(refname)\t%(objectname)\t%(authorname)\t%(authordate:iso-strict)\t%(subject)", "refs/heads", "refs/remotes/origin");
   const seen = new Set<string>();
   const out: BranchInfo[] = [];

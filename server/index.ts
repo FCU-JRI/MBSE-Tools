@@ -2,6 +2,7 @@ import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import path from "node:path";
 import fs from "node:fs";
+import { brotliCompressSync, constants as zc, gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { ROOT_PACKAGE, shutdown } from "./engine.ts";
 import { evaluateGates, GATES } from "./gates.ts";
@@ -33,7 +34,29 @@ const CAT_PKGS = new Set(CATEGORIES.map((c) => c.pkg));
 const isUserPackage = (e: Element | undefined): e is Element =>
   !!e && e.kind === "Package" && !e.shared && e.qualifiedName !== ROOT_PACKAGE && !(e.qualifiedName.split("::").length === 2 && CAT_PKGS.has(e.name));
 const app = express();
+app.disable("x-powered-by");
+app.use(auth.hostGuard);
 app.use(express.json({ limit: "5mb" }));
+
+// 壓縮 API 的回應（JSON 與報告的 HTML）。靜態檔另外處理，壓一次就記住。
+app.use((req, res, next) => {
+  if (!/\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""))) return next();
+  const send = res.send.bind(res);
+  res.send = ((body?: unknown) => {
+    const type = String(res.getHeader("Content-Type") ?? "");
+    if ((typeof body === "string" || Buffer.isBuffer(body)) && !res.getHeader("Content-Encoding") && /json|text\/|javascript|xml/.test(type)) {
+      const buf = Buffer.from(body as string);
+      if (buf.length > 1024) {
+        res.setHeader("Content-Encoding", "gzip");
+        res.setHeader("Vary", "Accept-Encoding");
+        res.removeHeader("Content-Length");
+        return send(gzipSync(buf));
+      }
+    }
+    return send(body);
+  }) as typeof res.send;
+  next();
+});
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => {
   fn(req, res).catch(next);
@@ -59,11 +82,33 @@ app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "same-origin");
+  // 只載入自己的程式與 Google Fonts 的字型；報告頁另有更嚴格的設定
+  res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
   next();
 });
 auth.mountAuthRoutes(app);
 app.use("/api", auth.authenticate);
 app.use("/api/projects/:id", auth.projectGuard);
+
+// 同一個專案的修改一次只做一個。每個修改都是「讀檔 → 改 → 寫回 → 提交」，
+// 兩個人同時送出時若不排隊，後寫的會蓋掉先寫的，Git 也會因為鎖定而失敗。
+const queues = new Map<string, Promise<void>>();
+app.use("/api/projects/:id", (req, res, next) => {
+  // 只讀的請求不用排；模擬要跑很久，也不排（它只在最後寫自己的結果檔）
+  if (req.method === "GET" || req.method === "HEAD" || /\/(validate|sim\/run|sim\/thrust)$/.test(req.path)) return next();
+  const id = String(req.params.id);
+  const prev = queues.get(id) ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((r) => { release = r; });
+  const tail = prev.then(() => mine);
+  queues.set(id, tail);
+  void tail.then(() => { if (queues.get(id) === tail) queues.delete(id); });
+  const timer = setTimeout(release, 120_000); // 保險：回應卡住也不會永遠擋住後面的人
+  const done = () => { clearTimeout(timer); release(); };
+  res.once("finish", done);
+  res.once("close", done);
+  void prev.then(() => next());
+});
 
 app.get("/api/me", wrap(async (req, res) => {
   const c = await auth.getConfig();
@@ -474,6 +519,15 @@ app.put("/api/projects/:id/layout", wrap(async (req, res) => {
   await store.writeLayout(pid(req), req.body?.layout ?? {});
   res.json({ saved: true });
 }));
+// 只存一張圖的位置：不同的人各自排不同的圖時，不會互相蓋掉
+app.patch("/api/projects/:id/layout", wrap(async (req, res) => {
+  const diagram = String(req.body?.diagram ?? "");
+  if (!diagram || diagram.length > 400) throw new store.UserError("沒有指定是哪一張圖。");
+  const all = await store.readLayout(pid(req));
+  if (req.body?.nodes && typeof req.body.nodes === "object") all[diagram] = req.body.nodes; else delete all[diagram];
+  await store.writeLayout(pid(req), all);
+  res.json({ saved: true });
+}));
 app.get("/api/projects/:id/diagrams", wrap(async (req, res) => res.json(await store.readDiagrams(pid(req)))));
 app.put("/api/projects/:id/diagrams", wrap(async (req, res) => res.json(await store.writeDiagrams(pid(req), req.body?.diagrams))));
 
@@ -604,8 +658,31 @@ app.get("/api/projects/:id/report", wrap(async (req, res) => {
 
 const dist = path.join(ROOT, "dist");
 if (fs.existsSync(dist)) {
-  app.use(express.static(dist));
-  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.join(dist, "index.html")));
+  // 打包出來的檔名帶有內容雜湊，可以永久快取；壓縮一次後留在記憶體
+  const packed = new Map<string, Buffer>();
+  app.get("/assets/:name", (req, res, next) => {
+    const name = String(req.params.name);
+    const file = path.join(dist, "assets", name);
+    if (!/^[\w.-]+\.(js|css)$/.test(name) || !fs.existsSync(file)) return next();
+    const accept = String(req.headers["accept-encoding"] ?? "");
+    const enc = /\bbr\b/.test(accept) ? "br" : /\bgzip\b/.test(accept) ? "gzip" : "";
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Vary", "Accept-Encoding");
+    res.type(path.extname(name));
+    if (!enc) return res.end(fs.readFileSync(file));
+    let body = packed.get(`${enc}:${name}`);
+    if (!body) {
+      const raw = fs.readFileSync(file);
+      body = enc === "br" ? brotliCompressSync(raw, { params: { [zc.BROTLI_PARAM_QUALITY]: 9, [zc.BROTLI_PARAM_SIZE_HINT]: raw.length } }) : gzipSync(raw);
+      packed.set(`${enc}:${name}`, body);
+    }
+    res.setHeader("Content-Encoding", enc);
+    res.end(body);
+  });
+  // 首頁每次都要重新確認，才拿得到新版的檔名
+  const noCache = (res: Response) => res.setHeader("Cache-Control", "no-cache");
+  app.use(express.static(dist, { setHeaders: (res, file) => { if (file.endsWith(".html")) noCache(res as Response); } }));
+  app.get(/^(?!\/api\/).*/, (_req, res) => { noCache(res); res.sendFile(path.join(dist, "index.html")); });
 }
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
