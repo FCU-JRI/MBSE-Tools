@@ -210,14 +210,22 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const [menu, setMenu] = useState<null | { x: number; y: number; on: "pane" | "item"; ask?: boolean }>(null);
   /** 「放進新套件」：套件建立後要搬進去的項目 */
   const pkgFor = useRef<string[] | null>(null);
-  /** 最近一次捲動來自觸控板（兩指滑動）還是滑鼠滾輪：觸控板用來平移，滾輪用來縮放 */
-  const [padScroll, setPadScroll] = useState(false);
-  const onWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) return; // 兩指捏合或 Ctrl+滾輪：一律是縮放
-    // 滑鼠滾輪一格是整數的大步（通常 100 或 120）且沒有橫向；觸控板是連續的小量，常帶橫向
-    const wheel = e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 50 && Number.isInteger(e.deltaY));
-    if (wheel === padScroll) setPadScroll(!wheel);
-  };
+  // 按住 Shift 捲動（滑鼠滾輪或觸控板兩指滑動）＝平移畫面；不按是縮放。
+  // 用原生事件並搶在圖形元件之前處理，才擋得住它預設的縮放。
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.shiftKey || e.ctrlKey || e.metaKey) return;
+      if (!(e.target as HTMLElement | null)?.closest?.(".react-flow")) return;
+      e.preventDefault(); e.stopPropagation();
+      const k = e.deltaMode === 1 ? 20 : 1; // 以「行」為單位的滾輪換算成像素
+      const v = flow.getViewport();
+      flow.setViewport({ x: v.x - e.deltaX * k, y: v.y - e.deltaY * k, zoom: v.zoom });
+    };
+    el.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () => el.removeEventListener("wheel", onWheel, { capture: true });
+  }, [flow]);
   const [confirm, setConfirm] = useState<null | "selection" | "diagram">(null);
   const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg">(null);
   const [withDraft, setWithDraft] = useState(() => load("jri.export", { draft: false }).draft);
@@ -666,7 +674,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         <div className="tool-group">
           <span className="label">{def.code} · {def.title}</span>
           <Tool onClick={toggleCollapsed} glyph={collapsed ? "»" : "«"} text={collapsed ? "展開工具列" : "收合工具列"} />
-          <Tool on={tool === "select"} onClick={() => setTool("select")} icon="select" text="選取" sub="拖曳空白處框選" title="點選、拖曳移動。在空白處拖曳可以框選多個一起移動；按住 Ctrl 或 Shift 點選可以加選；Ctrl+A 全選。按右鍵有快速功能。要移動畫面：觸控板用兩指滑動（兩指捏合是縮放）；滑鼠按住右鍵或中鍵拖曳，或按住空白鍵拖曳。" />
+          <Tool on={tool === "select"} onClick={() => setTool("select")} icon="select" text="選取" sub="Shift＋捲動平移" title="點選、拖曳移動。在空白處拖曳可以框選多個一起移動；按住 Ctrl 或 Shift 點選可以加選；Ctrl+A 全選。按右鍵有快速功能。要移動畫面：按住 Shift 捲動（滾輪或觸控板兩指滑動）；也可以按住滑鼠右鍵或中鍵拖曳，或按住空白鍵拖曳。" />
         </div>
         {!readOnly && elTools.length > 0 && (
           <div className="tool-group">
@@ -729,7 +737,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           </div>
         )}
       </div>
-      <div ref={canvasRef} className={`canvas ${activeLink ? "linking" : ""}`} tabIndex={0} onKeyDown={onKey} onWheelCapture={onWheel}>
+      <div ref={canvasRef} className={`canvas ${activeLink ? "linking" : ""}`} tabIndex={0} onKeyDown={onKey}>
         {activeLink && <div className="canvas-hint"><span className="tag done">{activeLink.zh}</span><span className="caption">{activeLink.hint}。按 Esc 結束。</span></div>}
         {note && !readOnly && !activeLink && panel === null && (
           <div className="canvas-hint">
@@ -871,7 +879,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
             onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
             onSelectionDragStart={(e, ns) => onNodeDragStart(e, ns[0] as FlowNode, ns as FlowNode[])} onSelectionDrag={(e, ns) => onNodeDrag(e, ns[0] as FlowNode, ns as FlowNode[])} onSelectionDragStop={(e, ns) => onNodeDragStop(e, ns[0] as FlowNode, ns as FlowNode[])} onConnect={onConnect} connectionMode={ConnectionMode.Loose} nodesConnectable={!readOnly} deleteKeyCode={null}
             snapToGrid snapGrid={[SNAP, SNAP]} fitView fitViewOptions={{ padding: 0.22, maxZoom: 1 }} minZoom={0.15}
-            onSelectionChange={onSelectionChange} selectionOnDrag={!coarse} panOnDrag={coarse ? true : [1, 2]} panOnScroll={padScroll} zoomOnScroll={!padScroll} zoomOnPinch selectionMode={SelectionMode.Full} multiSelectionKeyCode={["Control", "Meta", "Shift"]}
+            onSelectionChange={onSelectionChange} selectionOnDrag={!coarse} panOnDrag={coarse ? true : [1, 2]} selectionMode={SelectionMode.Full} multiSelectionKeyCode={["Control", "Meta", "Shift"]}
             onNodeClick={(e, n) => { setMenu(null); if (e.ctrlKey || e.metaKey || e.shiftKey) return; pick(n); }}
             onNodeContextMenu={(e, n) => { if (!multiRef.current.includes(n.id)) { only(n.id); pick(n); } openMenu(e, "item"); }}
             onSelectionContextMenu={(e) => openMenu(e, "item")}
