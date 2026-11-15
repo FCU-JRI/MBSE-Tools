@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { analyze } from "./engine.ts";
 import type { Analysis, Source } from "./engine.ts";
 import type { Element } from "./extract.ts";
-import { commit, dirOf, git, listShared, pushLater, readProject, readShared, repoConfig, UserError } from "./projects.ts";
+import { analyzeProject, commit, dirOf, git, listShared, lock, parseRef, pushLater, readProject, readShared, refOf, repoConfig, UserError } from "./projects.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
@@ -29,14 +29,22 @@ async function analyzeAt(dir: string, sha: string): Promise<Analysis> {
 export interface BranchInfo { name: string; remote: boolean; ahead: number; behind: number; author: string; date: string; subject: string; ok: boolean; errors: number; firstError: string }
 
 const fetched = new Map<string, number>();
-export async function listBranches(id: string): Promise<BranchInfo[]> {
+/** 向 GitHub 抓一次要一秒左右，一分鐘內不重抓。 */
+async function fetchOnce(dir: string): Promise<void> {
+  if (Date.now() - (fetched.get(dir) ?? 0) <= 60_000 || !(await git(dir, "remote", "get-url", "origin").catch(() => ""))) return;
+  fetched.set(dir, Date.now());
+  await git(dir, "fetch", "--prune", "origin").catch(() => "");
+}
+
+/** 不論從 main 還是從分支的畫面呼叫，列的都是整個專案的分支。 */
+export async function listBranches(ref: string): Promise<BranchInfo[]> {
+  const { id } = parseRef(ref);
   const dir = dirOf(id);
   await readProject(id);
-  // 向 GitHub 抓一次要一秒左右，一分鐘內不重抓
-  if (Date.now() - (fetched.get(dir) ?? 0) > 60_000 && await git(dir, "remote", "get-url", "origin").catch(() => "")) {
-    fetched.set(dir, Date.now());
-    await git(dir, "fetch", "--prune", "origin").catch(() => "");
-  }
+  await fetchOnce(dir);
+  // 在網頁上開過的分支有本機的一份；成員之後推到 GitHub 的新提交先接上來，列出來的才是最新的
+  const names = (await git(dir, "for-each-ref", "--format=%(refname:short)", "refs/heads")).split("\n").filter((n) => n && n !== "main");
+  for (const n of names) await syncBranch(id, n).catch(() => "");
   const raw = await git(dir, "for-each-ref", "--format=%(refname)\t%(objectname)\t%(authorname)\t%(authordate:iso-strict)\t%(subject)", "refs/heads", "refs/remotes/origin");
   const seen = new Set<string>();
   const out: BranchInfo[] = [];
@@ -61,36 +69,174 @@ const branchRef = async (dir: string, name: string) => {
   return local || resolve(dir, `origin/${name}`);
 };
 
-export async function branchDiff(id: string, name: string): Promise<{ diff: string; changes: Change[] }> {
-  const dir = dirOf(id);
+export async function branchDiff(ref: string, name: string): Promise<{ diff: string; changes: Change[] }> {
+  const dir = dirOf(parseRef(ref).id);
   const sha = await branchRef(dir, name);
   const base = await git(dir, "merge-base", "main", sha);
   const diff = await git(dir, "diff", "--no-color", `${base}..${sha}`, "--", "model");
   return { diff: diff.slice(0, 200_000), changes: diffElements(await analyzeAt(dir, base), await analyzeAt(dir, sha)) };
 }
 
-/** 合併前先確認合併後的模型能解析；不能就取消，main 不會被弄壞。 */
-export async function mergeBranch(id: string, name: string, author: string): Promise<{ commit: string }> {
-  const dir = dirOf(id);
-  const sha = await branchRef(dir, name);
+// ───────── 合併 ─────────
+const who = (author: string) => ["-c", `user.name=${author || "JRI MBSE"}`, "-c", "user.email=mbse@jri.local"];
+const exists = (p: string) => fs.stat(p).then(() => true, () => false);
+const isAncestor = (dir: string, a: string, b: string) => git(dir, "merge-base", "--is-ancestor", a, b).then(() => true, () => false);
+
+// 工具自己維護的資料檔是 JSON。兩邊都改過（例如各自拖過圖）時 git 會當成文字衝突，這裡改成逐欄位合併。
+const DATA_FILES = new Map([["layout.json", 1], ["diagrams.json", 1], ["pm.json", 1], ["sim.json", 1], ["project.json", 2]]);
+// 工具放進儲存庫的副本（元模型庫、分析方法），每次讀專案都會更新成工具內的版本，衝突時留哪一邊都一樣
+const TOOL_COPY = /^(lib|\.claude)\//;
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const keyed = (v: unknown): v is { id: string }[] => Array.isArray(v) && v.every((x) => isObj(x) && typeof x.id === "string");
+
+/**
+ * JSON 的三方合併：只有一邊改過的欄位採用改過的那邊；物件逐欄位、帶 id 的清單逐項目往下比。
+ * 兩邊把同一個值改成不同內容時依 prefer 決定。回傳 undefined 表示這個欄位被刪掉了。
+ */
+export function merge3(base: unknown, ours: unknown, theirs: unknown, prefer: "ours" | "theirs"): unknown {
+  if (same(ours, theirs) || same(theirs, base)) return ours;
+  if (same(ours, base)) return theirs;
+  if (isObj(ours) && isObj(theirs)) {
+    const b = isObj(base) ? base : {};
+    const out: Record<string, unknown> = {};
+    for (const k of new Set([...Object.keys(ours), ...Object.keys(theirs)])) {
+      const v = merge3(b[k], ours[k], theirs[k], prefer);
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  }
+  if (keyed(ours) && keyed(theirs)) {
+    const by = (list: { id: string }[]) => new Map(list.map((x) => [x.id, x]));
+    const [b, o, t] = [by(keyed(base) ? base : []), by(ours), by(theirs)];
+    const out: unknown[] = [];
+    for (const k of new Set([...o.keys(), ...t.keys()])) {
+      const v = merge3(b.get(k), o.get(k), t.get(k), prefer);
+      if (v !== undefined) out.push(v);
+    }
+    return out;
+  }
+  return prefer === "ours" ? ours : theirs;
+}
+
+/**
+ * 把 sha 合併進 ref 的工作目錄。合併後先確認模型能解析，不能就取消，原本的內容不會被弄壞。
+ * 模型檔有衝突時不猜，直接取消並回報 conflict 的說明；prefer 是資料檔兩邊改到同一欄位時採用的那一邊。
+ */
+async function mergeInto(ref: string, sha: string, author: string, message: string, prefer: "ours" | "theirs", conflict: string): Promise<void> {
+  const dir = dirOf(ref);
   await repoConfig(dir);
   if (await git(dir, "status", "--porcelain")) await commit(dir, author, "合併前儲存未提交的變更");
+  const abort = () => git(dir, "merge", "--abort").catch(() => "");
   try {
-    await git(dir, "-c", `user.name=${author || "JRI MBSE"}`, "-c", "user.email=mbse@jri.local", "merge", "--no-ff", "--no-commit", sha);
+    await git(dir, ...who(author), "merge", "--no-ff", "--no-commit", sha);
   } catch {
-    await git(dir, "merge", "--abort").catch(() => "");
-    throw new UserError("這個分支和目前的模型有衝突，無法自動合併。請分支作者先把 main 合併進自己的分支並解決衝突。");
+    const files = (await git(dir, "diff", "--name-only", "--diff-filter=U").catch(() => "")).split("\n").filter(Boolean);
+    if (files.length === 0 || !files.every((f) => DATA_FILES.has(f) || TOOL_COPY.test(f))) { await abort(); throw new UserError(conflict); }
+    for (const f of files) {
+      if (DATA_FILES.has(f)) {
+        const stage = async (n: number): Promise<unknown> => { try { return JSON.parse(await git(dir, "show", `:${n}:${f}`)); } catch { return undefined; } };
+        const merged = merge3(await stage(1), await stage(2), await stage(3), prefer);
+        if (merged === undefined) { await git(dir, "rm", "-q", "-f", "--", f); continue; }
+        await fs.writeFile(path.join(dir, f), JSON.stringify(merged, null, DATA_FILES.get(f)) + "\n", "utf8");
+      } else await git(dir, "checkout", "--ours", "--", f);
+      await git(dir, "add", "--", f);
+    }
   }
-  const { analyzeProject } = await import("./projects.ts");
-  const a = await analyzeProject(id);
+  const a = await analyzeProject(ref);
   if (!a.ok) {
-    await git(dir, "merge", "--abort").catch(() => "");
+    await abort();
     const e = a.diagnostics.find((d) => d.severity === "error");
     throw new UserError(`合併後的模型有錯誤，已取消合併：${e ? `${e.file} 第 ${e.line} 行 ${e.message}` : ""}`);
   }
-  await git(dir, "-c", `user.name=${author || "JRI MBSE"}`, "-c", "user.email=mbse@jri.local", "commit", "-m", `合併分支 ${name}`);
+  await git(dir, ...who(author), "commit", "-m", message);
   pushLater(dir);
+}
+
+/** 把分支合併進 main。 */
+export async function mergeBranch(id: string, name: string, author: string): Promise<{ commit: string }> {
+  if (parseRef(id).branch) throw new UserError("合併分支只能在 main 進行。");
+  const dir = dirOf(id);
+  await branchRef(dir, name);
+  // 分支在網頁上開著時，還沒提交的變更（例如剛排好的圖）先存進分支，才會一起合併進來
+  const opened = refOf(id, name);
+  if (await exists(path.join(dirOf(opened), ".git"))) {
+    const release = await lock(opened);
+    try { if (await git(dirOf(opened), "status", "--porcelain")) await commit(dirOf(opened), author, "儲存圖的版面"); } finally { release(); }
+  }
+  await mergeInto(id, await branchRef(dir, name), author, `合併分支 ${name}`, "theirs", "這個分支和目前的模型有衝突，無法自動合併。請分支作者先把 main 合併進自己的分支並解決衝突。");
   return { commit: await git(dir, "rev-parse", "--short", "HEAD") };
+}
+
+// ───────── 開啟分支（F-33）─────────
+// 分支的內容放在它自己的工作目錄，網頁上看到、改到的都是那一份；每次修改提交到該分支並推送。
+const warnings = new Map<string, string>();
+
+/** 讓本機的分支跟上 GitHub 上同名的分支。回傳空字串，或無法自動合併時給使用者看的說明。 */
+async function syncBranch(id: string, branch: string): Promise<string> {
+  const main = dirOf(id), ref = refOf(id, branch), dir = dirOf(ref);
+  const rev = (r: string) => git(main, "rev-parse", "--verify", "--quiet", r).catch(() => "");
+  const [local, remote] = [await rev(`refs/heads/${branch}`), await rev(`refs/remotes/origin/${branch}`)];
+  if (!local || !remote || local === remote || await isAncestor(main, remote, local)) return "";
+  if (!(await exists(path.join(dir, ".git")))) {
+    // 沒有開著的分支只要移動指標；兩邊各有修改的留到開啟時再合併
+    if (await isAncestor(main, local, remote) && await git(main, "rev-parse", "--abbrev-ref", "HEAD") !== branch) await git(main, "update-ref", `refs/heads/${branch}`, remote, local);
+    return "";
+  }
+  const release = await lock(ref);
+  try {
+    if (await git(dir, "status", "--porcelain")) await commit(dir, "JRI MBSE", "儲存圖的版面");
+    if (await isAncestor(dir, "HEAD", remote)) { await git(dir, "merge", "--ff-only", remote); return ""; }
+    await mergeInto(ref, remote, "JRI MBSE", `合併 GitHub 上的 ${branch}`, "ours", "衝突");
+    return "";
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    return "這個分支在網頁上和 GitHub 上各有不同的修改，無法自動合併。網頁上的修改暫時推不上 GitHub，請分支作者在自己的電腦上處理。";
+  } finally { release(); }
+}
+
+/** 開啟分支：第一次開啟時建立它的工作目錄；sync 為真時順便跟上 GitHub 上的新提交。main 不用做任何事。 */
+export async function openBranch(ref: string, sync: boolean): Promise<void> {
+  const { id, branch } = parseRef(ref);
+  if (!branch) return;
+  const main = dirOf(id), dir = dirOf(ref);
+  await readProject(id);
+  const has = await exists(path.join(dir, ".git"));
+  if (has && !sync) return;
+  await fetchOnce(main);
+  if (!has) {
+    const release = await lock(ref);
+    try {
+      if (!(await exists(path.join(dir, ".git")))) {
+        const rev = (r: string) => git(main, "rev-parse", "--verify", "--quiet", r).catch(() => "");
+        const from = await rev(`refs/heads/${branch}`) ? [dir, branch] : await rev(`refs/remotes/origin/${branch}`) ? ["-b", branch, dir, `origin/${branch}`] : null;
+        if (!from) throw new UserError(`找不到分支 ${branch}。`);
+        await fs.mkdir(path.dirname(dir), { recursive: true });
+        await git(main, "worktree", "prune").catch(() => "");
+        await git(main, "worktree", "add", ...from).catch(() => { throw new UserError(`無法開啟分支 ${branch}：它可能正在伺服器的其他位置使用中。`); });
+      }
+    } finally { release(); }
+  }
+  warnings.set(dir, await syncBranch(id, branch));
+}
+
+export interface BranchState { name: string; ahead: number; behind: number; warning: string }
+/** 分支相對於 main 的位置；main 回傳 null。 */
+export async function branchState(ref: string): Promise<BranchState | null> {
+  const { branch } = parseRef(ref);
+  if (!branch) return null;
+  const dir = dirOf(ref);
+  const [behind, ahead] = (await git(dir, "rev-list", "--left-right", "--count", "main...HEAD")).split(/\s+/).map(Number);
+  return { name: branch, ahead, behind, warning: warnings.get(dir) ?? "" };
+}
+
+/** 把 main 的更新合併進分支，分支才不會離 main 越來越遠，之後合併回 main 也比較不會衝突。 */
+export async function mergeMain(ref: string, author: string): Promise<void> {
+  if (!parseRef(ref).branch) throw new UserError("這個功能只用在分支上。");
+  const dir = dirOf(ref);
+  const sha = await git(dir, "rev-parse", "main");
+  if (await isAncestor(dir, sha, "HEAD")) throw new UserError("這個分支已經包含 main 的最新內容。");
+  await mergeInto(ref, sha, author, "合併 main 的更新", "ours", "main 的更新和這個分支的修改有衝突，無法自動合併。請分支作者在自己的電腦上把 main 合併進來並解決衝突。");
 }
 
 export interface Baseline { ref: string; label: string; date: string; commit: string }

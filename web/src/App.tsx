@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { api, getAuthor, setAuthor } from "./api.ts";
+import { api, baseOf, getAuthor, setAuthor } from "./api.ts";
 import type { Diagrams, Me, Meta, MeResponse, Project, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
 import { diagramsOf, label, listOf } from "./model.ts";
@@ -48,7 +48,7 @@ export function App() {
   );
 
   if (!welcomed) return <Welcome name={user.name} role={user.rankZh} onDone={() => { markWelcome(); setWelcomed(true); }} />;
-  if (projectId) return <Workspace id={projectId} meta={meta} user={user} onHome={() => open(null)} who={who} />;
+  if (projectId) return <Workspace key={projectId} id={projectId} meta={meta} user={user} onHome={() => open(null)} onOpen={open} who={who} />;
   return (
     <div className="shell">
       <header className="topbar">
@@ -193,7 +193,8 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
 type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history";
 const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
 
-function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; user: Me; onHome: () => void; who: React.ReactNode }) {
+/** id 是專案參照：main 或某個分支。分支和 main 用同一個畫面，所有分頁都能看、能改（F-33）。 */
+function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
   const readOnly = !user.caps.edit;
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
@@ -232,7 +233,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
     setDiagramId(did); setMode("diagram");
   };
   const diagrams = useMemo(() => (view ? diagramsOf(view.analysis, extra) : []), [view, extra]);
-  if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><button className="tbtn primary" onClick={onHome}>回專案列表</button></div>;
+  if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><div className="tbtn-row">{id !== baseOf(id) && <button className="tbtn primary" onClick={() => onOpen(baseOf(id))}>回到 main</button>}<button className={`tbtn ${id === baseOf(id) ? "primary" : ""}`} onClick={onHome}>回專案列表</button></div></div>;
   if (!view) return <div className="page"><p className="label">載入模型中</p></div>;
 
   const def: DiagramDef = diagrams.find((d) => d.id === diagramId) ?? diagrams[0];
@@ -269,6 +270,8 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
         </aside>}
         {showTree && <Resizer side="left" open={panes.leftOpen} width={panes.left} onWidth={(w) => setPane({ left: w })} onToggle={() => setPane({ leftOpen: !panes.leftOpen })} />}
         <section className="center">
+          {view.branch && <div className="banner"><span className="tag warn">分支</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>正在{readOnly ? "瀏覽" : "編輯"}分支 <b>{view.branch.name}</b>。{readOnly ? "這裡的內容還沒有合併進 main。" : "這裡的修改只存在這個分支，合併後才會進入 main。"}</span><button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main</button></div>}
+          {view.branch?.warning && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ maxWidth: "none" }}>{view.branch.warning}</span></div>}
           {errors.length > 0 && mode !== "source" && (
             <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>
           )}
@@ -284,7 +287,7 @@ function Workspace({ id, meta, user, onHome, who }: { id: string; meta: Meta; us
           {mode === "plan" && <div className="center-scroll"><PlanView view={view} meta={meta} user={user} /></div>}
           {mode === "sim" && <div className="center-scroll"><SimView view={view} user={user} onChanged={setView} /></div>}
           {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} /></div>}
-          {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} onChanged={setView} /></div>}
+          {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} branch={view.branch ?? null} onOpen={onOpen} onChanged={(v) => { setView(v); api<Diagrams>(`/projects/${id}/diagrams`).then(setExtra).catch(() => {}); }} /></div>}
         </section>
         {showSide && <Resizer side="right" open={panes.rightOpen} width={panes.right} onWidth={(w) => setPane({ right: w })} onToggle={() => setPane({ rightOpen: !panes.rightOpen })} />}
         {showSide && <aside className="side right" style={{ width: panes.rightOpen ? panes.right : 0 }} hidden={!panes.rightOpen}><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}

@@ -303,7 +303,8 @@ export function describe(u: User) {
 /** 專案層級的檢查：唯讀連結只能看指定專案，且不能寫入。 */
 export function projectGuard(req: Request, res: Response, next: NextFunction): void {
   const u = req.user as User;
-  if (u.project && u.project !== req.params.id) { res.status(403).json({ error: "這個連結不能開啟此專案。" }); return; }
+  // 唯讀連結可以看指定專案的 main 與分支（參照「代號@分支」的前半是專案）
+  if (u.project && u.project !== String(req.params.id).split("@")[0]) { res.status(403).json({ error: "這個連結不能開啟此專案。" }); return; }
   const readOnlyPost = req.method === "POST" && /\/validate$/.test(req.path);
   if (req.method !== "GET" && !readOnlyPost && !can.edit(u)) { res.status(403).json({ error: "唯讀連結不能修改內容。" }); return; }
   next();
