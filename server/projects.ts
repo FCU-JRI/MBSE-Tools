@@ -107,6 +107,17 @@ export async function syncState(id: string): Promise<SyncState> {
   return cur;
 }
 
+// 推送因為 GitHub 上有這裡沒有的提交而被拒絕時要做的事（由 versions.ts 登記：接上那些提交再推一次）
+let rejected: ((dir: string) => void) | null = null;
+export function onPushRejected(fn: (dir: string) => void): void { rejected = fn; }
+/** 從工作目錄反推專案參照；不是專案或分支的資料夾回傳 null。 */
+export function refOfDir(dir: string): string | null {
+  const p = path.relative(DATA_DIR, dir).split(path.sep);
+  if (p.length === 1 && ID.test(p[0])) return p[0];
+  const b = path.relative(BRANCH_DIR, dir).split(path.sep);
+  return b.length === 2 && ID.test(b[0]) && BRANCH.test(b[1]) ? `${b[0]}@${b[1]}` : null;
+}
+
 export function pushLater(dir: string): void {
   if (pending.get(dir)) return;
   pending.set(dir, true);
@@ -124,7 +135,9 @@ export function pushLater(dir: string): void {
       if (branch === "main") await run("git", ["push", "origin", "--tags"], { cwd: dir, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
       st.lastPushAt = new Date().toISOString(); st.error = null;
     } catch (e) {
-      st.error = String((e as { stderr?: string }).stderr ?? (e as Error).message).split("\n").filter(Boolean).slice(-2).join(" ").slice(0, 300);
+      const text = String((e as { stderr?: string }).stderr ?? (e as Error).message);
+      st.error = text.split("\n").filter(Boolean).slice(-2).join(" ").slice(0, 300);
+      if (/non-fast-forward|fetch first/.test(text)) rejected?.(dir);
     } finally { st.pushing = false; }
   }, 1500);
 }
