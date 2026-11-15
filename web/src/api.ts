@@ -20,7 +20,9 @@ export interface Step {
 /** 開啟的是分支時才有：分支名稱、相對 main 領先與落後的提交數、無法跟 GitHub 同步時的說明 */
 export interface BranchState { name: string; ahead: number; behind: number; warning: string }
 /** project.id 是專案參照：main 是「代號」，分支是「代號@分支」（斜線寫成 ~）。拿它呼叫 API 就會留在同一個分支。 */
-export interface View { project: Project; analysis: Analysis; gates: Gate[]; docs: Doc[]; milestones: Record<string, string>; process: Step[]; history?: { undo: boolean; redo: boolean }; branch?: BranchState | null }
+export interface View { project: Project; analysis: Analysis; gates: Gate[]; docs: Doc[]; milestones: Record<string, string>; process: Step[]; history?: { undo: boolean; redo: boolean }; branch?: BranchState | null;
+  /** 和 GitHub 接不上時的說明（main 與分支都可能有） */
+  warning?: string }
 export const baseOf = (ref: string) => ref.split("@")[0];
 export const refOf = (ref: string, branch: string) => `${baseOf(ref)}@${branch.replaceAll("/", "~")}`;
 export interface Field { name: string; zh: string; type: "text" | "int" | "real" }

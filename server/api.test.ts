@@ -399,6 +399,87 @@ test("分支和 GitHub 同步：成員推上來的修改會接上，網頁上的
   assert.match(gitIn(path.join(home, "archive", kept), "branch", "--list"), /claude\/fix/);
 });
 
+test("合併時的模型衝突：一邊的修改已包含另一邊會自動解決；一邊刪、一邊改同一行仍然要人處理（F-34）", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "tc", name: "衝突測試", kind: "annual" });
+  const dir = path.join(home, "projects", "tc"), model = path.join(dir, "model", "model.sysml");
+  const base = await fs.readFile(model, "utf8");
+  const lineOf = (part: string) => { const l = base.split("\n").find((x) => x.includes(part)); assert.ok(l, `範本裡找不到 ${part}`); return l + "\n"; };
+  const L1 = lineOf("#derive dependency from '完成年度飛行任務' to '到達目標高度';"), L2 = lineOf("#derive dependency from '遠地點達 3000 m' to '完成年度飛行任務';");
+  assert.ok(base.includes(L1 + L2), "兩條關係要相鄰，才會讓 git 判定衝突");
+  const commitOn = async (branch: string, content: string, message: string) => {
+    if (branch !== "main") gitIn(dir, "checkout", "-q", "-b", branch);
+    await fs.writeFile(model, content, "utf8");
+    gitIn(dir, "commit", "-qam", message);
+    gitIn(dir, "checkout", "-q", "main");
+  };
+  await commitOn("feature/superset", base.replace(L1 + L2, ""), "分支：刪掉兩條關係");
+  await commitOn("feature/rewrite", base.replace(L1, L1.replace("#derive", "#trace")), "分支：改寫第一條關係");
+  await commitOn("main", base.replace(L1, ""), "main：刪掉第一條關係");
+
+  // main 刪掉的那一行，分支把它改寫了：真的意見不同，不自動處理，main 不變
+  let r = await call(`${I}/api/projects/tc/branches/merge`, "POST", { name: "feature/rewrite" });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /衝突.*model\.sysml/);
+  assert.equal((await fs.readFile(model, "utf8")), base.replace(L1, ""));
+
+  // main 刪的那一條，分支也刪了，還多刪一條：分支的結果已經包含兩邊的修改
+  r = await call(`${I}/api/projects/tc/branches/merge`, "POST", { name: "feature/superset" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.ok, true);
+  assert.equal(await fs.readFile(model, "utf8"), base.replace(L1 + L2, ""));
+  assert.match(gitIn(dir, "log", "-1", "--format=%B"), /自動解決的模型衝突.*model\.sysml 1 段/);
+});
+
+test("main 也會接上 GitHub 上的新提交：有人在 GitHub 合併後，網頁的修改仍然推得上去（F-35）", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "tm", name: "main 同步測試", kind: "annual" });
+  const dir = path.join(home, "projects", "tm"), bare = path.join(home, "remote-tm.git"), member = path.join(home, "member-tm");
+  gitIn(home, "init", "-q", "--bare", "-b", "main", bare);
+  gitIn(dir, "remote", "add", "origin", bare);
+  gitIn(dir, "push", "-q", "origin", "main");
+  gitIn(home, "clone", "-q", bare, member);
+  const model = path.join(member, "model", "model.sysml");
+  // 模擬 GitHub 上的 main 多了提交（在 GitHub 按合併，或有人直接推送）
+  const onGitHub = async (change: (text: string) => string, message: string) => {
+    gitIn(member, "pull", "-q", "origin", "main");
+    await fs.writeFile(model, change(await fs.readFile(model, "utf8")), "utf8");
+    gitIn(member, "commit", "-qam", message);
+    gitIn(member, "push", "-q", "origin", "main");
+  };
+  const M = `${I}/api/projects/tm`;
+  const tips = () => [gitIn(dir, "rev-parse", "HEAD").trim(), gitIn(bare, "rev-parse", "refs/heads/main").trim()];
+  const inSync = async () => {
+    for (let i = 0; i < 75; i++) { const [a, b] = tips(); if (a === b) return true; await wait(200); }
+    return false;
+  };
+
+  // GitHub 上多了一筆，網頁接著有人修改：推送被拒絕 → 自動接上 → 再推一次成功
+  await onGitHub((t) => t.replace("package Requirements {", "package Requirements {\n        requirement <'REQ-SYS-950'> 'GitHub 上合併進來的需求' : SystemRequirement { doc /* 來自 GitHub。 */ }"), "GitHub：合併進 main");
+  assert.equal((await call(`${M}/pm/tasks`, "POST", { title: "網頁上的任務", start: "2026-09-01", end: "2026-09-02" })).status, 200);
+  assert.ok(await inSync(), "推送被拒絕後應該自動接上 GitHub 的提交並推送成功");
+  let r = await call(M);
+  assert.ok(hasEl(r.data, "GitHub 上合併進來的需求"));
+  assert.equal(r.data.warning, "");
+  assert.equal((await call(`${M}/sync`)).data.error, null);
+  assert.equal((await call(`${M}/pm`)).data.tasks[0].title, "網頁上的任務");
+
+  // 沒有人修改時，重新載入專案也會接上
+  await onGitHub((t) => t.replace("來自 GitHub。", "GitHub 上又改了一次。"), "GitHub：再改一次");
+  gitIn(dir, "fetch", "-q", "origin");
+  r = await call(M);
+  assert.equal(r.data.warning, "");
+  assert.match((await call(`${M}/files/model.sysml`)).data.content, /GitHub 上又改了一次。/);
+  // 工作目錄有還沒提交的檔案（這裡是共用元件庫的副本）時會先存起來再合併，所以不一定是快轉；結果要和 GitHub 一致
+  assert.ok(await inSync(), "接上後兩邊應該一致");
+
+  // GitHub 上的 main 模型壞了：不接，免得所有人的畫面一起壞掉，並提示
+  await onGitHub((t) => t + "\npackage Oops { part def }\n", "GitHub：壞掉的模型");
+  gitIn(dir, "fetch", "-q", "origin");
+  r = await call(M);
+  assert.match(r.data.warning, /無法解析/);
+  assert.equal(r.data.analysis.ok, true);
+  assert.notEqual(tips()[0], tips()[1]);
+});
+
 test("GitHub 儲存庫網址只接受 github.com", async () => {
   assert.equal((await call(`${I}/api/projects/t1/remote`, "POST", { url: "ext::sh -c whoami" })).status, 400);
   assert.equal((await call(`${I}/api/projects/t1/sync`)).data.remote, "");

@@ -76,7 +76,7 @@ async function view(id: string) {
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
   const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id), branch: await versions.branchState(id) };
+  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id), branch: await versions.branchState(id), warning: versions.syncWarning(id) };
 }
 
 app.use((_req, res, next) => {
@@ -91,7 +91,7 @@ auth.mountAuthRoutes(app);
 app.use("/api", auth.authenticate);
 app.use("/api/projects/:id", auth.projectGuard);
 
-// 分支（F-33）：參照是「代號@分支」。第一次開啟時建立它的工作目錄；載入整個專案時順便跟上 GitHub 上的新提交。
+// 分支（F-33）：參照是「代號@分支」，第一次開啟時建立它的工作目錄。載入整個專案時，main 和分支都順便跟上 GitHub 上的新提交。
 app.use("/api/projects/:id", (req, _res, next) => {
   versions.openBranch(String(req.params.id), req.method === "GET" && req.path === "/").then(() => next(), next);
 });
