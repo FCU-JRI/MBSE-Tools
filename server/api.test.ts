@@ -256,6 +256,149 @@ test("基線比較：列出節點核可後的變更", async () => {
   assert.equal((await call(`${I}/api/projects/t1/compare?from=HEAD&to=--upload-pack=x`)).status, 400);
 });
 
+const hasEl = (view: any, name: string) => view.analysis.elements.some((e: any) => e.name === name);
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test("分支可以像 main 一樣完整開啟並編輯；修改只留在分支，合併後才進 main（F-33）", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "tb", name: "分支測試", kind: "annual" });
+  gitIn(path.join(home, "projects", "tb"), "branch", "feature/ws");
+  const M = `${I}/api/projects/tb`, B = `${I}/api/projects/tb@feature~ws`;
+
+  let r = await call(B);
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.equal(r.data.project.id, "tb@feature~ws", "回傳的專案參照帶著分支，網頁接下來的請求才會留在分支上");
+  assert.deepEqual(r.data.branch, { name: "feature/ws", ahead: 0, behind: 0, warning: "" });
+  assert.equal(r.data.gates.length, 8);
+  assert.equal((await call(M)).data.branch, null);
+
+  // 模型、時程、版面：改在分支，main 不受影響
+  r = await call(`${B}/elements`, "POST", { category: "SystemRequirement", name: "分支上的需求", doc: "只在分支。" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.ok(hasEl(r.data, "分支上的需求"));
+  assert.equal(r.data.branch.ahead, 1);
+  assert.equal(hasEl((await call(M)).data, "分支上的需求"), false);
+  r = await call(`${B}/pm/tasks`, "POST", { title: "分支上的任務", start: "2026-09-01", end: "2026-09-02" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.equal((await call(`${M}/pm`)).data.tasks.length, 0);
+  await call(`${B}/layout`, "PATCH", { diagram: "bdd", nodes: { b: { x: 3, y: 4 } } });
+  assert.deepEqual((await call(`${M}/layout`)).data, {});
+  assert.match((await call(`${B}/files/model.sysml`)).data.content, /分支上的需求/);
+  assert.equal((await call(`${B}/export.xlsx`)).status, 200);
+  assert.match((await call(`${B}/report?gate=proposal`)).data, /分支上的需求|分支測試/);
+
+  // 復原與重做在分支上各自獨立
+  r = await call(`${B}/undo`, "POST", {});
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.equal(hasEl(r.data, "分支上的需求"), false);
+  r = await call(`${B}/redo`, "POST", {});
+  assert.ok(hasEl(r.data, "分支上的需求"));
+
+  // 整個專案的事不能在分支上做；不合法或不存在的分支被拒絕
+  r = await call(`${B}/signoffs`, "POST", { gate: "proposal", decision: "APPROVE" });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /只能在 main/);
+  assert.equal((await call(`${B}/archive`, "POST", { confirm: "分支測試" })).status, 400);
+  assert.equal((await call(`${B}/branches/merge`, "POST", { name: "feature/ws" })).status, 400);
+  for (const bad of ["tb@main", "tb@no-such", "tb@a..b", "tb@feature%2Fws", "tb@-x"]) assert.equal((await call(`${I}/api/projects/${bad}`)).status, 400, bad);
+  assert.equal((await call(`${I}/api/projects`, "POST", { id: "tb@x", name: "不該建立", kind: "annual" })).status, 400);
+
+  // main 往前走，而且排了同一張圖 → 分支把 main 的更新合併進來，兩邊的版面都留著
+  await call(`${M}/layout`, "PATCH", { diagram: "bdd", nodes: { a: { x: 1, y: 2 } } });
+  r = await call(`${M}/elements`, "POST", { category: "Stakeholder", name: "main 上的利害關係人", doc: "只在 main。" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.equal((await call(B)).data.branch.behind >= 1, true);
+  r = await call(`${B}/branches/update`, "POST", {});
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.branch.behind, 0);
+  assert.ok(hasEl(r.data, "main 上的利害關係人") && hasEl(r.data, "分支上的需求"));
+  assert.deepEqual((await call(`${B}/layout`)).data, { bdd: { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } } });
+  assert.equal((await call(`${B}/branches/update`, "POST", {})).status, 400, "已經包含 main 的最新內容");
+
+  // 分支列在 main 的版本頁；合併時連還沒提交的版面一起帶進 main
+  const row = (await call(`${M}/branches`)).data.find((x: any) => x.name === "feature/ws");
+  assert.equal(row?.ok, true);
+  await call(`${B}/layout`, "PATCH", { diagram: "req", nodes: { c: { x: 5, y: 6 } } });
+  r = await call(`${M}/branches/merge`, "POST", { name: "feature/ws" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.ok(hasEl(r.data, "分支上的需求"));
+  assert.deepEqual((await call(`${M}/layout`)).data, { bdd: { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } }, req: { c: { x: 5, y: 6 } } });
+  assert.equal((await call(`${M}/pm`)).data.tasks[0].title, "分支上的任務");
+});
+
+test("分支和 GitHub 同步：成員推上來的修改會接上，網頁上的修改推到同名分支，衝突時不硬合併", async () => {
+  const dir = path.join(home, "projects", "tb");
+  const bare = path.join(home, "remote-tb.git"), member = path.join(home, "member-tb");
+  gitIn(home, "init", "-q", "--bare", "-b", "main", bare);
+  gitIn(dir, "remote", "add", "origin", bare);
+  gitIn(dir, "push", "-q", "origin", "main");
+  gitIn(home, "clone", "-q", bare, member);
+  gitIn(member, "checkout", "-q", "-b", "claude/fix");
+  const model = path.join(member, "model", "model.sysml");
+  const edit = async (from: string, to: string, message: string) => {
+    const text = await fs.readFile(model, "utf8");
+    assert.ok(text.includes(from), `成員的模型裡找不到「${from}」`);
+    await fs.writeFile(model, text.replace(from, to), "utf8");
+    gitIn(member, "commit", "-qam", message);
+    gitIn(member, "push", "-q", "origin", "claude/fix");
+  };
+  await edit("package Requirements {", "package Requirements {\n        requirement <'REQ-SYS-901'> '成員推上來的需求' : SystemRequirement { doc /* 第一版。 */ }", "成員：新增需求");
+
+  // 只存在 GitHub 上的分支也能直接開啟
+  const B = `${I}/api/projects/tb@claude~fix`;
+  let r = await call(B);
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 200));
+  assert.ok(hasEl(r.data, "成員推上來的需求"));
+
+  // 網頁上的修改推到 GitHub 上的同名分支
+  const opened = path.join(home, "branches", "tb", "claude~fix");
+  const pushed = async () => {
+    for (let i = 0; i < 60; i++) {
+      if (gitIn(bare, "rev-parse", "refs/heads/claude/fix").trim() === gitIn(opened, "rev-parse", "HEAD").trim()) return true;
+      await wait(200);
+    }
+    return false;
+  };
+  assert.equal((await call(`${B}/pm/tasks`, "POST", { title: "網頁上加的任務", start: "2026-09-03", end: "2026-09-04" })).status, 200);
+  assert.ok(await pushed(), "網頁上的修改應該推到 GitHub");
+
+  // 成員拉下來再推一版 → 網頁重新開啟時接上
+  gitIn(member, "pull", "-q", "origin", "claude/fix");
+  await edit("第一版。", "第二版。", "成員：修改說明");
+  gitIn(dir, "fetch", "-q", "origin");
+  r = await call(B);
+  assert.equal(r.data.branch.warning, "");
+  assert.match((await call(`${B}/files/model.sysml`)).data.content, /第二版。/);
+
+  // 成員和網頁各改各的（不同檔案）→ 自動合併，再推上去
+  await edit("第二版。", "第三版。", "成員：再改一次");
+  assert.equal((await call(`${B}/pm/tasks`, "POST", { title: "同時加的任務", start: "2026-09-05", end: "2026-09-06" })).status, 200);
+  gitIn(dir, "fetch", "-q", "origin");
+  r = await call(B);
+  assert.equal(r.data.branch.warning, "");
+  assert.match((await call(`${B}/files/model.sysml`)).data.content, /第三版。/);
+  assert.ok((await call(`${B}/pm`)).data.tasks.some((t: any) => t.title === "同時加的任務"));
+  assert.ok(await pushed(), "合併後的結果應該推到 GitHub");
+  assert.equal((await call(`${I}/api/projects/tb/branches`)).data.find((x: any) => x.name === "claude/fix")?.ok, true);
+
+  // 兩邊改了模型的同一行 → 不硬合併：網頁上的內容不變，提示使用者
+  gitIn(member, "pull", "-q", "origin", "claude/fix");
+  await edit("第三版。", "成員版。", "成員：改同一行");
+  const mine = (await call(`${B}/files/model.sysml`)).data.content.replace("第三版。", "網頁版。");
+  assert.equal((await call(`${B}/files/model.sysml`, "PUT", { content: mine, message: "網頁：改同一行" })).status, 200);
+  gitIn(dir, "fetch", "-q", "origin");
+  r = await call(B);
+  assert.match(r.data.branch.warning, /無法自動合併/);
+  assert.equal(r.data.analysis.ok, true);
+  assert.match((await call(`${B}/files/model.sysml`)).data.content, /網頁版。/);
+
+  // 封存專案時收掉分支的工作目錄，分支本身留在儲存庫
+  assert.equal((await call(`${I}/api/projects/tb/archive`, "POST", { confirm: "分支測試" })).status, 200);
+  assert.equal(await fs.stat(path.join(home, "branches", "tb")).then(() => true, () => false), false);
+  assert.equal((await call(B)).status, 400);
+  const kept = (await fs.readdir(path.join(home, "archive"))).find((n) => n.startsWith("tb-")) as string;
+  assert.match(gitIn(path.join(home, "archive", kept), "branch", "--list"), /claude\/fix/);
+});
+
 test("GitHub 儲存庫網址只接受 github.com", async () => {
   assert.equal((await call(`${I}/api/projects/t1/remote`, "POST", { url: "ext::sh -c whoami" })).status, 400);
   assert.equal((await call(`${I}/api/projects/t1/sync`)).data.remote, "");

@@ -137,7 +137,8 @@ function Signoff({ user, view, gate, setView }: { user: Me; view: View; gate: Ga
           ))}</tbody>
         </table>
       )}
-      {user.rank && <>
+      {view.branch && <p className="caption">節點簽核只能在 main 進行。這個分支合併進 main 之後，再到 main 簽核。</p>}
+      {user.rank && !view.branch && <>
       <div className="row">
         {gate.perSubsystem && <label className="field"><span className="label">次系統</span><select className="input" value={form.subsystem} onChange={(e) => setForm({ ...form, subsystem: e.target.value })}><option value="">請選擇</option>{subsystems.map((s) => <option key={s.id}>{s.name}</option>)}</select></label>}
         <label className="field" style={{ flex: 2 }}><span className="label">意見</span><input className="input" value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>

@@ -44,9 +44,48 @@ export class UserError extends Error {}
 const ID = /^[a-z0-9][a-z0-9-]{1,40}$/;
 const FILE = /^[A-Za-z0-9_\-一-鿿]+\.sysml$/;
 
-export function dirOf(id: string): string {
+const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,120}$/;
+const BRANCH_DIR = path.join(HOME_DIR, "branches");
+
+/**
+ * 專案參照（F-33）：`代號` 是 main，`代號@分支` 是某個分支。分支名稱裡的斜線在參照中寫成 ~
+ * （git 不允許分支名稱含 ~，不會混淆），參照才能直接放進網址路徑。
+ * 每個分支有自己的工作目錄（git worktree），所以讀寫專案的功能不用另外寫一套就能用在分支上。
+ */
+export function parseRef(ref: string): { id: string; branch: string | null } {
+  const at = ref.indexOf("@");
+  const id = at < 0 ? ref : ref.slice(0, at);
   if (!ID.test(id)) throw new UserError("專案代號只能用小寫英數與連字號。");
-  return path.join(DATA_DIR, id);
+  if (at < 0) return { id, branch: null };
+  const raw = ref.slice(at + 1);
+  const branch = raw.replaceAll("~", "/");
+  if (!BRANCH.test(raw) || branch === "main" || /\.\.|\/\/|\/$|\.lock$|\/\./.test(branch)) throw new UserError("分支名稱不合法。");
+  return { id, branch };
+}
+export const refOf = (id: string, branch: string | null): string => (branch ? `${id}@${branch.replaceAll("/", "~")}` : id);
+
+export function dirOf(ref: string): string {
+  const { id, branch } = parseRef(ref);
+  return branch ? path.join(BRANCH_DIR, id, branch.replaceAll("/", "~")) : path.join(DATA_DIR, id);
+}
+/** 簽核、封存、儲存庫設定是整個專案的事，不能在分支上做。 */
+function mainOnly(ref: string, what: string): string {
+  if (parseRef(ref).branch) throw new UserError(`${what}只能在 main 進行。`);
+  return ref;
+}
+
+// 同一個專案（或同一個分支）的修改一次只做一個。每個修改都是「讀檔 → 改 → 寫回 → 提交」，
+// 兩個人同時送出時若不排隊，後寫的會蓋掉先寫的，Git 也會因為鎖定而失敗。
+const queues = new Map<string, Promise<void>>();
+/** 排隊：等前面的做完才輪到自己。回傳的函式用來放行下一個，一定要呼叫。 */
+export function lock(ref: string): Promise<() => void> {
+  const prev = queues.get(ref) ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((r) => { release = r; });
+  const tail = prev.then(() => mine);
+  queues.set(ref, tail);
+  void tail.then(() => { if (queues.get(ref) === tail) queues.delete(ref); });
+  return prev.then(() => release);
 }
 
 export async function git(dir: string, ...args: string[]): Promise<string> {
@@ -78,8 +117,11 @@ export function pushLater(dir: string): void {
     const st = sync.get(dir) ?? { remote, lastPushAt: null, error: null, pushing: false };
     st.remote = remote; st.pushing = true; sync.set(dir, st);
     try {
-      await run("git", ["push", "--follow-tags", "origin", "main"], { cwd: dir, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
-      await run("git", ["push", "origin", "--tags"], { cwd: dir, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      // 分支的工作目錄推自己的分支；基線標籤只跟著 main 推
+      const head = await git(dir, "rev-parse", "--abbrev-ref", "HEAD").catch(() => "");
+      const branch = head && head !== "HEAD" ? head : "main";
+      await run("git", ["push", "--follow-tags", "origin", branch], { cwd: dir, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      if (branch === "main") await run("git", ["push", "origin", "--tags"], { cwd: dir, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
       st.lastPushAt = new Date().toISOString(); st.error = null;
     } catch (e) {
       st.error = String((e as { stderr?: string }).stderr ?? (e as Error).message).split("\n").filter(Boolean).slice(-2).join(" ").slice(0, 300);
@@ -89,7 +131,7 @@ export function pushLater(dir: string): void {
 
 const REMOTE = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\.git)?$/;
 export async function setRemote(id: string, url: string): Promise<SyncState> {
-  const dir = dirOf(id);
+  const dir = dirOf(mainOnly(id, "儲存庫設定"));
   await readProject(id);
   const u = url.trim();
   if (u && !REMOTE.test(u)) throw new UserError("儲存庫網址必須是 https://github.com/組織/名稱 的形式。");
@@ -111,7 +153,7 @@ const errText = (e: unknown) => String((e as { stderr?: string }).stderr || (e a
 
 /** 在 GitHub 建立 擁有者/專案代號 並設為推送目標。失敗不丟例外，錯誤記在同步狀態，「版本」頁會顯示。 */
 export async function createRepo(id: string, description: string, opt: AutoRepo): Promise<SyncState> {
-  const dir = dirOf(id);
+  const dir = dirOf(mainOnly(id, "儲存庫設定"));
   await readProject(id);
   try {
     if (!GITHUB_OWNER.test(opt.owner)) throw new Error("管理頁的 GitHub 擁有者名稱不合法。");
@@ -175,13 +217,13 @@ export async function readProject(id: string): Promise<Project> {
   return JSON.parse(raw) as Project;
 }
 
-async function writeProject(p: Project): Promise<void> {
-  await fs.writeFile(path.join(dirOf(p.id), "project.json"), JSON.stringify(p, null, 2) + "\n", "utf8");
+async function writeProject(ref: string, p: Project): Promise<void> {
+  await fs.writeFile(path.join(dirOf(ref), "project.json"), JSON.stringify(p, null, 2) + "\n", "utf8");
 }
 
 export async function createProject(input: { id: string; name: string; kind: "annual" | "small"; gates?: string[]; template?: string; author: string }): Promise<Project> {
   const template: Project["template"] = input.template === "blank" || input.template === "guided" ? input.template : "sample";
-  const dir = dirOf(input.id);
+  const dir = dirOf(mainOnly(input.id, "建立專案"));
   if (!input.name.trim()) throw new UserError("請填專案名稱。");
   if (await fs.stat(dir).catch(() => null)) throw new UserError("這個專案代號已經被使用。");
   const all = GATES.map((g) => g.id);
@@ -195,7 +237,7 @@ export async function createProject(input: { id: string; name: string; kind: "an
   await fs.copyFile(LIBRARY, path.join(dir, "lib", "JRI.sysml"));
   await fs.copyFile(path.join(TEMPLATE_DIR, "CLAUDE.md"), path.join(dir, "CLAUDE.md")).catch(() => {});
   const project: Project = { id: input.id, name: input.name.trim(), kind: input.kind, template, createdAt: new Date().toISOString(), gates, manual: {}, signoffs: [] };
-  await writeProject(project);
+  await writeProject(input.id, project);
   await git(dir, "init", "-b", "main");
   await repoConfig(dir);
   await commit(dir, input.author, `建立專案：${project.name}`);
@@ -276,19 +318,19 @@ export async function saveFile(id: string, file: string, content: string, author
 export async function setManual(id: string, key: string, done: boolean, author: string): Promise<Project> {
   const p = await readProject(id);
   p.manual[key] = done;
-  await writeProject(p);
+  await writeProject(id, p);
   await commit(dirOf(id), author, `${done ? "確認" : "取消確認"}檢查項目 ${key}`);
   return p;
 }
 
 export async function signoff(id: string, input: Omit<Signoff, "at" | "commit">): Promise<Project> {
-  const p = await readProject(id);
+  const p = await readProject(mainOnly(id, "節點簽核"));
   if (!p.gates.includes(input.gate)) throw new UserError("這個專案沒有此節點。");
   if (!input.by.trim()) throw new UserError("請填簽核人姓名。");
   const dir = dirOf(id);
   const head = await git(dir, "rev-parse", "--short", "HEAD");
   p.signoffs.push({ ...input, at: new Date().toISOString(), commit: head });
-  await writeProject(p);
+  await writeProject(id, p);
   await commit(dir, input.by, `${input.gate.toUpperCase()}${input.subsystem ? `（${input.subsystem}）` : ""} 簽核：${input.decision}`);
   if (input.decision === "APPROVE") {
     // 節點通過時打標籤作為基線
@@ -400,8 +442,13 @@ export async function writeDiagrams(id: string, input: unknown): Promise<Diagram
 
 /** 封存專案：整個資料夾移到 archive，不真的刪除。必須輸入專案名稱確認。 */
 export async function archiveProject(id: string, confirmName: string): Promise<string> {
-  const p = await readProject(id);
+  const p = await readProject(mainOnly(id, "封存專案"));
   if (confirmName.trim() !== p.name) throw new UserError("輸入的專案名稱不符，未封存。");
+  // 分支的工作目錄不跟著封存：還沒提交的變更先存進分支，再收掉。分支本身留在儲存庫裡
+  const opened = path.join(BRANCH_DIR, id);
+  for (const d of await fs.readdir(opened).catch(() => [] as string[])) await commit(path.join(opened, d), "JRI MBSE", "封存前儲存未提交的變更").catch(() => "");
+  await fs.rm(opened, { recursive: true, force: true });
+  await git(dirOf(id), "worktree", "prune").catch(() => "");
   const archive = path.join(HOME_DIR, "archive");
   await fs.mkdir(archive, { recursive: true });
   const target = path.join(archive, `${id}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
@@ -411,16 +458,16 @@ export async function archiveProject(id: string, confirmName: string): Promise<s
 
 // ───────── 復原與重做 ─────────
 // 每一次對模型的修改都是一次提交。復原＝把 model/ 換回上一步的內容再提交一次，重做＝換回下一步。
-// 歷史本身不會被改寫；走到哪一步記在 .git/jri-undo.json（不進版本紀錄）。
+// 歷史本身不會被改寫；走到哪一步記在 git 資料夾裡的 jri-undo.json（不進版本紀錄）。分支的工作目錄各有一份。
 interface Hist { tip: string; snaps: string[]; pos: number }
 const HIST_MAX = 200;
-const histFile = (dir: string) => path.join(dir, ".git", "jri-undo.json");
+const histFile = async (dir: string) => path.join(await git(dir, "rev-parse", "--absolute-git-dir"), "jri-undo.json");
 const lastModelCommit = (dir: string) => git(dir, "log", "-1", "--first-parent", "--pretty=%H", "HEAD", "--", "model").catch(() => "");
 
 async function loadHist(dir: string): Promise<Hist> {
   const tip = await lastModelCommit(dir);
   let h: Hist | null = null;
-  try { h = JSON.parse(await fs.readFile(histFile(dir), "utf8")) as Hist; } catch { /* 還沒有紀錄 */ }
+  try { h = JSON.parse(await fs.readFile(await histFile(dir), "utf8")) as Hist; } catch { /* 還沒有紀錄 */ }
   if (h && h.tip === tip && h.snaps?.[h.pos]) return h;
   const list = async (...range: string[]) => (await git(dir, "log", "--first-parent", "--reverse", "--pretty=%H", ...range, "--", "model").catch(() => "")).split("\n").filter(Boolean);
   let snaps: string[];
@@ -430,7 +477,7 @@ async function loadHist(dir: string): Promise<Hist> {
   } else snaps = await list("-n", String(HIST_MAX), "HEAD");
   snaps = snaps.slice(-HIST_MAX);
   const next = { tip, snaps, pos: snaps.length - 1 };
-  await fs.writeFile(histFile(dir), JSON.stringify(next), "utf8").catch(() => undefined);
+  await fs.writeFile(await histFile(dir), JSON.stringify(next), "utf8").catch(() => undefined);
   return next;
 }
 
@@ -472,5 +519,5 @@ export async function stepHistory(id: string, author: string, step: -1 | 1): Pro
   const was = new Map((await old<Partial<Diagrams>>("diagrams.json", {})).custom?.map((c) => [c.id, c.members ?? []]) ?? []);
   await writeDiagrams(id, { ...before.diagrams, custom: before.diagrams.custom.map((c) => ({ ...c, members: [...c.members, ...(was.get(c.id) ?? []).filter((m) => ids.has(m) && !c.members.includes(m))] })) });
   await commit(dir, author, `${step < 0 ? "復原" : "重做"}：${subject}`.slice(0, 200));
-  await fs.writeFile(histFile(dir), JSON.stringify({ tip: await lastModelCommit(dir), snaps: h.snaps, pos: to }), "utf8");
+  await fs.writeFile(await histFile(dir), JSON.stringify({ tip: await lastModelCommit(dir), snaps: h.snaps, pos: to }), "utf8");
 }
