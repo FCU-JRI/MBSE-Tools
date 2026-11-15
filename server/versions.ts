@@ -119,22 +119,88 @@ export function merge3(base: unknown, ours: unknown, theirs: unknown, prefer: "o
   return prefer === "ours" ? ours : theirs;
 }
 
+// 模型檔的衝突（F-34）。git 只要兩邊改到相鄰的幾行就算衝突，其中一種其實不需要人判斷：
+// 一邊只刪了東西，而另一邊把同樣的東西也刪了、另外還多改了一些。這時「多改的那一邊」已經包含兩邊的修改。
+const MODEL_FILE = /^model\/[^/]+\.sysml$/;
+const HUNK = /^<{7} [^\n]*\n([\s\S]*?)^\|{7}[^\n]*\n([\s\S]*?)^={7}\n([\s\S]*?)^>{7} [^\n]*\n/gm;
+const tally = (list: string[]) => { const m = new Map<string, number>(); for (const l of list) m.set(l, (m.get(l) ?? 0) + 1); return m; };
+/** 兩行文字有多像（0 到 1）：相鄰兩個字的組合有多少是共有的。 */
+function alike(a: string, b: string): number {
+  const grams = (s: string) => { const t = s.trim(); return tally(Array.from({ length: Math.max(t.length - 1, 0) }, (_, i) => t.slice(i, i + 2))); };
+  const [x, y] = [grams(a), grams(b)];
+  let both = 0, total = 0;
+  for (const [g, n] of x) { both += Math.min(n, y.get(g) ?? 0); total += n; }
+  for (const n of y.values()) total += n;
+  return total ? (2 * both) / total : 0;
+}
+
+/**
+ * 判斷一段衝突能不能自動解決。base 是兩邊共同的上一版，回傳合併後的內容；需要人判斷時回傳 null。
+ * 條件：x 只刪了幾行（沒有新增或修改），這幾行 y 也都刪了；而且 y 新寫的內容不是在改寫 x 刪掉的那幾行
+ * （一邊刪掉、另一邊修改同一行，是真的意見不同，要留給人決定）。成立時採用 y。
+ */
+export function resolveHunk(base: string[], ours: string[], theirs: string[]): string[] | null {
+  const cb = tally(base);
+  const covers = (x: string[], y: string[]): boolean => {
+    let i = 0;
+    for (const l of base) if (i < x.length && x[i] === l) i++;
+    if (i !== x.length) return false; // x 有新增或改寫
+    const [cx, cy] = [tally(x), tally(y)];
+    const gone = (c: Map<string, number>, l: string) => Math.max(0, (cb.get(l) ?? 0) - (c.get(l) ?? 0));
+    const byX = [...cb.keys()].filter((l) => gone(cx, l) > 0);
+    if (byX.some((l) => gone(cx, l) > gone(cy, l))) return false; // x 刪的有些 y 還留著
+    const onlyY = [...cb.keys()].filter((l) => gone(cy, l) > gone(cx, l));
+    const best = (line: string, among: string[]) => among.reduce((m, l) => Math.max(m, alike(line, l)), 0);
+    for (const [line, n] of cy) {
+      if (n <= (cb.get(line) ?? 0)) continue; // 不是 y 新寫的
+      const s = best(line, byX);
+      if (s >= 0.6 && s > best(line, onlyY)) return false; // 看起來是在改寫 x 刪掉的那一行
+    }
+    return true;
+  };
+  if (covers(ours, theirs)) return theirs;
+  if (covers(theirs, ours)) return ours;
+  return null;
+}
+
+/** 解決一個檔案裡的所有衝突段落（要用 diff3 樣式，才有共同的上一版）。只要有一段需要人判斷就回傳 null。 */
+export function resolveConflicts(text: string): { text: string; resolved: number } | null {
+  const lines = (s: string) => (s === "" ? [] : s.replace(/\n$/, "").split("\n"));
+  let resolved = 0, stuck = false;
+  const out = text.replace(HUNK, (all: string, ours: string, base: string, theirs: string) => {
+    const r = resolveHunk(lines(base), lines(ours), lines(theirs));
+    if (!r) { stuck = true; return all; }
+    resolved++;
+    return r.map((l) => l + "\n").join("");
+  });
+  return stuck || resolved === 0 || /^(<{7}|>{7}) /m.test(out) ? null : { text: out, resolved };
+}
+
 /**
  * 把 sha 合併進 ref 的工作目錄。合併後先確認模型能解析，不能就取消，原本的內容不會被弄壞。
- * 模型檔有衝突時不猜，直接取消並回報 conflict 的說明；prefer 是資料檔兩邊改到同一欄位時採用的那一邊。
+ * 模型檔的衝突只自動解決 resolveHunk 認得的那一種，其餘不猜，取消並回報 conflict 的說明；
+ * prefer 是資料檔兩邊改到同一欄位時採用的那一邊。
  */
 async function mergeInto(ref: string, sha: string, author: string, message: string, prefer: "ours" | "theirs", conflict: string): Promise<void> {
   const dir = dirOf(ref);
   await repoConfig(dir);
   if (await git(dir, "status", "--porcelain")) await commit(dir, author, "合併前儲存未提交的變更");
   const abort = () => git(dir, "merge", "--abort").catch(() => "");
+  const auto: string[] = [];
   try {
-    await git(dir, ...who(author), "merge", "--no-ff", "--no-commit", sha);
+    await git(dir, ...who(author), "-c", "merge.conflictStyle=diff3", "merge", "--no-ff", "--no-commit", sha);
   } catch {
-    const files = (await git(dir, "diff", "--name-only", "--diff-filter=U").catch(() => "")).split("\n").filter(Boolean);
-    if (files.length === 0 || !files.every((f) => DATA_FILES.has(f) || TOOL_COPY.test(f))) { await abort(); throw new UserError(conflict); }
+    const files = (await git(dir, "-c", "core.quotepath=false", "diff", "--name-only", "--diff-filter=U").catch(() => "")).split("\n").filter(Boolean);
+    const stop = async (f?: string) => { await abort(); throw new UserError(f ? `${conflict}（衝突的檔案：${f}）` : conflict); };
+    if (files.length === 0) await stop();
     for (const f of files) {
-      if (DATA_FILES.has(f)) {
+      if (MODEL_FILE.test(f)) {
+        const r = resolveConflicts(await fs.readFile(path.join(dir, f), "utf8").catch(() => ""));
+        if (!r) { await stop(f); continue; }
+        await fs.writeFile(path.join(dir, f), r.text, "utf8");
+        auto.push(`${path.posix.basename(f)} ${r.resolved} 段`);
+      } else if (!DATA_FILES.has(f) && !TOOL_COPY.test(f)) await stop(f);
+      else if (DATA_FILES.has(f)) {
         const stage = async (n: number): Promise<unknown> => { try { return JSON.parse(await git(dir, "show", `:${n}:${f}`)); } catch { return undefined; } };
         const merged = merge3(await stage(1), await stage(2), await stage(3), prefer);
         if (merged === undefined) { await git(dir, "rm", "-q", "-f", "--", f); continue; }
@@ -149,7 +215,8 @@ async function mergeInto(ref: string, sha: string, author: string, message: stri
     const e = a.diagnostics.find((d) => d.severity === "error");
     throw new UserError(`合併後的模型有錯誤，已取消合併：${e ? `${e.file} 第 ${e.line} 行 ${e.message}` : ""}`);
   }
-  await git(dir, ...who(author), "commit", "-m", message);
+  // 自動解決的衝突寫進提交訊息，之後查得到
+  await git(dir, ...who(author), "commit", "-m", auto.length ? `${message}\n\n自動解決的模型衝突（一邊的修改已包含另一邊）：${auto.join("、")}` : message);
   pushLater(dir);
 }
 

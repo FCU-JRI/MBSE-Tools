@@ -399,6 +399,37 @@ test("分支和 GitHub 同步：成員推上來的修改會接上，網頁上的
   assert.match(gitIn(path.join(home, "archive", kept), "branch", "--list"), /claude\/fix/);
 });
 
+test("合併時的模型衝突：一邊的修改已包含另一邊會自動解決；一邊刪、一邊改同一行仍然要人處理（F-34）", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "tc", name: "衝突測試", kind: "annual" });
+  const dir = path.join(home, "projects", "tc"), model = path.join(dir, "model", "model.sysml");
+  const base = await fs.readFile(model, "utf8");
+  const lineOf = (part: string) => { const l = base.split("\n").find((x) => x.includes(part)); assert.ok(l, `範本裡找不到 ${part}`); return l + "\n"; };
+  const L1 = lineOf("#derive dependency from '完成年度飛行任務' to '到達目標高度';"), L2 = lineOf("#derive dependency from '遠地點達 3000 m' to '完成年度飛行任務';");
+  assert.ok(base.includes(L1 + L2), "兩條關係要相鄰，才會讓 git 判定衝突");
+  const commitOn = async (branch: string, content: string, message: string) => {
+    if (branch !== "main") gitIn(dir, "checkout", "-q", "-b", branch);
+    await fs.writeFile(model, content, "utf8");
+    gitIn(dir, "commit", "-qam", message);
+    gitIn(dir, "checkout", "-q", "main");
+  };
+  await commitOn("feature/superset", base.replace(L1 + L2, ""), "分支：刪掉兩條關係");
+  await commitOn("feature/rewrite", base.replace(L1, L1.replace("#derive", "#trace")), "分支：改寫第一條關係");
+  await commitOn("main", base.replace(L1, ""), "main：刪掉第一條關係");
+
+  // main 刪掉的那一行，分支把它改寫了：真的意見不同，不自動處理，main 不變
+  let r = await call(`${I}/api/projects/tc/branches/merge`, "POST", { name: "feature/rewrite" });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /衝突.*model\.sysml/);
+  assert.equal((await fs.readFile(model, "utf8")), base.replace(L1, ""));
+
+  // main 刪的那一條，分支也刪了，還多刪一條：分支的結果已經包含兩邊的修改
+  r = await call(`${I}/api/projects/tc/branches/merge`, "POST", { name: "feature/superset" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.ok, true);
+  assert.equal(await fs.readFile(model, "utf8"), base.replace(L1 + L2, ""));
+  assert.match(gitIn(dir, "log", "-1", "--format=%B"), /自動解決的模型衝突.*model\.sysml 1 段/);
+});
+
 test("GitHub 儲存庫網址只接受 github.com", async () => {
   assert.equal((await call(`${I}/api/projects/t1/remote`, "POST", { url: "ext::sh -c whoami" })).status, 400);
   assert.equal((await call(`${I}/api/projects/t1/sync`)).data.remote, "");
