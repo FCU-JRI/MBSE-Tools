@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { analyze } from "./engine.ts";
 import type { Analysis, Source } from "./engine.ts";
 import type { Element } from "./extract.ts";
-import { analyzeProject, commit, dirOf, git, listShared, lock, parseRef, pushLater, readProject, readShared, refOf, repoConfig, UserError } from "./projects.ts";
+import { analyzeProject, commit, dirOf, git, listShared, lock, onPushRejected, parseRef, pushLater, readProject, readShared, refOf, refOfDir, repoConfig, UserError } from "./projects.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
@@ -239,39 +239,58 @@ export async function mergeBranch(id: string, name: string, author: string): Pro
 // 分支的內容放在它自己的工作目錄，網頁上看到、改到的都是那一份；每次修改提交到該分支並推送。
 const warnings = new Map<string, string>();
 
-/** 讓本機的分支跟上 GitHub 上同名的分支。回傳空字串，或無法自動合併時給使用者看的說明。 */
-async function syncBranch(id: string, branch: string): Promise<string> {
-  const main = dirOf(id), ref = refOf(id, branch), dir = dirOf(ref);
+/**
+ * 讓本機的分支跟上 GitHub 上同名的分支；branch 為 null 表示 main（有人在 GitHub 上合併或直接推送時，這裡也要接上，
+ * 否則之後每次推送都會被拒絕）。回傳空字串，或無法接上時給使用者看的說明。
+ */
+async function syncBranch(id: string, branch: string | null): Promise<string> {
+  const main = dirOf(id), ref = refOf(id, branch), dir = dirOf(ref), name = branch ?? "main";
   const rev = (r: string) => git(main, "rev-parse", "--verify", "--quiet", r).catch(() => "");
-  const [local, remote] = [await rev(`refs/heads/${branch}`), await rev(`refs/remotes/origin/${branch}`)];
+  const [local, remote] = [await rev(`refs/heads/${name}`), await rev(`refs/remotes/origin/${name}`)];
   if (!local || !remote || local === remote || await isAncestor(main, remote, local)) return "";
   if (!(await exists(path.join(dir, ".git")))) {
     // 沒有開著的分支只要移動指標；兩邊各有修改的留到開啟時再合併
-    if (await isAncestor(main, local, remote) && await git(main, "rev-parse", "--abbrev-ref", "HEAD") !== branch) await git(main, "update-ref", `refs/heads/${branch}`, remote, local);
+    if (await isAncestor(main, local, remote) && await git(main, "rev-parse", "--abbrev-ref", "HEAD") !== name) await git(main, "update-ref", `refs/heads/${name}`, remote, local);
     return "";
   }
+  // main 是大家共用的：GitHub 上的模型不能解析就不接，免得所有人的畫面一起壞掉
+  if (!branch && !(await analyzeAt(main, remote).catch(() => null))?.ok) return "GitHub 上的 main 模型無法解析，網頁沒有接上這些修改，之後的修改也推不上去。請在 GitHub 上修正，或請管理員處理。";
   const release = await lock(ref);
   try {
     if (await git(dir, "status", "--porcelain")) await commit(dir, "JRI MBSE", "儲存圖的版面");
     if (await isAncestor(dir, "HEAD", remote)) { await git(dir, "merge", "--ff-only", remote); return ""; }
-    await mergeInto(ref, remote, "JRI MBSE", `合併 GitHub 上的 ${branch}`, "ours", "衝突");
+    await mergeInto(ref, remote, "JRI MBSE", `合併 GitHub 上的 ${name}`, "ours", "衝突");
     return "";
   } catch (e) {
     if (!(e instanceof UserError)) throw e;
-    return "這個分支在網頁上和 GitHub 上各有不同的修改，無法自動合併。網頁上的修改暫時推不上 GitHub，請分支作者在自己的電腦上處理。";
+    return `${branch ? "這個分支" : "main "}在網頁上和 GitHub 上各有不同的修改，無法自動合併。網頁上的修改暫時推不上 GitHub，請${branch ? "分支作者在自己的電腦上" : "管理員"}處理。`;
   } finally { release(); }
 }
 
-/** 開啟分支：第一次開啟時建立它的工作目錄；sync 為真時順便跟上 GitHub 上的新提交。main 不用做任何事。 */
+// 推送被拒絕（GitHub 上有這裡沒有的提交）：馬上抓下來接上，接得上就會再推一次
+onPushRejected((dir) => {
+  void (async () => {
+    const ref = refOfDir(dir);
+    if (!ref) return;
+    const { id, branch } = parseRef(ref);
+    fetched.delete(dirOf(id));
+    await fetchOnce(dirOf(id));
+    warnings.set(dir, await syncBranch(id, branch));
+  })().catch(() => undefined);
+});
+
+/**
+ * 開啟專案或分支。分支第一次開啟時建立它的工作目錄；sync 為真（載入整個專案）時，main 和分支都順便跟上 GitHub 上的新提交。
+ */
 export async function openBranch(ref: string, sync: boolean): Promise<void> {
   const { id, branch } = parseRef(ref);
-  if (!branch) return;
   const main = dirOf(id), dir = dirOf(ref);
+  if (!branch && !sync) return;
   await readProject(id);
   const has = await exists(path.join(dir, ".git"));
   if (has && !sync) return;
   await fetchOnce(main);
-  if (!has) {
+  if (!has && branch) {
     const release = await lock(ref);
     try {
       if (!(await exists(path.join(dir, ".git")))) {
@@ -286,6 +305,9 @@ export async function openBranch(ref: string, sync: boolean): Promise<void> {
   }
   warnings.set(dir, await syncBranch(id, branch));
 }
+
+/** 上次和 GitHub 同步時留下的說明（接不上時才有）。 */
+export const syncWarning = (ref: string): string => warnings.get(dirOf(ref)) ?? "";
 
 export interface BranchState { name: string; ahead: number; behind: number; warning: string }
 /** 分支相對於 main 的位置；main 回傳 null。 */
