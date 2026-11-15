@@ -70,12 +70,13 @@ const author = (req: Request) => {
 };
 const pid = (req: Request) => String(req.params.id);
 
+/** id 可以是分支的參照（代號@分支）。回傳的 project.id 是參照本身，網頁接著用它呼叫 API，才會一直留在同一個分支。 */
 async function view(id: string) {
-  const project = await store.readProject(id);
+  const project = { ...(await store.readProject(id)), id };
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
   const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id) };
+  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id), branch: await versions.branchState(id) };
 }
 
 app.use((_req, res, next) => {
@@ -90,24 +91,21 @@ auth.mountAuthRoutes(app);
 app.use("/api", auth.authenticate);
 app.use("/api/projects/:id", auth.projectGuard);
 
-// 同一個專案的修改一次只做一個。每個修改都是「讀檔 → 改 → 寫回 → 提交」，
-// 兩個人同時送出時若不排隊，後寫的會蓋掉先寫的，Git 也會因為鎖定而失敗。
-const queues = new Map<string, Promise<void>>();
+// 分支（F-33）：參照是「代號@分支」。第一次開啟時建立它的工作目錄；載入整個專案時順便跟上 GitHub 上的新提交。
+app.use("/api/projects/:id", (req, _res, next) => {
+  versions.openBranch(String(req.params.id), req.method === "GET" && req.path === "/").then(() => next(), next);
+});
+
+// 同一個專案（或同一個分支）的修改一次只做一個，見 store.lock。
 app.use("/api/projects/:id", (req, res, next) => {
   // 只讀的請求不用排；模擬要跑很久，也不排（它只在最後寫自己的結果檔）
   if (req.method === "GET" || req.method === "HEAD" || /\/(validate|sim\/run|sim\/thrust)$/.test(req.path)) return next();
-  const id = String(req.params.id);
-  const prev = queues.get(id) ?? Promise.resolve();
-  let release!: () => void;
-  const mine = new Promise<void>((r) => { release = r; });
-  const tail = prev.then(() => mine);
-  queues.set(id, tail);
-  void tail.then(() => { if (queues.get(id) === tail) queues.delete(id); });
-  const timer = setTimeout(release, 120_000); // 保險：回應卡住也不會永遠擋住後面的人
-  const done = () => { clearTimeout(timer); release(); };
+  let release: (() => void) | null = null, over = false;
+  const done = () => { clearTimeout(timer); over = true; release?.(); };
+  const timer = setTimeout(done, 120_000); // 保險：回應卡住也不會永遠擋住後面的人
   res.once("finish", done);
   res.once("close", done);
-  void prev.then(() => next());
+  void store.lock(String(req.params.id)).then((r) => { release = r; if (over) r(); next(); });
 });
 
 app.get("/api/me", wrap(async (req, res) => {
@@ -122,6 +120,7 @@ app.post("/api/admin/members", admin, wrap(async (req, res) => res.json({ member
 app.post("/api/admin/members/delete", admin, wrap(async (req, res) => res.json({ members: await auth.removeMember(String(req.body?.login ?? "")) })));
 app.get("/api/admin/shares", admin, wrap(async (_req, res) => res.json({ shares: await auth.listShares() })));
 app.post("/api/admin/shares", admin, wrap(async (req, res) => {
+  if (String(req.body?.project ?? "").includes("@")) throw new store.UserError("唯讀連結以專案為單位，不能只給某個分支。");
   await store.readProject(String(req.body?.project ?? ""));
   const c = await auth.getConfig();
   const r = await auth.createShare(String(req.body.project), String(req.body.label ?? ""), Number(req.body.days), me(req).name);
@@ -633,6 +632,11 @@ app.get("/api/projects/:id/branches/diff", wrap(async (req, res) => res.json(awa
 app.post("/api/projects/:id/branches/merge", auth.need(auth.can.merge, "合併分支需要責任工程師以上的權限。"), wrap(async (req, res) => {
   const r = await versions.mergeBranch(pid(req), String(req.body?.name ?? ""), author(req));
   res.json({ ...r, ...(await view(pid(req))) });
+}));
+// 把 main 的更新合併進目前開啟的分支
+app.post("/api/projects/:id/branches/update", wrap(async (req, res) => {
+  await versions.mergeMain(pid(req), author(req));
+  res.json(await view(pid(req)));
 }));
 app.get("/api/projects/:id/baselines", wrap(async (req, res) => res.json(await versions.listBaselines(pid(req)))));
 app.get("/api/projects/:id/compare", wrap(async (req, res) => res.json(await versions.compare(pid(req), String(req.query.from ?? ""), String(req.query.to ?? "")))));

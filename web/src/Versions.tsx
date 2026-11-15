@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "./api.ts";
-import type { Me, View } from "./api.ts";
+import { api, baseOf, refOf } from "./api.ts";
+import type { BranchState, Me, View } from "./api.ts";
 import { HistoryView } from "./Views.tsx";
 
 interface Sync { remote: string; lastPushAt: string | null; error: string | null; pushing: boolean }
@@ -26,8 +26,8 @@ function Changes({ list }: { list: Change[] }) {
   );
 }
 
-/** 版本頁：GitHub 同步、分支審查與合併、基線比較、修改紀錄。 */
-export function VersionsView({ id, user, onChanged }: { id: string; user: Me; onChanged: (v: View) => void }) {
+/** 版本頁：GitHub 同步、分支審查與合併、基線比較、修改紀錄。開啟的是分支（branch 有值）時，改成顯示這個分支相對 main 的狀態。 */
+export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: string; user: Me; branch: BranchState | null; onOpen: (ref: string) => void; onChanged: (v: View) => void }) {
   const [sync, setSync] = useState<Sync | null>(null);
   const [url, setUrl] = useState("");
   const [branches, setBranches] = useState<Branch[] | null>(null);
@@ -37,6 +37,7 @@ export function VersionsView({ id, user, onChanged }: { id: string; user: Me; on
   const [result, setResult] = useState<Change[] | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [tick, setTick] = useState(0);
+  const onBranch = !!branch;
 
   const run = async (fn: () => Promise<void>, done?: string) => {
     setMsg(null);
@@ -45,10 +46,11 @@ export function VersionsView({ id, user, onChanged }: { id: string; user: Me; on
   const load = useCallback(() => run(async () => {
     const s = await api<Sync>(`/projects/${id}/sync`); setSync(s); setUrl(s.remote);
     const b = await api<Baseline[]>(`/projects/${id}/baselines`); setBaselines(b); setCmp((c) => ({ from: c.from || b[1]?.ref || "", to: c.to }));
-    setBranches(await api<Branch[]>(`/projects/${id}/branches`));
-  }), [id]);
+    if (!onBranch) setBranches(await api<Branch[]>(`/projects/${id}/branches`));
+  }), [id, onBranch]);
   useEffect(() => { load(); }, [load]);
 
+  const update = () => run(async () => { onChanged(await api<View>(`/projects/${id}/branches/update`, "POST", {})); await load(); setTick((t) => t + 1); }, "已合併 main 的更新。");
   const merge = (name: string) => run(async () => { onChanged(await api<View>(`/projects/${id}/branches/merge`, "POST", { name })); setOpen(null); await load(); setTick((t) => t + 1); }, `已合併 ${name}。`);
 
   return (
@@ -56,10 +58,10 @@ export function VersionsView({ id, user, onChanged }: { id: string; user: Me; on
       {msg && <p className="msg" role="status">{!msg.ok && <span className="tag danger">ERR</span>}{msg.text}</p>}
       <section className="section">
         <div className="section-head"><h1 className="section-title">GitHub 同步</h1><span className="label">{!sync?.remote ? "未設定" : sync.pushing ? "推送中" : sync.error ? "ERR" : "已同步"}</span></div>
-        <p className="body muted" style={{ marginBottom: 12 }}>設定後，每次儲存都會自動推送到這個儲存庫。管理頁開啟「自動建立」時，新專案會自動建好；否則先在 GitHub 建立空的儲存庫再把網址填在這裡。</p>
+        <p className="body muted" style={{ marginBottom: 12 }}>{onBranch ? "這個分支的每次儲存都會自動推送到 GitHub 上的同名分支；成員從自己的電腦推上來的修改，重新開啟時也會接上。" : "設定後，每次儲存都會自動推送到這個儲存庫。管理頁開啟「自動建立」時，新專案會自動建好；否則先在 GitHub 建立空的儲存庫再把網址填在這裡。"}</p>
         {sync?.error && <p className="msg"><span className="tag danger">ERR</span>{sync.error.startsWith("自動建立") ? sync.error : `推送失敗：${sync.error}`}</p>}
         {sync?.lastPushAt && <p className="caption" style={{ marginBottom: 8 }}>上次推送　{when(sync.lastPushAt)}</p>}
-        {user.caps.admin ? (
+        {user.caps.admin && !onBranch ? (
           <div className="row">
             <label className="field"><span className="label">儲存庫網址</span><input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/FCU-JRI/專案代號" /></label>
             <div className="tbtn-row" style={{ marginBottom: 12 }}><button className="tbtn primary" onClick={() => run(async () => setSync(await api<Sync>(`/projects/${id}/remote`, "POST", { url })), "已儲存，開始推送。")}>儲存</button>
@@ -68,32 +70,45 @@ export function VersionsView({ id, user, onChanged }: { id: string; user: Me; on
         ) : <p className="caption">{sync?.remote || "尚未設定儲存庫。"}</p>}
       </section>
 
-      <section className="section">
-        <div className="section-head"><h2 className="section-title">分支審查</h2><span className="label">{branches?.length ?? "…"}</span></div>
-        <p className="body muted" style={{ marginBottom: 12 }}>成員在自己的分支上修改（可以用自己的 Claude），推送後出現在這裡。工具會先檢查模型能不能解析，再由責任工程師以上審查合併。</p>
-        {branches === null ? <p className="label">讀取中</p> : branches.length === 0 ? <p className="caption">目前沒有待審查的分支。</p> : (
-          <table>
-            <thead><tr><th>分支</th><th>作者</th><th>最後修改</th><th>提交</th><th>檢查</th><th></th></tr></thead>
-            <tbody>{branches.map((b) => (
-              <tr key={b.name}>
-                <td className="id">{b.name}</td><td>{b.author}</td><td className="id">{when(b.date)}</td><td>{b.ahead} 筆<div className="caption">{b.subject}</div></td>
-                <td>{b.ok ? <span className="tag done">PASS</span> : <><span className="tag danger">ERR</span><div className="caption">{b.firstError}</div></>}</td>
-                <td><div className="tbtn-row">
-                  <button className="tbtn" onClick={() => run(async () => setOpen({ name: b.name, ...(await api<{ diff: string; changes: Change[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(b.name)}`)) }))}>看差異</button>
-                  {user.caps.merge && b.ok && <button className="tbtn primary" onClick={() => merge(b.name)}>合併</button>}
-                </div></td>
-              </tr>
-            ))}</tbody>
-          </table>
-        )}
-        {open && (
-          <div style={{ marginTop: 16 }}>
-            <div className="section-head"><h3 className="section-title">{open.name} 的變更</h3><button className="tbtn" onClick={() => setOpen(null)}>關閉</button></div>
-            <Changes list={open.changes} />
-            <pre className="code" style={{ maxHeight: 320, marginTop: 12 }}>{open.diff || "（沒有文字差異）"}</pre>
+      {branch ? (
+        <section className="section">
+          <div className="section-head"><h2 className="section-title">這個分支</h2><span className="label">{branch.name}</span></div>
+          <p className="body" style={{ marginBottom: 8 }}>比 main 多 {branch.ahead} 筆提交，main 有 {branch.behind} 筆更新還沒進來。</p>
+          <p className="body muted" style={{ marginBottom: 12 }}>要把這個分支併入 main，請回到 main 的「版本」頁，由責任工程師以上審查合併。main 有更新時先合併進來，之後比較不會衝突。</p>
+          <div className="tbtn-row">
+            {user.caps.edit && <button className="tbtn primary" disabled={branch.behind === 0} onClick={update}>合併 main 的更新</button>}
+            <button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main</button>
           </div>
-        )}
-      </section>
+        </section>
+      ) : (
+        <section className="section">
+          <div className="section-head"><h2 className="section-title">分支審查</h2><span className="label">{branches?.length ?? "…"}</span></div>
+          <p className="body muted" style={{ marginBottom: 12 }}>成員在自己的分支上修改（可以用自己的 Claude），推送後出現在這裡。按「開啟」可以像 main 一樣完整瀏覽這個分支的每個分頁，也可以直接修改。工具會先檢查模型能不能解析，再由責任工程師以上審查合併。</p>
+          {branches === null ? <p className="label">讀取中</p> : branches.length === 0 ? <p className="caption">目前沒有待審查的分支。</p> : (
+            <table>
+              <thead><tr><th>分支</th><th>作者</th><th>最後修改</th><th>提交</th><th>檢查</th><th></th></tr></thead>
+              <tbody>{branches.map((b) => (
+                <tr key={b.name}>
+                  <td className="id">{b.name}</td><td>{b.author}</td><td className="id">{when(b.date)}</td><td>{b.ahead} 筆<div className="caption">{b.subject}</div></td>
+                  <td>{b.ok ? <span className="tag done">PASS</span> : <><span className="tag danger">ERR</span><div className="caption">{b.firstError}</div></>}</td>
+                  <td><div className="tbtn-row">
+                    <button className="tbtn" onClick={() => onOpen(refOf(id, b.name))}>開啟</button>
+                    <button className="tbtn" onClick={() => run(async () => setOpen({ name: b.name, ...(await api<{ diff: string; changes: Change[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(b.name)}`)) }))}>看差異</button>
+                    {user.caps.merge && b.ok && <button className="tbtn primary" onClick={() => merge(b.name)}>合併</button>}
+                  </div></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+          {open && (
+            <div style={{ marginTop: 16 }}>
+              <div className="section-head"><h3 className="section-title">{open.name} 的變更</h3><button className="tbtn" onClick={() => setOpen(null)}>關閉</button></div>
+              <Changes list={open.changes} />
+              <pre className="code" style={{ maxHeight: 320, marginTop: 12 }}>{open.diff || "（沒有文字差異）"}</pre>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="section">
         <div className="section-head"><h2 className="section-title">基線比較</h2><span className="label">{Math.max(baselines.length - 1, 0)} 個基線</span></div>
