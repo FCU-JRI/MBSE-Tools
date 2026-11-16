@@ -5,9 +5,9 @@ import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { api } from "./api.ts";
 import type { Annotation, Diagrams, Layout, Meta, View } from "./api.ts";
-import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, LINK_TOOLS, modelItems, PALETTE, PKG_TAB } from "./model.ts";
+import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, seedLayout } from "./model.ts";
 import type { DiagramDef, GEdge, GNode, Graph, LinkTool } from "./model.ts";
-import { annotationSvg, FRAME_HEAD, frameSvg, iconSvg, nodeSvg, SCREEN } from "./shapes.ts";
+import { annotationSvg, edgeMarkers, FRAME_HEAD, frameSvg, iconSvg, MARKERS, markerSvg, nodeSvg, SCREEN } from "./shapes.ts";
 import { downloadPng, downloadSvg, toSvg } from "./exportSvg.ts";
 
 /** g：模型元素的節點；a：草稿標註（便箋、外框、文字，不進模型）。 */
@@ -56,6 +56,7 @@ function PackageNode({ id, data, selected, width, height }: NodeProps<FlowNode>)
     </div>
   );
 }
+const MARKER_DEFS = Object.values(MARKERS).map((m) => markerSvg(m, "jri-", SCREEN, "auto-start-reverse")).join("");
 const nodeTypes = { el: ElementNode, note: NoteNode, pkg: PackageNode };
 
 type Spot = { x: number; y: number; w?: number; h?: number };
@@ -139,12 +140,13 @@ function sides(a: Box, b: Box, vertical: boolean): [Position, Position] {
 function toEdge(e: GEdge, pos: Map<string, Box>, vertical: boolean, straight: boolean): Edge {
   const a = pos.get(e.source), b = pos.get(e.target);
   const [sh, th] = a && b ? sides(a, b, vertical) : vertical ? [Position.Bottom, Position.Top] : [Position.Right, Position.Left];
+  const marks = edgeMarkers(e);
   return {
     id: e.id, source: e.source, target: e.target, sourceHandle: sh, targetHandle: th, label: e.label || undefined, data: { g: e },
     type: straight ? "straight" : "smoothstep", pathOptions: { borderRadius: 0 },
     style: { strokeWidth: 1, strokeDasharray: e.dashed ? "6 4" : undefined }, labelBgPadding: [4, 2],
-    markerStart: e.tail === "diamond" ? "jri-diamond" : undefined,
-    markerEnd: e.head === "open" ? { type: MarkerType.Arrow, color: "currentColor", width: 18, height: 18, strokeWidth: 1.2 } : e.head === "typing" ? "jri-typing" : undefined,
+    markerStart: marks.start ? `jri-${marks.start.id}` : undefined,
+    markerEnd: e.head === "open" ? { type: MarkerType.Arrow, color: "currentColor", width: 18, height: 18, strokeWidth: 1.2 } : marks.end ? `jri-${marks.end.id}` : undefined,
     selectable: e.remove !== null, focusable: e.remove !== null,
   } as Edge;
 }
@@ -246,7 +248,9 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const drag = useRef<{ starts: Map<string, { x: number; y: number }>; pkgs: Map<string, { x: number; y: number }>; members: Map<string, { pkg: string; x: number; y: number }> } | null>(null);
 
   // 第一層工具：一般的圖用該圖固定的項目，自訂圖用釘選的項目
-  const elTools = custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c)) : PALETTE[def.kind];
+  const elTools = custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c)) : paletteOf(def, view.analysis, meta.categories);
+  // 套件內容圖與分解圖的內容由擁有關係決定，不在這裡畫套件的框
+  const structural = def.kind === "pkg" || def.kind === "decomp";
   const allowedLinks = LINK_TOOLS[def.kind];
   const linkTools: LinkTool[] = custom ? ALL_LINKS.filter((t) => pins.links.includes(t.kind)) : allowedLinks;
 
@@ -297,7 +301,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   useEffect(() => {
     if (!layout) return;
     // 位置一旦決定就存起來，之後編輯模型不會重排；只有「自動排列」會整張重排。
-    const saved = layoutRef.current[def.id] ?? {};
+    // 新的套件內容圖與分解圖還沒有紀錄時，沿用舊結構分解圖裡同一個節點的位置
+    const saved = seedLayout(layoutRef.current, def, graph.nodes.map((g) => g.id));
     const missing = graph.nodes.filter((g) => !saved[g.id]);
     let pos: Record<string, Spot> = saved;
     if (missing.length > 0) {
@@ -313,7 +318,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         }
       }
       saveLayout({ ...layoutRef.current, [def.id]: pos });
-    }
+    } else if (saved !== layoutRef.current[def.id] && graph.nodes.length > 0) saveLayout({ ...layoutRef.current, [def.id]: pos }); // 全部沿用舊位置時也記到這張圖底下
     const isSel = (id: string, single: boolean) => (multiRef.current.length ? multiRef.current.includes(id) : single);
     const els: FlowNode[] = graph.nodes.map((g0) => {
       const p = pos[g0.id];
@@ -691,7 +696,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         {!readOnly && (
           <div className="tool-group">
             <span className="label">組織</span>
-            <Tool on={panel === "pkg"} onClick={() => setPanel(panel === "pkg" ? null : "pkg")} icon="package" text="套件" sub="package" title="把屬於同一群的項目放在一起。把項目拖進框裡就歸屬這個套件，拖出來就移出。會寫進模型。" />
+            {!structural && <Tool on={panel === "pkg"} onClick={() => setPanel(panel === "pkg" ? null : "pkg")} icon="package" text="套件" sub="package" title="把屬於同一群的項目放在一起。把項目拖進框裡就歸屬這個套件，拖出來就移出。會寫進模型。" />}
             <Tool disabled={busy} onClick={() => addComment("註解", undefined, onThisDiagram && selectedEl?.kind !== "Comment" && selectedEl?.kind !== "Package" ? selectedEl?.id : undefined)} icon="comment" text="註解" sub="comment" title="先選一個項目再按，註解就會連到它；沒有選取就是整個模型的註解。會寫進模型。" />
           </div>
         )}
@@ -738,6 +743,9 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         )}
       </div>
       <div ref={canvasRef} className={`canvas ${activeLink ? "linking" : ""}`} tabIndex={0} onKeyDown={onKey}>
+        {!!graph.folded && !activeLink && panel === null && !selectedId && !selNote && (
+          <div className="canvas-hint"><span className="tag warn">上限</span><span className="caption">這張圖最多畫 {NODE_LIMIT} 個節點，其餘 {graph.folded} 個改列在節點的隔間裡。</span></div>
+        )}
         {activeLink && <div className="canvas-hint"><span className="tag done">{activeLink.zh}</span><span className="caption">{activeLink.hint}。按 Esc 結束。</span></div>}
         {note && !readOnly && !activeLink && panel === null && (
           <div className="canvas-hint">
@@ -786,7 +794,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
                   <div className="tool-group" key={p}>
                     <span className="label">{pzh}</span>
                     {cats.map((c) => {
-                      const ok = custom || PALETTE[def.kind].includes(c.id);
+                      const ok = custom || elTools.includes(c.id);
                       return (
                         <div className="tool-row" key={c.id}>
                           <Tool disabled={!ok} onClick={() => newElement(c.id)} icon={CATEGORY_SHAPE[c.id] ?? "usage"} text={c.zh} title={ok ? c.help : NA} />
@@ -844,7 +852,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
                 <Item text="取消" onClick={close} />
               </> : menu.on === "pane" ? <>
                 {!readOnly && elTools.map((c) => <Item key={c} text={`新增${catOf(c)?.zh ?? c}`} onClick={run(() => newElement(c))} />)}
-                {!readOnly && <Item text="新增套件" onClick={run(() => { pkgFor.current = null; setPanel("pkg"); })} />}
+                {!readOnly && !structural && <Item text="新增套件" onClick={run(() => { pkgFor.current = null; setPanel("pkg"); })} />}
                 {!readOnly && <Item text="新增註解" onClick={run(() => addComment("註解"))} />}
                 {!readOnly && <hr />}
                 <Item text="全選　Ctrl+A" onClick={run(selectAll)} />
@@ -863,16 +871,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           );
         })()}
         <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
-          <defs>
-            <marker id="jri-diamond" viewBox="0 0 20 12" markerWidth="20" markerHeight="12" refX="1" refY="6" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-              <path d="M1 6 L10 1 L19 6 L10 11 Z" fill="var(--ink)" stroke="var(--ink)" strokeWidth="1" />
-            </marker>
-            {/* defined by：定義端為空心三角形加兩點 */}
-            <marker id="jri-typing" viewBox="0 0 20 14" markerWidth="20" markerHeight="14" refX="19" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-              <circle cx="3" cy="3" r="1.4" fill="var(--ink)" /><circle cx="3" cy="11" r="1.4" fill="var(--ink)" />
-              <path d="M6 1 L19 7 L6 13 Z" fill="var(--bg)" stroke="var(--ink)" strokeWidth="1" />
-            </marker>
-          </defs>
+          {/* 連線端點的記號：實心與空心菱形、defined by、特化、重定義、參照子集。形狀和匯出檔共用 shapes.ts 的 MARKERS */}
+          <defs dangerouslySetInnerHTML={{ __html: MARKER_DEFS }} />
         </svg>
         {empty ? <p className="body muted empty">{custom ? "這張圖還沒有內容。用工具列的「加入既有項目」放進模型裡已有的項目，或用「元素」建立新的。" : "這張圖還沒有內容。用左邊工具列的「元素」開始。"}</p> : (
           <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}

@@ -281,7 +281,7 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
     let target = to;
     if (/Definition$/.test(to.kind)) {
       const usage = before.elements.find((e) => e.kind === "PartUsage" && e.typeIds.includes(to.id));
-      if (!usage) throw new store.UserError(`「${to.name}」還沒有放進系統的結構，無法分配。請先到結構分解圖把它加為某個系統的零件。`);
+      if (!usage) throw new store.UserError(`「${to.name}」還沒有放進系統的結構，無法分配。請先到 Structure 的套件內容圖把它加為某個系統的零件。`);
       target = usage;
     }
     // 零件若定義在某個系統定義裡，從外面無法直接引用，所以把分配寫進那個定義的主體

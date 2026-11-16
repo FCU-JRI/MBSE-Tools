@@ -138,7 +138,7 @@ export function evaluateProcess(a: Analysis): StepStatus[] {
       const composed = (s: Element) => a.elements.some((u) => u.kind === "PartUsage" && u.typeIds.includes(s.id) && byId.get(u.owner ?? "")?.kind === "PartDefinition");
       return [
         ...(subs.length < 1 ? [{ id: null, text: "至少拆出一個次系統。" }] : []),
-        ...subs.filter((s) => !composed(s)).map((s) => ({ id: s.id, text: `${s.name} 還沒有放進系統的結構（到結構分解圖從系統拉線到它）。` })),
+        ...subs.filter((s) => !composed(s)).map((s) => ({ id: s.id, text: `${s.name} 還沒有放進系統的結構（到 Structure 的套件內容圖從系統拉線到它）。` })),
       ];
     },
     functions: () => [
