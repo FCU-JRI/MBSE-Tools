@@ -2,6 +2,7 @@
   "name": "jri-mbse-tools",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "JRI MBSE 網頁工具：以 SysML v2 建模，依 NASA-HDBK-1009A 與 AEAS 工程指導原則",
   "engines": {
