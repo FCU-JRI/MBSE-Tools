@@ -10,6 +10,8 @@
 //   非組成的零件（ref part）在擁有者一端畫空心菱形，節點外框為虛線（8.2.3.11）；
 //   套件不畫成員時名稱寫在資料夾本體中央（8.2.3.5）。
 import type { Analysis, Diagrams, Element, Layout } from "./api.ts";
+import { ANALYSIS_VIEWS } from "./method/views.ts";
+import type { AnalysisView } from "./method/views.ts";
 
 const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
 
@@ -83,21 +85,30 @@ export function packageOf(t: TreeIndex, id: string): string | null {
 export const LINK_SYMBOL: Record<string, string> = { type: ":", specialize: ":>", subset: ":>", redefine: ":>>", reference: "::>" };
 export const LINK_ZH: Record<string, string> = { specialize: "特化", type: "由…定義", subset: "子集", redefine: "重定義", reference: "參照", perform: "執行" };
 
-export type DiagramKind = "pkg" | "decomp" | "req" | "act" | "ibd" | "uc" | "stm" | "custom";
+/**
+ * pkg 套件內容、decomp 零件分解（F-76）；req 需求、uc 使用案例（F-77）；stm 狀態機（F-78）；act 動作流程、fdecomp 功能分解（F-79）；
+ * ibd 互連（F-80）；occ 個體、時間切片與快照、calc 計算與分析（F-81）；custom 自訂圖；
+ * analysis 分析圖（METHOD.md 第 3 節，P2）：一個階段一張，跨套件放任何元素。
+ */
+export type DiagramKind = "pkg" | "decomp" | "fdecomp" | "req" | "act" | "ibd" | "uc" | "stm" | "occ" | "calc" | "custom" | "analysis";
+/** 內容完全由模型的擁有關係決定的圖：不畫使用者套件的框，也不提供「新增套件」。 */
+export const STRUCTURAL_KINDS = new Set<DiagramKind>(["pkg", "decomp", "fdecomp", "occ", "calc"]);
 /**
  * code／viewDef：SysML v2 標準檢視定義的短名稱與名稱（StandardViewDefinitions）。
- * members 只有自訂圖使用：這張圖放了哪些模型項目。
+ * members 只有自訂圖與分析圖使用：這張圖放了哪些模型項目。view：分析圖在 method/views.ts 的登記。
  */
-export interface DiagramDef { id: string; kind: DiagramKind; code: string; viewDef: string; title: string; context: string | null; members?: string[] }
+export interface DiagramDef { id: string; kind: DiagramKind; code: string; viewDef: string; title: string; context: string | null; members?: string[]; view?: AnalysisView }
 const VIEW: Record<DiagramKind, [code: string, viewDef: string]> = {
-  pkg: ["GV", "GeneralView"], decomp: ["GV", "GeneralView"], req: ["GV", "GeneralView"], uc: ["GV", "GeneralView"], custom: ["GV", "GeneralView"],
+  pkg: ["GV", "GeneralView"], decomp: ["GV", "GeneralView"], fdecomp: ["GV", "GeneralView"], req: ["GV", "GeneralView"], uc: ["GV", "GeneralView"], custom: ["GV", "GeneralView"], analysis: ["GV", "GeneralView"],
+  occ: ["GV", "GeneralView"], calc: ["GV", "GeneralView"],
   ibd: ["IV", "InterconnectionView"], act: ["AFV", "ActionFlowView"], stm: ["STV", "StateTransitionView"],
 };
 /** 圖框標籤：«view» 名稱 : 檢視定義。 */
 export const frameLabel = (d: DiagramDef) => `«view» ${d.title} : ${d.viewDef}`;
 
 /** pkgbox：不畫成員的套件，名稱寫在資料夾本體中央（一般的節點，不是可以把項目拖進去的框）。 */
-export type Shape = "def" | "usage" | "package" | "pkgbox" | "comment" | "start" | "done";
+/** param：動作的參數與零件邊上的連接埠，小方塊加名稱（規範 8.2.3.12、8.2.3.17）。 */
+export type Shape = "def" | "usage" | "package" | "pkgbox" | "comment" | "start" | "done" | "param";
 export interface GNode {
   id: string;
   el: Element | null; // 起始與完成節點沒有對應的模型元素
@@ -114,7 +125,20 @@ export interface GNode {
   dashed?: boolean;
   /** 列在這個節點隔間裡的元素（套件內容圖與分解圖才有） */
   covers?: string[];
+  /**
+   * 貼在節點左右邊上的小方塊（階段 4，規範 8.2.3.12 的連接埠、8.2.3.17 的參數）。y 是方塊中心到節點頂端的距離；
+   * key 用來讓連線接在這個方塊上（GEdge 的 sourcePort／targetPort）。
+   */
+  ports?: NodePort[];
+  /** 名稱與隔間之間留給 ports 的高度 */
+  band?: number;
+  /** 貼在圖框邊上的節點（這張圖的動作自己的參數、這個定義自己的連接埠）：位置由圖框決定，不能拖曳 */
+  boundary?: "left" | "right";
+  /** P2 系統簡圖：包住零件的外框（大小由版面決定，可以拉大小）；inside 是這個節點所在的外框 */
+  container?: boolean;
+  inside?: string;
 }
+export interface NodePort { key: string; label: string; side: "left" | "right"; y: number }
 export interface GEdge {
   id: string; source: string; target: string; kind: string; label: string;
   dashed: boolean;
@@ -123,11 +147,17 @@ export interface GEdge {
   tail: "diamond" | "hollow" | "none"; // 起點記號：實心菱形（組成）、空心菱形（非組成）
   /** 刪除這條線時要做的事：刪關係，或刪掉代表它的元素。 */
   remove: { type: "relation"; kind: string; from: string; to: string } | { type: "element"; id: string } | null;
+  /** 接在端點節點的哪一個小方塊（NodePort 的 key）上；沒有就接在節點的外框 */
+  sourcePort?: string; targetPort?: string;
+  /** 存轉折點用的識別碼（P2）：關係的連線不含流水號，模型增減別的關係時不會跑掉；沒有就用 id */
+  key?: string;
 }
 /** reverse：排版時要反向看待的連線種類（例如追溯是由下層指向上層，上層應排在上方）。 */
 export interface Graph { nodes: GNode[]; edges: GEdge[]; direction: "TB" | "BT" | "LR" | "RL"; reverse?: string[];
   /** 節點超過上限時，有幾個元素改列在隔間裡 */
-  folded?: number }
+  folded?: number;
+  /** P2：rocket 是系統簡圖，外框裡的零件照實際位置由上而下疊起來 */
+  arrange?: "tb" | "rocket" }
 
 /** SysML v2 的關鍵字：由元類別名稱得出，例如 PartDefinition → «part def»、UseCaseUsage → «use case»。 */
 const KEYWORD: Record<string, string> = { VerificationCaseUsage: "verification", VerificationCaseDefinition: "verification def", Comment: "comment" };
@@ -167,6 +197,8 @@ function makeNode(el: Element, compartments: string[][] = [], text = nameOf(el))
   const height = 26 + title.length * 16 + 8 + comps.reduce((s, c) => s + c.length * 16 + 9, 0);
   return { id: el.id, el, shape: el.kind.endsWith("Definition") ? "def" : "usage", keyword: stereotype(el), name: el.name, title, compartments: comps, width: NODE_W, height };
 }
+/** 隔間佔的高度（和 makeNode 的算法相同）。 */
+const heightOf = (comps: string[][]) => comps.reduce((h, c) => h + c.length * 16 + 9, 0);
 const pseudo = (id: string, shape: "start" | "done"): GNode => ({ id, el: null, shape, keyword: "", name: "", title: [], compartments: [], width: 26, height: 26 });
 
 /** 套件節點：大小由版面決定，這裡給預設值。 */
@@ -202,6 +234,14 @@ export const TOP_DIAGRAM = "pkg:";
 /** 一張圖最多畫幾個節點；超過的改列在隔間裡（F-76）。只是防止極端的模型拖垮瀏覽器的保險，一般的模型不會碰到。 */
 export const NODE_LIMIT = 500;
 
+const isAction = (e: Element) => /ActionUsage$/.test(e.kind);
+const isRequirement = (e: Element) => e.kind === "RequirementUsage" || e.kind === "RequirementDefinition";
+const isUseCase = (e: Element) => e.kind === "UseCaseUsage" || e.kind === "UseCaseDefinition";
+const STATE_KINDS = new Set(["StateDefinition", "StateUsage", "ExhibitStateUsage"]);
+const CALC_KINDS = new Set(["CalculationDefinition", "CalculationUsage", "AnalysisCaseDefinition", "AnalysisCaseUsage"]);
+/** 時間切片與快照（規範 8.2.3.9）。 */
+const isPortion = (e: Element) => /^(snapshot|timeslice)$/.test(e.keyword ?? "");
+
 export function diagramsOf(a: Analysis, extra?: Diagrams): DiagramDef[] {
   const def = (id: string, kind: DiagramKind, title: string, context: string | null, members?: string[]): DiagramDef => ({ id, kind, code: VIEW[kind][0], viewDef: VIEW[kind][1], title, context, members });
   // 套件內容圖：最上層一張，每個套件一張；分解圖：每個擁有零件的零件定義一張（F-76）
@@ -209,13 +249,32 @@ export function diagramsOf(a: Analysis, extra?: Diagrams): DiagramDef[] {
   const out: DiagramDef[] = [def(TOP_DIAGRAM, "pkg", "模型", null)];
   for (const e of t.all) if (isPackage(e)) out.push(def(`pkg:${e.qualifiedName}`, "pkg", e.name, e.id));
   for (const e of t.all) if (e.kind === "PartDefinition" && !e.unnamed && (t.children.get(e.id) ?? []).some((c) => c.kind === "PartUsage")) out.push(def(`decomp:${e.qualifiedName}`, "decomp", e.name, e.id));
+  // 功能分解（F-79）：每個擁有動作的動作定義一張
+  const kidsOf = (e: Element) => t.children.get(e.id) ?? [];
+  for (const e of t.all) if (e.kind === "ActionDefinition" && !e.unnamed && !e.shared && kidsOf(e).some(isAction)) out.push(def(`fdecomp:${e.qualifiedName}`, "fdecomp", e.name, e.id));
+  // 需求與使用案例（F-77）：整個模型各一張（原本的圖，版面紀錄沿用），再加上每個有需求、使用案例的套件一張
   out.push(def("req", "req", "需求追溯", null), def("uc", "uc", "使用案例", null));
+  for (const p of t.all) {
+    if (!isPackage(p) || p.shared) continue;
+    const inside = descendantsOf(t, p.id).filter((e) => !e.shared && packageOf(t, e.id) === p.id);
+    if (inside.some(isRequirement)) out.push(def(`req:${p.qualifiedName}`, "req", `需求 ${p.name}`, p.id));
+    if (inside.some(isUseCase)) out.push(def(`uc:${p.qualifiedName}`, "uc", `使用案例 ${p.name}`, p.id));
+  }
   const byKind = (id: string | null) => a.elements.find((e) => e.id === id)?.kind;
   const kids = (id: string, kind: string) => a.elements.some((e) => e.owner === id && e.kind === kind);
+  const own = (e: Element) => !e.shared && !e.unnamed;
   for (const e of a.elements) {
     if (e.kind === "PartDefinition" && kids(e.id, "PartUsage")) out.push(def(`ibd:${e.qualifiedName}`, "ibd", e.name, e.id));
-    if (e.kind === "StateUsage" && (kids(e.id, "StateUsage") || e.category === "Mode") && byKind(e.owner) !== "StateUsage") out.push(def(`stm:${e.qualifiedName}`, "stm", e.name, e.id));
-    if (e.kind === "ActionUsage" && kids(e.id, "ActionUsage")) out.push(def(`act:${e.qualifiedName}`, "act", e.name, e.id));
+    // 狀態機（F-78）：原本的模式之外，任何擁有狀態的狀態定義、狀態、exhibit state
+    const oldStm = e.kind === "StateUsage" && (kids(e.id, "StateUsage") || e.category === "Mode") && byKind(e.owner) !== "StateUsage";
+    if (oldStm || (own(e) && STATE_KINDS.has(e.kind) && kidsOf(e).some((c) => STATE_KINDS.has(c.kind) && c.kind !== "StateDefinition"))) out.push(def(`stm:${e.qualifiedName}`, "stm", e.name, e.id));
+    // 動作流程（F-79）：原本的任務與功能之外，任何擁有動作的動作定義與動作
+    const oldAct = e.kind === "ActionUsage" && kids(e.id, "ActionUsage");
+    if (oldAct || (own(e) && (e.kind === "ActionDefinition" || isAction(e)) && kidsOf(e).some(isAction))) out.push(def(`act:${e.qualifiedName}`, "act", e.name, e.id));
+    // 個體、時間切片與快照（F-81）
+    if (own(e) && kidsOf(e).some(isPortion)) out.push(def(`occ:${e.qualifiedName}`, "occ", e.name, e.id));
+    // 計算與分析（F-81）：不在另一個計算或分析裡的
+    if (own(e) && CALC_KINDS.has(e.kind) && !CALC_KINDS.has(t.byId.get(e.parent ?? "")?.kind ?? "")) out.push(def(`calc:${e.qualifiedName}`, "calc", e.name, e.id));
   }
   for (const c of extra?.custom ?? []) out.push(def(c.id, "custom", c.title, null, c.members));
   return out;
@@ -238,7 +297,7 @@ export function buildGraph(d: DiagramDef, a: Analysis, opts?: { packages: Set<st
   if (!opts) return g;
   const ids = new Set(g.nodes.map((n) => n.id));
   // 套件內容圖與分解圖由模型的擁有關係決定內容，不另外畫套件的框
-  const structural = d.kind === "pkg" || d.kind === "decomp";
+  const structural = STRUCTURAL_KINDS.has(d.kind);
   // 套件：有成員在這張圖上，或剛在這張圖上建立
   for (const p of a.elements) {
     if (structural || !isUserPackage(p, opts.packages)) continue;
@@ -261,7 +320,7 @@ export function buildGraph(d: DiagramDef, a: Analysis, opts?: { packages: Set<st
 function baseGraph(d: DiagramDef, a: Analysis): Graph {
   const byId = new Map(a.elements.map((e) => [e.id, e]));
   const relEdge = (r: Analysis["relations"][number], i: number): GEdge => {
-    const e = edge(`${r.kind}:${r.from}:${r.to}:${i}`, r.from, r.to, r.kind, EDGE_LABEL[r.kind] ?? "", { type: "relation", kind: r.kind, from: r.from, to: r.to });
+    const e = { ...edge(`${r.kind}:${r.from}:${r.to}:${i}`, r.from, r.to, r.kind, EDGE_LABEL[r.kind] ?? "", { type: "relation", kind: r.kind, from: r.from, to: r.to }), key: `${r.kind}:${r.from}:${r.to}` };
     // 內建的 stakeholder、actor 是需求或使用案例的參數，規範 8.2.3.21 畫成一條沒有箭頭、沒有標籤的實線
     return r.form ? { ...e, dashed: false, head: "none", label: "" } : e;
   };
@@ -296,52 +355,70 @@ function baseGraph(d: DiagramDef, a: Analysis): Graph {
     return { nodes, edges, direction: "TB", reverse: ["derive", "refine", "trace", "satisfy", "verify"] };
   }
 
-  if (d.kind === "pkg") return packageGraph(d, a);
-  if (d.kind === "decomp") return decompositionGraph(d, a);
-
-  if (d.kind === "req") {
-    const rels = a.relations.filter((r) => ["derive", "refine", "trace", "satisfy", "verify"].includes(r.kind));
-    const ids = new Set(listOf(a.elements, ...REQ_CATS).map((e) => e.id));
-    for (const r of rels) if (ids.has(r.to) || ids.has(r.from)) { ids.add(r.from); ids.add(r.to); }
-    const shown = rels.filter((r) => ids.has(r.from) && ids.has(r.to));
-    const nodes = roles([...ids].map((id) => byId.get(id)).filter((e): e is Element => !!e).map((e) => node(e, a)), shown, "stakeholder");
-    return { nodes, edges: shown.map((r, i) => relEdge(r, i)), direction: "BT" };
-  }
-
-  if (d.kind === "uc") {
-    // 使用案例與利害關係人。參與者是使用案例的 actor 參數（舊模型可能還是 «#trace» 相依）；使用案例之間可以互相包含
-    const ids = new Set([...listOf(a.elements, "UseCase"), ...listOf(a.elements, "Stakeholder")].map((e) => e.id));
-    const rels = a.relations.filter((r) => (r.kind === "trace" || r.kind === "include") && ids.has(r.from) && ids.has(r.to));
-    const nodes = roles([...ids].map((id) => byId.get(id)).filter((e): e is Element => !!e).map((e) => node(e, a)), rels, "actor");
-    return { nodes, edges: rels.map((r, i) => relEdge(r, i)), direction: "RL" };
-  }
-
-  const childKind = d.kind === "ibd" ? "PartUsage" : d.kind === "stm" ? "StateUsage" : "ActionUsage";
-  const relKind = d.kind === "ibd" ? "connect" : d.kind === "stm" ? "transition" : "succession";
-  const children = a.elements.filter((e) => e.owner === d.context && e.kind === childKind);
-  const ids = new Set(children.map((e) => e.id));
-  const edges = a.relations.filter((r) => r.kind === relKind && ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i));
-  const nodes = children.map((e) => node(e, a));
-  if (d.kind === "ibd") return { nodes, edges, direction: "LR" };
-
-  // 動作流與狀態轉換：沒有前一步的節點接起始節點；沒有下一步的接完成節點（只在已有流程時）
-  if (children.length > 0 && edges.length > 0) {
-    const hasIn = new Set(edges.map((e) => e.target)), hasOut = new Set(edges.map((e) => e.source));
-    nodes.unshift(pseudo(`${d.id}#initial`, "start"));
-    nodes.push(pseudo(`${d.id}#final`, "done"));
-    for (const c of children) {
-      if (!hasIn.has(c.id) && hasOut.has(c.id)) edges.push(edge(`initial:${c.id}`, `${d.id}#initial`, c.id, relKind, "", null));
-      if (!hasOut.has(c.id) && hasIn.has(c.id)) edges.push(edge(`final:${c.id}`, c.id, `${d.id}#final`, relKind, "", null));
+  if (d.kind === "analysis") {
+    // 分析圖（P2）：使用者放進來的任何元素，以及它們之間已存在的所有關係。系統簡圖另外把零件定義畫成外框、零件疊在裡面
+    const ids = new Set((d.members ?? []).filter((id) => byId.has(id)));
+    const rocket = d.view?.arrange === "rocket";
+    const nodes: GNode[] = [];
+    const edges: GEdge[] = [];
+    const inside = new Set<string>();
+    for (const id of ids) {
+      const e = byId.get(id)!;
+      const parts = rocket && e.kind === "PartDefinition" ? stationOrder(a.elements.filter((u) => u.owner === e.id && u.kind === "PartUsage")) : [];
+      if (parts.length === 0) { nodes.push(node(e, a)); continue; }
+      const box = containerNode(e, parts.map((u) => makeNode(u)));
+      nodes.push(box.node);
+      for (const n of box.parts) if (!ids.has(n.id)) { nodes.push(n); inside.add(n.id); }
     }
+    const all = new Set([...ids, ...inside]);
+    const rels = a.relations.filter((r) => all.has(r.from) && all.has(r.to));
+    edges.push(...rels.map((r, i) => relEdge(r, i)));
+    if (!rocket) composition(ids, nodes, edges);
+    linkEdges(a, all, edges);
+    return { nodes: roles(nodes, rels), edges, direction: "TB", reverse: ["derive", "refine", "trace", "satisfy", "verify"], arrange: rocket ? "rocket" : "tb" };
   }
-  return { nodes, edges, direction: "LR" };
+  if (d.kind === "pkg") return packageGraph(d, a);
+  if (d.kind === "decomp" || d.kind === "fdecomp") return decompositionGraph(d, a);
+  if (d.kind === "req") return requirementGraph(d, a, relEdge, roles);
+  if (d.kind === "uc") return useCaseGraph(d, a, relEdge, roles);
+  if (d.kind === "stm") return stateGraph(d, a, relEdge);
+  if (d.kind === "act") return actionGraph(d, a, relEdge);
+  if (d.kind === "ibd") return interconnectionGraph(d, a, relEdge);
+  if (d.kind === "occ") return occurrenceGraph(d, a, relEdge);
+  return calculationGraph(d, a);
 }
 
 // ───────── 套件內容圖與分解圖（F-76）─────────
 const isRef = (e: Element) => e.kind === "ReferenceUsage" || /(^|\s)ref(\s|$)/.test(e.keyword ?? "");
-/** 隔間的標題（規範 8.2.3.6）：屬性、零件、項目各有自己的隔間，其餘的使用放 features，不是使用的放 members。 */
-const COMPARTMENT: Record<string, [title: string, keyword: string]> = { AttributeUsage: ["attributes", "attribute"], PartUsage: ["parts", "part"], ItemUsage: ["items", "item"] };
-const COMPARTMENT_ORDER = ["attributes", "parts", "items", "features", "members"];
+/**
+ * 隔間的標題（規範 8.2.3.6，階段 4 起依 8.2.3.12、8.2.3.17、8.2.3.18、8.2.3.20、8.2.3.9 分出連接埠、動作、狀態、限制等專屬的隔間）。
+ * 第二個值是這個隔間已經表示的關鍵字，列的時候不再寫。其餘的使用放 features，不是使用的放 members。
+ */
+const COMPARTMENT: Record<string, [title: string, keyword: string]> = {
+  AttributeUsage: ["attributes", "attribute"], PartUsage: ["parts", "part"], ItemUsage: ["items", "item"], PortUsage: ["ports", "port"],
+  ActionUsage: ["actions", "action"], PerformActionUsage: ["perform actions", "perform action"], AcceptActionUsage: ["actions", ""], SendActionUsage: ["actions", ""],
+  StateUsage: ["states", "state"], ExhibitStateUsage: ["exhibit states", "exhibit state"],
+  ConstraintUsage: ["constraints", "constraint"], AssertConstraintUsage: ["constraints", ""], RequirementUsage: ["requirements", "requirement"],
+  ConnectionUsage: ["connections", "connection"], InterfaceUsage: ["interfaces", "interface"], CalculationUsage: ["calcs", "calc"], AnalysisCaseUsage: ["analyses", "analysis"],
+  UseCaseUsage: ["use cases", "use case"],
+};
+/** 依關鍵字決定的隔間：需求與案例的角色、限制的種類、狀態的動作、時間切片與快照。 */
+const KEYWORD_COMPARTMENT: Record<string, [title: string, keyword: string]> = {
+  subject: ["subject", "subject"], actor: ["actors", "actor"], stakeholder: ["stakeholders", "stakeholder"], objective: ["objective", "objective"],
+  "require constraint": ["require constraints", "require constraint"], "assume constraint": ["assume constraints", "assume constraint"],
+  "entry action": ["actions", ""], "do action": ["actions", ""], "exit action": ["actions", ""],
+  snapshot: ["snapshots", "snapshot"], timeslice: ["timeslices", "timeslice"],
+};
+const COMPARTMENT_ORDER = ["subject", "actors", "stakeholders", "objective", "parameters", "attributes", "ports", "parts", "items", "actions", "perform actions", "states", "exhibit states",
+  "require constraints", "assume constraints", "constraints", "requirements", "use cases", "connections", "interfaces", "calcs", "analyses", "timeslices", "snapshots", "features", "members"];
+/** 行為（動作、計算、狀態、需求、案例）的 in／out／inout 特徵是參數（規範 8.2.3.17）。 */
+const BEHAVIOR = /(Action|Calculation|AnalysisCase|VerificationCase|UseCase|State|Requirement|Constraint)(Usage|Definition)$/;
+function compartmentOf(owner: Element, c: Element): [title: string, keyword: string] {
+  const kw = c.keyword ?? "";
+  if (KEYWORD_COMPARTMENT[kw]) return KEYWORD_COMPARTMENT[kw];
+  if (/^(in|out|inout)\b/.test(kw) && BEHAVIOR.test(owner.kind)) return ["parameters", ""];
+  return COMPARTMENT[c.kind] ?? [c.kind.endsWith("Usage") ? "features" : "members", ""];
+}
 
 interface Structure { t: TreeIndex; redefines: Map<string, string[]>; a: Analysis;
   /** 元素的第一個型別是用哪種關係寫的（「元素|對象名稱」→ 關係種類），決定寫成 :、:>、:>> 或 ::> */
@@ -393,7 +470,7 @@ function compartmentsOf(s: Structure, e: Element, skip: Set<string> = new Set())
   };
   for (const c of s.t.children.get(e.id) ?? []) {
     if (skip.has(c.id)) continue;
-    const [title, implied] = COMPARTMENT[c.kind] ?? [c.kind.endsWith("Usage") ? "features" : "members", ""];
+    const [title, implied] = compartmentOf(e, c);
     const rows = groups.get(title) ?? [];
     rows.push(rowOf(s, c, implied)); covers.push(c.id);
     below(c, 1, rows);
@@ -513,13 +590,16 @@ function decompositionGraph(d: DiagramDef, a: Analysis): Graph {
   const s = structureOf(a);
   const root = d.context ? s.t.byId.get(d.context) : undefined;
   if (!root) return { nodes: [], edges: [], direction: "TB" };
+  // 零件分解：零件；功能分解（F-79）：動作（含 perform、accept 等）
+  const functional = d.kind === "fdecomp";
+  const isChild = (u: Element) => (functional ? isAction(u) : u.kind === "PartUsage");
   const order: Element[] = [root], seen = new Set([root.id]), edges: GEdge[] = [];
   const extra = new Map<string, Element[]>(); // 超過上限、改列在擁有者隔間裡的零件
   let folded = 0;
   for (let i = 0; i < order.length; i++) {
     const o = order[i];
     for (const u of s.t.children.get(o.id) ?? []) {
-      if (u.kind !== "PartUsage" || seen.has(u.id)) continue;
+      if (!isChild(u) || seen.has(u.id)) continue;
       if (order.length >= NODE_LIMIT) { extra.set(o.id, [...(extra.get(o.id) ?? []), u]); folded++; continue; }
       seen.add(u.id); order.push(u);
       edges.push(ownEdge(o.id, u));
@@ -537,12 +617,273 @@ function decompositionGraph(d: DiagramDef, a: Analysis): Graph {
     const parts = extra.get(e.id) ?? [];
     const comps = [
       ...(e.kind.endsWith("Definition") ? [["attributes", ...attrs.slice(0, 6).map((c) => rowOf(s, c, "attribute")), ...(attrs.length > 6 ? ["..."] : [])]] : []),
-      ["parts", ...parts.map((c) => rowOf(s, c, "part"))],
+      functional ? ["actions", ...parts.map((c) => rowOf(s, c, "action"))] : ["parts", ...parts.map((c) => rowOf(s, c, "part"))],
     ];
     return { ...makeNode(e, comps, titleOf(s, e)), covers: parts.map((c) => c.id), ...(isRef(e) ? { dashed: true } : {}) };
   });
   linkEdges(a, seen, edges);
   return { nodes, edges, direction: "TB", reverse: GENERAL, ...(folded ? { folded } : {}) };
+}
+
+// ───────── 需求、使用案例、狀態機、動作、互連、個體、計算與分析（階段 4，F-77 到 F-81）─────────
+type RelEdge = (r: Analysis["relations"][number], i: number) => GEdge;
+type Roles = (nodes: GNode[], rels: Analysis["relations"], prefer?: "stakeholder" | "actor") => GNode[];
+/** 這幾類圖上的節點，每個隔間最多列幾列；其餘寫 ...（完整的內容在套件內容圖上）。 */
+const ROWS = 6;
+/**
+ * 一般的節點：名稱、關鍵字照原始碼（«perform action»、«exhibit state»、«individual part»…）、需求的 doc，與各層內容的隔間。
+ * extra：另外加的隔間（例如零件的定義上的連接埠），同名的隔間合併。
+ */
+function richNode(s: Structure, e: Element, extra: string[][] = []): GNode {
+  const { compartments } = compartmentsOf(s, e);
+  const merged: string[][] = compartments.map((c) => [...c]);
+  for (const x of extra) {
+    if (x.length < 2) continue;
+    const same = merged.find((c) => c[0] === x[0]);
+    if (same) same.push(...x.slice(1).filter((r) => !same.includes(r))); else merged.push([...x]);
+  }
+  merged.sort((p, q) => COMPARTMENT_ORDER.indexOf(p[0]) - COMPARTMENT_ORDER.indexOf(q[0]));
+  const cap = (c: string[]) => (c.length > ROWS + 1 ? [...c.slice(0, ROWS + 1), "..."] : c);
+  const doc = isRequirement(e) && e.doc ? [["doc", ...wrap(e.doc, 32, 4)]] : [];
+  const n = makeNode(e, [...doc, ...merged.map(cap)], titleOf(s, e));
+  return { ...n, keyword: e.keyword ? `«${e.keyword}»` : n.keyword, ...(isRef(e) ? { dashed: true } : {}) };
+}
+/** 貼在圖框邊上的參數與連接埠：小方塊在圖框的線上，名稱寫在圖框外側（規範 8.2.3.12、8.2.3.17）。 */
+function paramNode(s: Structure, e: Element, side: "left" | "right"): GNode {
+  const title = wrap(rowOf(s, e), 34, 1);
+  return { id: e.id, el: e, shape: "param", keyword: e.keyword ? `«${e.keyword}»` : "", name: e.name, title, compartments: [], width: Math.min(260, 24 + [...title[0]].reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? 11 : 6.2), 0)), height: 22, boundary: side };
+}
+/** 參數的方向決定貼在哪一邊：in 在左，out、inout 在右。 */
+const sideOf = (e: Element): "left" | "right" => (/^in\b(?!out)/.test(e.keyword ?? "") ? "left" : "right");
+/** 把小方塊排在節點的左右兩邊：名稱下方留一段高度，左右各自由上往下排。 */
+const PORT_ROW = 20;
+export function withPorts(n: GNode, list: Omit<NodePort, "y">[]): GNode {
+  if (!list.length) return n;
+  const top = 26 + n.title.length * 16 + 4 + 12;
+  const count = { left: 0, right: 0 };
+  const ports = list.map((p) => ({ ...p, y: top + (count[p.side]++) * PORT_ROW }));
+  const band = Math.max(count.left, count.right) * PORT_ROW + 8;
+  return { ...n, ports, band, height: n.height + band };
+}
+/** 節點超過上限時，其餘的列在一個節點的隔間裡（和套件內容圖相同）。 */
+function foldRest(s: Structure, d: DiagramDef, list: Element[]): { shown: Element[]; more: GNode | null; folded: number } {
+  if (list.length <= NODE_LIMIT) return { shown: list, more: null, folded: 0 };
+  const rest = list.slice(NODE_LIMIT);
+  return { shown: list.slice(0, NODE_LIMIT), more: packageBox(`${d.id}#more`, null, `${d.title}（其餘 ${rest.length} 個）`, rest.map((e) => rowOf(s, e)), rest.map((e) => e.id)), folded: rest.length };
+}
+const uniq = (list: Element[]) => [...new Map(list.map((e) => [e.id, e])).values()];
+const inPackage = (s: Structure, pkg: string, keep: (e: Element) => boolean) => descendantsOf(s.t, pkg).filter((e) => keep(e) && !e.shared && !e.unnamed && packageOf(s.t, e.id) === pkg);
+/** 兩端都在圖上、擁有者也是節點的元素，畫組成線（需求群組裡的需求、分析裡的計算）。 */
+function nestEdges(nodes: GNode[], edges: GEdge[]): void {
+  const ids = new Set(nodes.map((n) => n.id));
+  for (const n of nodes) if (n.el?.parent && ids.has(n.el.parent) && !edges.some((e) => e.kind === "compose" && e.target === n.id)) edges.push(ownEdge(n.el.parent, n.el));
+}
+
+/**
+ * 需求的圖（F-77，規範 8.2.3.20、8.2.3.3）：需求定義與需求、它們的 subject、require／assume constraint、屬性列在隔間；
+ * 細化、滿足、衍生、追溯、驗證連到另一端；利害關係人標 «stakeholder»。context 是 null 時是整個模型（原本的「需求追溯」）。
+ */
+function requirementGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge, roles: Roles): Graph {
+  const s = structureOf(a);
+  const base = d.context === null
+    ? uniq([...listOf(a.elements, ...REQ_CATS), ...a.elements.filter((e) => e.kind === "RequirementUsage" && !e.shared && !e.unnamed)])
+    : inPackage(s, d.context, isRequirement);
+  const rels = a.relations.filter((r) => ["derive", "refine", "trace", "satisfy", "verify"].includes(r.kind));
+  const ids = new Set(base.map((e) => e.id));
+  for (const r of rels) if (ids.has(r.to) || ids.has(r.from)) { ids.add(r.from); ids.add(r.to); }
+  const list = [...ids].map((id) => s.t.byId.get(id)).filter((e): e is Element => !!e);
+  const { shown, more, folded } = foldRest(s, d, list);
+  const on = new Set(shown.map((e) => e.id));
+  const drawn = rels.filter((r) => on.has(r.from) && on.has(r.to));
+  const nodes = roles(shown.map((e) => richNode(s, e)), drawn, "stakeholder");
+  const edges = drawn.map((r, i) => relEdge(r, i));
+  nestEdges(nodes, edges);
+  linkEdges(a, on, edges);
+  if (more) nodes.push(more);
+  return { nodes, edges, direction: "BT", reverse: GENERAL, ...(folded ? { folded } : {}) };
+}
+
+/** 使用案例（F-77，規範 8.2.3.21）：使用案例與參與者（actor 參數），使用案例之間的包含。 */
+function useCaseGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge, roles: Roles): Graph {
+  const s = structureOf(a);
+  const base = d.context === null
+    ? uniq([...listOf(a.elements, "UseCase"), ...listOf(a.elements, "Stakeholder"), ...a.elements.filter((e) => e.kind === "UseCaseUsage" && !e.shared && !e.unnamed)])
+    : inPackage(s, d.context, isUseCase);
+  const ids = new Set(base.map((e) => e.id));
+  const all = a.relations.filter((r) => r.kind === "trace" || r.kind === "include");
+  // 每個套件的圖：參與者與被包含的使用案例不在這個套件時也畫出來
+  if (d.context !== null) for (const r of all) if (ids.has(r.from) && (r.form === "actor" || r.kind === "include")) ids.add(r.to);
+  const list = [...ids].map((id) => s.t.byId.get(id)).filter((e): e is Element => !!e);
+  const { shown, more, folded } = foldRest(s, d, list);
+  const on = new Set(shown.map((e) => e.id));
+  const rels = all.filter((r) => on.has(r.from) && on.has(r.to));
+  const nodes = roles(shown.map((e) => richNode(s, e)), rels, "actor");
+  if (more) nodes.push(more);
+  return { nodes, edges: rels.map((r, i) => relEdge(r, i)), direction: "RL", ...(folded ? { folded } : {}) };
+}
+
+/** 轉換的標籤（規範 8.2.3.18）：觸發條件 [守衛] / 效果。 */
+export function transitionLabel(t: { trigger: string; guard: string; effect: string } | undefined): string {
+  if (!t) return "";
+  return [t.trigger, t.guard ? `[${t.guard}]` : "", t.effect ? `/ ${t.effect}` : ""].filter(Boolean).join(" ");
+}
+/** 沒有寫起點的舊模型（JRI 的任務與模式）：沒有前一步的接起始節點，沒有下一步的接完成節點（和原本的圖相同）。 */
+function legacyEnds(d: DiagramDef, children: Element[], edges: GEdge[], nodes: GNode[], relKind: string): void {
+  if (children.length === 0 || edges.length === 0) return;
+  const hasIn = new Set(edges.map((e) => e.target)), hasOut = new Set(edges.map((e) => e.source));
+  nodes.unshift(pseudo(`${d.id}#initial`, "start"));
+  nodes.push(pseudo(`${d.id}#final`, "done"));
+  for (const c of children) {
+    if (!hasIn.has(c.id) && hasOut.has(c.id)) edges.push(edge(`initial:${c.id}`, `${d.id}#initial`, c.id, relKind, "", null));
+    if (!hasOut.has(c.id) && hasIn.has(c.id)) edges.push(edge(`final:${c.id}`, c.id, `${d.id}#final`, relKind, "", null));
+  }
+}
+
+/**
+ * 狀態機（F-78，規範 8.2.3.18）：狀態是圓角矩形，entry／do／exit 動作列在 actions 隔間；
+ * 轉換是實線開放箭頭，標「觸發條件 [守衛] / 效果」；`entry; then X;` 畫成起始節點（實心圓）指向 X。
+ */
+function stateGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge): Graph {
+  const s = structureOf(a);
+  const ctx = s.t.byId.get(d.context ?? "");
+  if (!ctx) return { nodes: [], edges: [], direction: "LR" };
+  const children = (s.t.children.get(ctx.id) ?? []).filter((c) => c.kind === "StateUsage" || c.kind === "ExhibitStateUsage");
+  const ids = new Set(children.map((c) => c.id));
+  const nodes = children.map((c) => richNode(s, c));
+  const info = a.transitions ?? [];
+  const edges = a.relations.filter((r) => r.kind === "transition" && ids.has(r.from) && ids.has(r.to)).map((r, i) => {
+    const t = info.find((x) => x.from === r.from && x.to === r.to && x.line === r.line);
+    return { ...relEdge(r, i), label: transitionLabel(t) };
+  });
+  const entries = (a.entries ?? []).filter((x) => x.owner === ctx.id && ids.has(x.to));
+  if (entries.length) {
+    nodes.unshift(pseudo(`${d.id}#initial`, "start"));
+    for (const x of entries) edges.push(edge(`initial:${x.to}`, `${d.id}#initial`, x.to, "transition", "", null));
+  } else if (ctx.category !== null) legacyEnds(d, children, edges, nodes, "transition");
+  return { nodes, edges, direction: "LR" };
+}
+
+/**
+ * 動作流程（F-79，規範 8.2.3.17）：子動作（含 perform、accept、send）是節點，參數列在 parameters 隔間；
+ * 這個動作自己的參數畫成小方塊；先後（succession）是實線開放箭頭。
+ */
+function actionGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge): Graph {
+  const s = structureOf(a);
+  const ctx = s.t.byId.get(d.context ?? "");
+  if (!ctx) return { nodes: [], edges: [], direction: "LR" };
+  const kids = s.t.children.get(ctx.id) ?? [];
+  const children = kids.filter(isAction);
+  const params = kids.filter((c) => /^(in|out|inout)\b/.test(c.keyword ?? ""));
+  const ids = new Set(children.map((c) => c.id));
+  // 子動作的參數是貼在它邊上的小方塊（in 在左、out 在右），不再列在隔間
+  const pins = (c: Element) => (s.t.children.get(c.id) ?? []).filter((x) => /^(in|out|inout)\b/.test(x.keyword ?? "")).map((x) => ({ key: x.id, label: rowOf(s, x).replace(/^(in|out|inout) /, ""), side: sideOf(x) }));
+  const actionNode = (c: Element) => { const n = richNode(s, c); return withPorts({ ...n, compartments: n.compartments.filter((x) => x[0] !== "parameters"), height: n.height - heightOf(n.compartments.filter((x) => x[0] === "parameters")) }, pins(c)); };
+  const nodes = [...params.map((p) => paramNode(s, p, sideOf(p))), ...children.map(actionNode)];
+  const edges = a.relations.filter((r) => r.kind === "succession" && ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i));
+  if (ctx.category !== null) legacyEnds(d, children, edges, nodes, "succession");
+  return { nodes, edges, direction: "LR" };
+}
+
+/**
+ * 互連（F-80，規範 8.2.3.12 到 8.2.3.14）：零件是節點，它和它的定義上的連接埠列在 ports 隔間；
+ * 這個定義自己的連接埠畫成小方塊；連結與介面是實線，標「名稱 : 型別」，接在端點所在的零件（或連接埠）上。
+ */
+function interconnectionGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge): Graph {
+  const s = structureOf(a);
+  const ctx = s.t.byId.get(d.context ?? "");
+  if (!ctx) return { nodes: [], edges: [], direction: "LR" };
+  const kids = s.t.children.get(ctx.id) ?? [];
+  const parts = kids.filter((c) => c.kind === "PartUsage");
+  const own = kids.filter((c) => c.kind === "PortUsage");
+  const partIds = new Set(parts.map((u) => u.id)), ownIds = new Set(own.map((p) => p.id));
+  // 每個零件邊上的小方塊：它自己與它的定義上的連接埠，加上連結的端點在更深一層時（a.b.p）剩下的那一段
+  const ports = new Map<string, Omit<NodePort, "y">[]>(parts.map((u) => [u.id, []]));
+  // used：連結用到的端點。同一個連接埠既是起點又是終點時放右邊；沒有連結用到的只補上，不改已經決定的那一邊
+  const addPort = (part: string, key: string, label: string, side: "left" | "right", used: boolean) => {
+    const list = ports.get(part) as Omit<NodePort, "y">[];
+    const had = list.find((p) => p.key === key);
+    if (!had) list.push({ key, label, side });
+    else if (used && side === "right") had.side = "right";
+  };
+  type End = { node: string; port?: string };
+  const endOf = (chain: string[], path: string): End | null => {
+    const i = chain.findIndex((x) => partIds.has(x) || ownIds.has(x));
+    if (i < 0) return null;
+    const node = chain[i], rest = chain.slice(i + 1);
+    if (!rest.length || !partIds.has(node)) return { node };
+    const segs = path.split(".");
+    const label = segs.length === chain.length ? segs.slice(i + 1).join(".") : rest.map((x) => s.t.byId.get(x)?.name ?? x).join(".");
+    return { node, port: rest.join(".") + "|" + label };
+  };
+  const conns = (a.connectors ?? []).map((c, i) => ({ c, i, from: endOf(c.fromChain, c.fromPath), to: endOf(c.toChain, c.toPath) }))
+    .filter((x): x is { c: typeof x.c; i: number; from: End; to: End } => !!x.from && !!x.to && (x.from.node !== x.to.node || x.from.port !== x.to.port));
+  // 先放連結用到的（起點在右、終點在左），再放其餘的連接埠（右邊）
+  for (const { from, to } of conns) {
+    if (from.port) addPort(from.node, from.port.split("|")[0], from.port.split("|")[1], "right", true);
+    if (to.port) addPort(to.node, to.port.split("|")[0], to.port.split("|")[1], "left", true);
+  }
+  for (const u of parts) {
+    const all = [...(s.t.children.get(u.id) ?? []), ...definitionsOf(s, u.id).flatMap((t) => s.t.children.get(t) ?? [])].filter((c) => c.kind === "PortUsage");
+    for (const c of all) addPort(u.id, c.id, rowOf(s, c, "port"), "right", false);
+  }
+  const partNode = (u: Element) => {
+    const n = richNode(s, u);
+    const kept = n.compartments.filter((x) => x[0] !== "ports");
+    return withPorts({ ...n, compartments: kept, height: n.height - heightOf(n.compartments.filter((x) => x[0] === "ports")) }, ports.get(u.id) ?? []);
+  };
+  const nodes = [...own.map((p) => paramNode(s, p, "left")), ...parts.map(partNode)];
+  const edges: GEdge[] = [];
+  if (a.connectors) {
+    for (const { c, i, from, to } of conns) {
+      const label = `${c.name}${c.type ? ` : ${c.type}` : ""}`.trim();
+      // 直接連兩個零件的連結可以照原本的方式刪除；JRI 的介面（P4，型別特化 JRI::Interface）當元素刪除；其餘要改原始碼
+      const direct = c.fromChain.length === 1 && c.toChain.length === 1;
+      const named = c.kind === "interface" && c.id && s.t.byId.get(c.id)?.category === "Interface" ? { type: "element" as const, id: c.id } : null;
+      edges.push({
+        ...edge(`connect:${from.node}:${to.node}:${i}`, from.node, to.node, "connect", label, direct ? { type: "relation", kind: "connect", from: from.node, to: to.node } : named),
+        ...(from.port ? { sourcePort: from.port.split("|")[0] } : {}), ...(to.port ? { targetPort: to.port.split("|")[0] } : {}),
+      });
+    }
+  } else {
+    const ids = new Set(nodes.map((n) => n.id));
+    edges.push(...a.relations.filter((r) => r.kind === "connect" && ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i)));
+  }
+  return { nodes, edges, direction: "LR" };
+}
+
+/** 個體、時間切片與快照（F-81，規範 8.2.3.9）：時間切片與快照是節點（«timeslice»、«snapshot»），先後依 then。 */
+function occurrenceGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge): Graph {
+  const s = structureOf(a);
+  const children = (s.t.children.get(d.context ?? "") ?? []).filter(isPortion);
+  const ids = new Set(children.map((c) => c.id));
+  const nodes = children.map((c) => richNode(s, c));
+  const edges = a.relations.filter((r) => r.kind === "succession" && ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i));
+  return { nodes, edges, direction: "LR" };
+}
+
+/**
+ * 計算與分析（F-81，規範 8.2.3.19、8.2.3.23）：計算或分析本身畫成一個節點，subject、參數、objective、限制完整列在隔間；
+ * 它擁有的計算、分析與動作畫成節點並接組成線；在圖上的定義接「由誰定義」。
+ */
+function calculationGraph(d: DiagramDef, a: Analysis): Graph {
+  const s = structureOf(a);
+  const ctx = s.t.byId.get(d.context ?? "");
+  if (!ctx) return { nodes: [], edges: [], direction: "TB" };
+  const kids = (s.t.children.get(ctx.id) ?? []).filter((c) => CALC_KINDS.has(c.kind) || isAction(c));
+  const skip = new Set(kids.map((c) => c.id));
+  // 已經畫成節點的不再列在主體的隔間裡；主體的隔間不省略
+  const { compartments } = compartmentsOf(s, ctx, skip);
+  const doc = ctx.doc ? [["doc", ...wrap(ctx.doc, 32, 4)]] : [];
+  const main = { ...makeNode(ctx, [...doc, ...compartments], titleOf(s, ctx)), keyword: ctx.keyword ? `«${ctx.keyword}»` : stereotype(ctx) };
+  const nodes: GNode[] = [main, ...kids.map((c) => richNode(s, c))];
+  const edges: GEdge[] = kids.map((c) => ownEdge(ctx.id, c));
+  for (const e of [ctx, ...kids]) for (const t of definitionsOf(s, e.id)) {
+    const te = s.t.byId.get(t);
+    if (!te || te.shared) continue;
+    if (!nodes.some((n) => n.id === t)) nodes.push(richNode(s, te));
+    edges.push(edge(`define:${e.id}:${t}`, e.id, t, "define", "", null));
+  }
+  return { nodes, edges, direction: "TB", reverse: GENERAL };
 }
 
 /**
@@ -552,8 +893,10 @@ function decompositionGraph(d: DiagramDef, a: Analysis): Graph {
 export function seedLayout(layout: Layout, d: Pick<DiagramDef, "id" | "kind">, nodeIds: string[]): Layout[string] {
   const own = layout[d.id];
   if (own && Object.keys(own).length > 0) return own;
-  if (d.kind !== "pkg" && d.kind !== "decomp") return own ?? {};
-  const old = layout.bdd ?? {};
+  // 階段 4：每個套件的需求圖、使用案例圖沿用原本整張「需求追溯」（req）、「使用案例」（uc）的位置
+  const from = d.kind === "pkg" || d.kind === "decomp" ? "bdd" : (d.kind === "req" || d.kind === "uc") && d.id !== d.kind ? d.kind : null;
+  if (!from) return own ?? {};
+  const old = layout[from] ?? {};
   return Object.fromEntries(nodeIds.filter((id) => old[id]).map((id) => [id, { x: old[id].x, y: old[id].y }]));
 }
 
@@ -583,9 +926,13 @@ const link = (...kinds: string[]) => kinds.map((k) => ALL_LINKS.find((t) => t.ki
 export const CUSTOM_DEFAULT = { els: ["Stakeholder", "Expectation", "SystemRequirement", "Subsystem"], links: ["trace", "derive", "satisfy"] };
 /** 每種圖可以用的連線工具（選了工具再從起點拉到終點）。 */
 export const LINK_TOOLS: Record<DiagramKind, LinkTool[]> = {
-  pkg: link("compose"), decomp: link("compose"), ibd: link("connect"), req: link("derive", "refine", "satisfy", "trace"),
+  pkg: link("compose"), decomp: link("compose"), req: link("derive", "refine", "satisfy", "trace"),
   uc: [{ kind: "trace", zh: "參與者", en: "actor", hint: "從使用案例拉到參與的利害關係人" }, ...link("include")],
-  act: link("succession"), stm: link("transition"), custom: ALL_LINKS,
+  act: link("succession"), stm: link("transition"), custom: ALL_LINKS, analysis: ALL_LINKS,
+  // 階段 4 新增的圖只顯示模型，不提供連線工具
+  fdecomp: [], occ: [], calc: [],
+  // P4：互連圖可以編輯，介面工具從一個零件拉到另一個零件，自動找兩邊對得上的連接埠與介面定義
+  ibd: [...link("connect"), { kind: "interface", zh: "介面", en: "interface", hint: "從一個零件拉到另一個零件（同一個系統內）；自動找兩邊對得上的連接埠與介面定義。先到「介面」頁建連接埠與介面定義" }],
 };
 export const PALETTE: Record<DiagramKind, string[]> = {
   pkg: [], // 依套件而定，見 paletteOf
@@ -595,7 +942,127 @@ export const PALETTE: Record<DiagramKind, string[]> = {
   ibd: [],
   uc: ["Stakeholder", "UseCase"],
   stm: ["Mode"],
-  custom: [],
+  custom: [], analysis: [],
+  fdecomp: [], occ: [], calc: [],
 };
 /** 工具列上每個類別畫成哪種圖形：結構類別是定義（方角），其餘是使用（圓角）。 */
 export const CATEGORY_SHAPE: Record<string, Shape> = { System: "def", Subsystem: "def", Component: "def", ExternalEntity: "def" };
+
+// ───────── 分析圖（METHOD.md 第 3 節，P2）─────────
+/** 分析圖的識別碼前綴：版面紀錄與自訂圖資料都用 view:<登記的 id> */
+export const ANALYSIS_PREFIX = "view:";
+/** 分析圖的連線工具列預設顯示的種類 */
+export const ANALYSIS_LINKS = ["trace", "derive", "refine", "satisfy", "allocate"];
+/** 一張分析圖的中文標題：圖號加名稱 */
+export const analysisTitle = (v: Pick<AnalysisView, "order" | "zh">) => `圖 ${v.order} ${v.zh}`;
+/**
+ * 登記在 method/views.ts 的分析圖，依圖號由上而下排；圖號相同時依登記的先後。每個專案（包括新專案）都有，空的也列出來。
+ * members 存在 diagrams.json 的 views（P2）。和 diagramsOf 分開，審查報告與既有的圖清單不受影響。
+ */
+export function analysisDiagrams(extra?: Pick<Diagrams, "views">, views: AnalysisView[] = ANALYSIS_VIEWS): DiagramDef[] {
+  return views.map((v, i) => ({ v, i })).sort((x, y) => x.v.order - y.v.order || x.i - y.i).map(({ v }) => ({
+    id: `${ANALYSIS_PREFIX}${v.id}`, kind: "analysis" as const, code: VIEW.analysis[0], viewDef: VIEW.analysis[1], title: analysisTitle(v), context: null,
+    members: extra?.views?.[`${ANALYSIS_PREFIX}${v.id}`] ?? [], view: v,
+  }));
+}
+/** 這張分析圖的元素清單：釘選類別的元素（亮色）與其他所有元素（暗色）。SysML v2 的任何元素都列，標準庫的與套件本身除外。 */
+export function analysisPalette(a: Pick<Analysis, "elements">, v: Pick<AnalysisView, "pinned">, members: Iterable<string> = []): { pinned: Element[]; other: Element[] } {
+  const on = new Set(members);
+  const pin = new Set(v.pinned);
+  const list = a.elements.filter((e) => !e.shared && !isPackage(e) && e.kind !== "Comment" && !on.has(e.id));
+  const items = new Set(modelItems(list).map((e) => e.id));
+  // 釘選：釘選類別、而且是可以放進圖裡的那一層（結構類別取定義，其餘取使用）
+  return { pinned: list.filter((e) => e.category !== null && pin.has(e.category) && items.has(e.id)), other: list.filter((e) => !(e.category !== null && pin.has(e.category) && items.has(e.id))) };
+}
+
+/** 零件照實際位置由上而下：有 station 或 position 屬性（自鼻錐尖端起算）就照它排，沒有就照模型裡的順序。 */
+export function stationOrder(parts: Element[]): Element[] {
+  const at = (e: Element) => { const v = parseFloat(e.attrs?.station ?? e.attrs?.position ?? ""); return Number.isFinite(v) ? v : null; };
+  return parts.map((e, i) => ({ e, i, s: at(e) })).sort((x, y) => (x.s ?? Infinity) - (y.s ?? Infinity) || (x.e.line ?? 0) - (y.e.line ?? 0) || x.i - y.i).map((x) => x.e);
+}
+/** 外框的上方留給名稱，零件之間不留空隙，疊起來像一枚火箭的箭體。 */
+export const CONTAINER_PAD = 24;
+function containerNode(e: Element, parts: GNode[]): { node: GNode; parts: GNode[] } {
+  const base = makeNode(e);
+  const head = 26 + base.title.length * 16 + 8;
+  const w = Math.max(base.width, ...parts.map((p) => p.width)) + CONTAINER_PAD * 2;
+  const h = head + parts.reduce((s, p) => s + p.height, 0) + CONTAINER_PAD;
+  return { node: { ...base, compartments: [], width: w, height: h, container: true }, parts: parts.map((p) => ({ ...p, inside: e.id })) };
+}
+/** 外框上方名稱區的高度 */
+export const containerHead = (n: GNode) => 26 + n.title.length * 16 + 8;
+
+type Spot = { x: number; y: number; w?: number; h?: number };
+/**
+ * 系統簡圖的預設排法：外框由左而右並排，外框裡的零件由上而下緊貼著疊起來、置中。
+ * 只替還沒有位置的節點找位置；已經排過的（使用者拖過的）一律不動。其餘的節點交給一般的排法。
+ */
+export function rocketLayout(g: Pick<Graph, "nodes">, known: Record<string, Spot>): Record<string, Spot> {
+  const out: Record<string, Spot> = {};
+  const boxes = g.nodes.filter((n) => n.container);
+  let x = Math.min(24, ...Object.values(known).map((p) => p.x));
+  const right = Math.max(-Infinity, ...g.nodes.filter((n) => known[n.id]).map((n) => known[n.id].x + (known[n.id].w ?? n.width)));
+  if (Number.isFinite(right)) x = right + 72;
+  for (const b of boxes) {
+    const kids = g.nodes.filter((n) => n.inside === b.id);
+    let at = known[b.id];
+    if (!at) { at = { x, y: 24, w: b.width, h: b.height }; out[b.id] = at; x += b.width + 72; }
+    const w = at.w ?? b.width;
+    let y = Math.max(at.y + containerHead(b), ...kids.filter((k) => known[k.id]).map((k) => known[k.id].y + k.height));
+    for (const k of kids) {
+      if (known[k.id]) continue;
+      out[k.id] = { x: Math.round(at.x + (w - k.width) / 2), y: Math.round(y) };
+      y += k.height;
+    }
+    // 零件超出外框時把外框拉長（只改這一次新排的外框）
+    if (out[b.id]) out[b.id] = { ...out[b.id], h: Math.max(b.height, y - at.y + CONTAINER_PAD) };
+  }
+  return out;
+}
+
+/** 手動連線的轉折點存在版面紀錄裡（layout.json 這張圖的底下），鍵是 bend|<連線>|<序號>。 */
+export const BEND = "bend|";
+export const bendKey = (edgeKey: string, i: number) => `${BEND}${edgeKey}|${i}`;
+export function bendsOf(nodes: Record<string, Spot> | undefined, edgeKey: string): { x: number; y: number }[] {
+  const pre = `${BEND}${edgeKey}|`;
+  return Object.entries(nodes ?? {}).filter(([k]) => k.startsWith(pre)).map(([k, p]) => ({ i: Number(k.slice(pre.length)), x: p.x, y: p.y }))
+    .filter((p) => Number.isInteger(p.i)).sort((a, b) => a.i - b.i).map(({ x, y }) => ({ x, y }));
+}
+/** 換掉某條連線的轉折點（list 是空的就是拉直），其餘的位置不動。 */
+export function withBends(nodes: Record<string, Spot> | undefined, edgeKey: string, list: { x: number; y: number }[]): Record<string, Spot> {
+  const pre = `${BEND}${edgeKey}|`;
+  const next = Object.fromEntries(Object.entries(nodes ?? {}).filter(([k]) => !k.startsWith(pre)));
+  list.forEach((p, i) => { next[bendKey(edgeKey, i)] = { x: Math.round(p.x), y: Math.round(p.y) }; });
+  return next;
+}
+/**
+ * 自動排列之後，手動拉的轉折點跟著兩端的節點一起移動，不清掉（Mars，2026-11-17）。
+ * 第 i 個（共 n 個）轉折點的位移，是起點節點的位移與終點節點的位移依 (i+1)/(n+1) 內插；端點沒有新舊位置時當作沒動。
+ */
+export function moveBends(before: Record<string, Spot>, after: Record<string, Spot>, edges: Pick<GEdge, "id" | "key" | "source" | "target">[]): Record<string, Spot> {
+  const out = { ...after };
+  const delta = (id: string) => (before[id] && after[id] ? { x: after[id].x - before[id].x, y: after[id].y - before[id].y } : { x: 0, y: 0 });
+  for (const e of edges) {
+    const k = e.key ?? e.id;
+    const list = bendsOf(after, k);
+    if (!list.length) continue;
+    const ds = delta(e.source), dt = delta(e.target);
+    list.forEach((p, i) => {
+      const t = (i + 1) / (list.length + 1);
+      out[bendKey(k, i)] = { x: Math.round(p.x + ds.x + (dt.x - ds.x) * t), y: Math.round(p.y + ds.y + (dt.y - ds.y) * t) };
+    });
+  }
+  return out;
+}
+/** 在折線上離 p 最近的那一段插入新的轉折點，回傳插入的位置。pts 含兩端點。 */
+export function insertAt(pts: { x: number; y: number }[], p: { x: number; y: number }): number {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
+    const d = (a.x + t * dx - p.x) ** 2 + (a.y + t * dy - p.y) ** 2;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best; // 插在 bends 的第 best 個之前（pts 的第 best 段）
+}

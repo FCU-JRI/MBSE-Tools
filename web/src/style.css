@@ -184,6 +184,8 @@ tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1)
 .react-flow__edge.selected .react-flow__edge-path { stroke-width: 2; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.5)); }
 .react-flow__handle { width: 8px; height: 8px; border-radius: 0; opacity: 0; }
 .react-flow__node:hover .react-flow__handle, .react-flow__node.selected .react-flow__handle { opacity: 1; }
+/* 連接埠與參數的方塊由節點自己畫；這裡的 handle 只是連線的接點，不顯示、不能拉線 */
+.react-flow__handle.port-handle { opacity: 0 !important; pointer-events: none; }
 .node { min-width: 148px; max-width: 240px; background: var(--bg); border: var(--stroke-hair) solid var(--line-strong); }
 .react-flow__node.selected .node { border-color: var(--ink); box-shadow: var(--glow-ink); }
 .node-head { padding: var(--space-2) var(--space-3); text-align: center; }
@@ -381,3 +383,28 @@ details > summary { list-style: none; cursor: pointer; } details > summary::-web
 .ctx-menu .caption { padding: 4px var(--space-2); }
 .ctx-menu hr { border: 0; border-top: var(--stroke-hair) solid var(--line); margin: var(--space-1) 0; }
 .react-flow__selection, .react-flow__nodesselection-rect { background: rgba(127, 127, 127, 0.12); border: 1px dashed var(--ink-muted); }
+
+/* ───────── P2 分析圖：問題、還缺什麼、元素清單（釘選亮色、其他暗色）、手動連線 ───────── */
+.canvas-col { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.analysis-head { flex: none; padding: var(--space-2) var(--space-4); border-bottom: var(--stroke-hair) solid var(--line); display: flex; flex-direction: column; gap: var(--space-1); }
+.analysis-q { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.analysis-q .body { flex: 1; min-width: 240px; max-width: none; margin: 0; font-weight: 600; }
+.analysis-missing summary { cursor: pointer; }
+.analysis-missing ul { margin: var(--space-1) 0 0; padding-left: var(--space-4); }
+.linklike { border: 0; background: none; padding: 0; color: var(--ink-muted); text-decoration: underline; cursor: pointer; font: inherit; text-align: left; }
+.linklike:hover { color: var(--ink); }
+.analysis-list { width: 260px; flex: none; overflow-y: auto; border-left: var(--stroke-hair) solid var(--line); padding: var(--space-2) var(--space-3) var(--space-6); display: flex; flex-direction: column; gap: var(--space-2); }
+.analysis-list h3 { margin: var(--space-2) 0 0; }
+.el-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.el-item { display: grid; grid-template-columns: 1fr auto; column-gap: var(--space-2); align-items: center; padding: 4px 0; border-bottom: var(--stroke-hair) solid var(--line); cursor: grab; }
+.el-item .el-name { font-family: var(--font-sans); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.el-item .el-kind { grid-column: 1; font-size: 11px; color: var(--ink-muted); }
+.el-item .el-kind small, .tid small.en { font-size: 9.5px; letter-spacing: 0.04em; color: var(--ink-faint); margin-left: 4px; }
+.el-item .tbtn { grid-row: 1 / span 2; grid-column: 2; }
+.el-item.pinned .el-name { color: var(--ink); font-weight: 600; }
+.el-item.dim { opacity: 0.5; }
+.el-item.dim:hover, .el-item.dim:focus-within { opacity: 0.85; }
+.edge-label { position: absolute; pointer-events: none; font-size: 10px; line-height: 14px; padding: 0 4px; background: var(--bg); color: var(--ink-faint); white-space: nowrap; }
+.bend-handle { position: absolute; width: 10px; height: 10px; background: var(--ink); border: 1px solid var(--bg); pointer-events: all; cursor: move; z-index: 4; }
+.bend-handle.add { width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 1px solid var(--ink); cursor: copy; }
+@media (max-width: 860px) { .analysis-list { width: auto; border-left: 0; border-top: var(--stroke-hair) solid var(--line); max-height: 40vh; } }

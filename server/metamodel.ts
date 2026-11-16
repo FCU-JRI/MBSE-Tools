@@ -66,15 +66,15 @@ export const CATEGORIES: Category[] = [
     help: "用測試、分析、檢查或展示，證明某條需求有被做到。", example: "以飛行電腦氣壓計紀錄遠地點高度。" },
   { id: "ValidationEvent", zh: "確認事件", en: "Validation Event", pillar: "vv", prefix: "VAL", pkg: "Verification", keyword: "verification",
     help: "確認做出來的系統真的符合利害關係人的期望（做對的東西）。", example: "飛行後與指導老師檢視任務是否達成目的。" },
-  { id: "Risk", zh: "風險", en: "Risk (FMEA)", pillar: "risk", prefix: "RISK", pkg: "Risks", keyword: "item",
-    help: "可能出錯的事。嚴重度與可能性各評 1–5，並寫下緩解方式。", example: "降落傘未展開",
+  { id: "Risk", zh: "風險", en: "Risk", pillar: "risk", prefix: "RISK", pkg: "Risks", keyword: "item",
+    help: "可能出錯的事。可能性與後果（嚴重度）各評 1–5，並寫下緩解方式。可以掛在任務、系統、次系統、元件或介面上，再連到它威脅的需求。", example: "降落傘未展開",
     fields: [
       { name: "failureMode", zh: "失效模式", type: "text" }, { name: "effect", zh: "影響", type: "text" },
-      { name: "cause", zh: "原因", type: "text" }, { name: "severity", zh: "嚴重度 1–5", type: "int" },
+      { name: "cause", zh: "原因", type: "text" }, { name: "severity", zh: "後果（嚴重度）1–5", type: "int" },
       { name: "likelihood", zh: "可能性 1–5", type: "int" }, { name: "detection", zh: "偵測度 1–5（越難發現越高）", type: "int" },
       { name: "mitigation", zh: "緩解措施", type: "text" }, { name: "residualSeverity", zh: "緩解後嚴重度 1–5", type: "int" },
       { name: "residualLikelihood", zh: "緩解後可能性 1–5", type: "int" }, { name: "owner", zh: "負責人", type: "text" },
-      { name: "status", zh: "狀態（開啟／結案）", type: "text" } ] },
+      { name: "status", zh: "狀態（開啟／結案）", type: "text" }, { name: "source", zh: "來源（FMEA／方案比較／任務剖面）", type: "text" } ] },
   { id: "SafetyFactor", zh: "安全係數", en: "Factor of Safety", pillar: "risk", prefix: "FOS", pkg: "Safety", keyword: "item",
     help: "結構或壓力元件的實際安全係數與要求值。", example: "燃燒室爆破安全係數",
     fields: [
@@ -101,6 +101,49 @@ export const CATEGORIES: Category[] = [
       { name: "preSignOff", zh: "加工前簽核", type: "text" }, { name: "machinist", zh: "加工者", type: "text" },
       { name: "postSignOff", zh: "加工後簽核", type: "text" }, { name: "finalSignOff", zh: "最終簽核（總工程師）", type: "text" },
       { name: "status", zh: "狀態", type: "text" } ] },
+  // METHOD.md 實作：各期只改自己的區塊（docs/IMPL-PLAN.md）
+  // [P1 需求屬性與需求矩陣]
+  { id: "MissionRequirement", zh: "任務需求", en: "Mission Requirement", pillar: "requirements", prefix: "REQ-MIS", pkg: "Requirements", keyword: "requirement",
+    help: "整個任務（不只火箭，也包括地面站等）要達成什麼、有哪些不能違反的條件。用「應」字，有數字，可以驗證。不寫階段、順序與轉換條件，那些屬於任務剖面。比賽或外部規定的條件可以寫成任務需求，要註明出處。",
+    example: "任務應於落地後 2 小時內尋回箭體。" },
+  // [/P1]
+  // [P2 分析圖骨架與中文化]
+  // [/P2]
+  // [P3 任務剖面、功能分配、MOE／MOP／TPM]
+  // [/P3]
+  // [P4 介面與 N² 矩陣]
+  { id: "InterfacePort", zh: "連接埠", en: "Port Definition", pillar: "structure", prefix: "IFP", pkg: "Interfaces", keyword: "port def",
+    help: "次系統身上和別人交換東西的地方，帶它要管的物理量（電壓、力、溫度、資料速率⋯）。在「介面」頁新增與修改。", example: "電源埠（電壓、最大電流）" },
+  { id: "Interface", zh: "介面", en: "Interface Definition", pillar: "structure", prefix: "IF", pkg: "Interfaces", keyword: "interface def",
+    help: "兩個次系統之間交換什麼：機械、熱、電、流體、資料、人。兩端的數字用限制檢查是否對得上；變更要兩端負責人都同意才定案。", example: "航電供電介面" },
+  // [/P4]
+  // [P5 FMEA、風險與圖表]
+  { id: "FailureMode", zh: "失效模式", en: "Failure Mode (FMEA)", pillar: "risk", prefix: "FM", pkg: "FMEA", keyword: "item",
+    help: "FMEA 的一列：某個次系統執行某個功能時可能怎麼失效。發生度、嚴重度、難檢度各評 1–10（比賽附件 12 的尺度），RPN = O × S × D。嚴重度 8 以上一定要寫矯正措施。", example: "無法有效提供各次系統電力",
+    fields: [
+      { name: "effect", zh: "失效影響", type: "text" }, { name: "cause", zh: "失效因素", type: "text" },
+      { name: "control", zh: "現狀控制", type: "text" }, { name: "occurrenceRating", zh: "發生度 O 1–10", type: "int" },
+      { name: "severity", zh: "嚴重度 S 1–10（空白用建議值）", type: "int" }, { name: "detection", zh: "難檢度 D 1–10（空白用建議值）", type: "int" },
+      { name: "correctiveAction", zh: "建議矯正措施／狀態", type: "text" }, { name: "owner", zh: "負責人", type: "text" },
+      { name: "due", zh: "日期", type: "text" }, { name: "done", zh: "完成校正（是／否）", type: "text" },
+      { name: "occurrenceAfter", zh: "矯正後 O", type: "int" }, { name: "severityAfter", zh: "矯正後 S", type: "int" },
+      { name: "detectionAfter", zh: "矯正後 D", type: "int" } ] },
+  // [/P5]
+  // [P6 方案比較與模型內公式]
+  { id: "DecisionMatrix", zh: "方案比較", en: "Decision Matrix (Trade Study)", pillar: "parametrics", prefix: "TRD", pkg: "TradeStudies", keyword: "item",
+    help: "每次要設計的地方跑一次：列出候選方案，用專案統一的準則與權重逐項打分，選定一個、否決的留下理由。", example: "推進方案比較、回收方式比較",
+    fields: [{ name: "question", zh: "要決定什麼", type: "text" }, { name: "decision", zh: "結論與理由", type: "text" }] },
+  { id: "Criterion", zh: "評比準則", en: "Criterion", pillar: "parametrics", prefix: "CRIT", pkg: "TradeStudies", keyword: "item",
+    help: "專案統一的評比準則，客觀、可量測，並追溯到需求、MOE 或 MOP。必須（must）不通過就剔除；加分（want）依權重計分。風險也是一項準則。", example: "推重比（必須 ≥ 5）、成本、技術風險",
+    fields: [
+      { name: "kind", zh: "種類（must 必須／want 加分）", type: "text" }, { name: "weight", zh: "權重（加分準則）", type: "real" },
+      { name: "aspect", zh: "面向（performance／cost／schedule／safety／risk）", type: "text" }, { name: "measure", zh: "怎麼量、單位或門檻", type: "text" } ] },
+  { id: "Alternative", zh: "候選方案", en: "Alternative", pillar: "parametrics", prefix: "ALT", pkg: "TradeStudies", keyword: "item",
+    help: "方案比較裡的一個選項，建在方案比較裡面。選定的方案成為設計；否決的方案要寫理由，之後查得到為什麼不用它。", example: "固態馬達、混合式馬達",
+    fields: [{ name: "status", zh: "狀態（candidate／selected／rejected）", type: "text" }, { name: "rationale", zh: "選定或否決的理由", type: "text" }] },
+  // [/P6]
+  // [P7 火箭外形與模擬圖]
+  // [/P7]
 ];
 
 export const CATEGORY = new Map(CATEGORIES.map((c) => [c.id, c]));
@@ -113,4 +156,20 @@ export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
   verify: { zh: "驗證", help: "哪個驗證事件用來證明這條需求。" },
   allocate: { zh: "分配給", help: "這個功能由哪個次系統或元件執行。" },
   include: { zh: "包含", help: "這個使用案例進行時會用到另一個使用案例。" },
+  // METHOD.md 實作：各期只改自己的區塊
+  // [P1 需求屬性與需求矩陣]
+  // [/P1]
+  // [P2 分析圖骨架與中文化]
+  // [/P2]
+  // [P3 任務剖面、功能分配、MOE／MOP／TPM]
+  // [/P3]
+  // [P4 介面與 N² 矩陣]
+  // [/P4]
+  // [P5 FMEA、風險與圖表]
+  // [/P5]
+  // [P6 方案比較與模型內公式]
+  // 方案比較沿用 trace：準則 → 需求／MOE／MOP、決策矩陣 → 準則（只用部分準則時）、選定方案 ↔ 設計元素
+  // [/P6]
+  // [P7 火箭外形與模擬圖]
+  // [/P7]
 };

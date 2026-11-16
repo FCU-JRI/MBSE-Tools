@@ -78,9 +78,9 @@ test("套件內容圖：成員是節點、下層列在隔間、零件畫成節�
   // 參照的使用：虛線外框
   assert.equal(node("Top::other")?.dashed, true);
   assert.equal(node("Top::Car::spare")?.dashed, true);
-  // 隔間：屬性放 attributes，其餘的使用放 features，更下層的縮排；已經畫成節點的零件不再列
+  // 隔間：屬性放 attributes，動作放 actions（階段 4 起分出專屬的隔間，原本放 features），更下層的縮排；已經畫成節點的零件不再列
   const car = node("Top::Car");
-  assert.deepEqual(car?.compartments, [["attributes", "count"], ["features", "action spin", "· action inner"]]);
+  assert.deepEqual(car?.compartments, [["attributes", "count"], ["actions", "spin", "· action inner"]]);
   assert.deepEqual(node("Top::Base")?.compartments, [["attributes", "mass"]]);
   // 組成：擁有者端實心菱形；非組成：空心菱形
   assert.deepEqual(edges("compose"), ["Car :> Base → again : Car", "Car :> Base → wheel : Wheel", "SportsCar :> Car → :>> wheel", "SportsCar :> Car → extra : Wheel", "Wheel :> Base → hub : Hub"]);
@@ -247,4 +247,14 @@ test("Apollo 11 參考模型：21 個定義都有分解圖且每個零件都在�
   const mc = buildGraph(decomps.find((d) => d.title === "MassedComponent") as DiagramDef, a);
   assert.deepEqual(mc.nodes.map((n) => n.name), ["MassedComponent", "subcomponents"]);
   assert.deepEqual(mc.edges.map((e) => e.kind).sort(), ["compose", "define"]);
+});
+
+test("自動排列不清掉手動轉折點：轉折點跟著兩端節點移動（Mars，2026-11-17）", async () => {
+  const { moveBends, bendsOf, withBends } = await import("./model.ts");
+  const before = withBends({ A: { x: 0, y: 0 }, B: { x: 100, y: 0 } }, "e1", [{ x: 50, y: 50 }]);
+  // 起點往右移 20、終點往下移 40：中間唯一的轉折點取兩者的一半
+  const after = moveBends(before, { ...withBends({}, "e1", [{ x: 50, y: 50 }]), A: { x: 20, y: 0 }, B: { x: 100, y: 40 } }, [{ id: "e1", source: "A", target: "B" }]);
+  assert.deepEqual(bendsOf(after, "e1"), [{ x: 60, y: 70 }]);
+  // 沒有轉折點的連線不受影響，節點位置照新的
+  assert.deepEqual(after.A, { x: 20, y: 0 });
 });

@@ -79,6 +79,20 @@ export interface Relation {
   file: string;
 }
 
+/**
+ * 狀態轉換的觸發條件、守衛與效果（階段 4，F-78）：`transition first a accept X if g do e then b`。
+ * from／to 和 relations 裡 kind 為 transition 的那一條相同（同一行）。沒寫的是空字串。
+ */
+export interface Transition { from: string; to: string; trigger: string; guard: string; effect: string; file: string; line: number | null }
+/** 起點（階段 4，F-78）：`entry; then X;`，owner 是寫這句的狀態或狀態定義，to 是第一個狀態。 */
+export interface Entry { owner: string; to: string }
+/**
+ * 連結與介面（階段 4，F-80）：`interface l : T connect a.p to b.q;`、`connect a to b;`。
+ * fromChain／toChain：端點的特徵鏈（a.p 是 [a 的 id, p 的 id]），沒有列出來的特徵也保留 id；fromPath／toPath 是原始碼上的寫法。
+ * id：連結本身有名字時是它的 id，沒有名字時是 null。
+ */
+export interface Connector { kind: "connection" | "interface"; id: string | null; name: string; type: string; fromChain: string[]; toChain: string[]; fromPath: string; toPath: string; file: string; line: number | null }
+
 export interface Extracted {
   elements: Element[];
   relations: Relation[];
@@ -86,6 +100,10 @@ export interface Extracted {
   unnamed: Element[];
   links: Link[];
   imports: Import[];
+  /** 階段 4（F-78、F-80）：轉換的觸發條件、起點、連結與介面的端點。和 relations 分開，現有的輸出不變 */
+  transitions: Transition[];
+  entries: Entry[];
+  connectors: Connector[];
 }
 
 type Raw = Record<string, any>;
@@ -339,7 +357,13 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       ...(withSubject.has(id) ? { hasSubject: true } : {}),
     };
   };
-  const general = (el: Element): Element => { const r = byId.get(el.id) as Raw; return { ...el, keyword: keywordOf(r, textAt(r), byId.get(ref(r.owningMembership) ?? "")?.["@type"]), parent: parentOf(r) }; };
+  const general = (el: Element): Element => {
+    const r = byId.get(el.id) as Raw, m = byId.get(ref(r.owningMembership) ?? "");
+    const k = keywordOf(r, textAt(r), m?.["@type"]);
+    // 狀態裡的 entry／do／exit 動作（規範 8.2.3.18 的 entry action、do action、exit action）
+    const sub = m?.["@type"] === "StateSubactionMembership" && m.kind ? `${m.kind} action` : k;
+    return { ...el, keyword: sub, parent: parentOf(r) };
+  };
   const elements: Element[] = namedRaw.map((e) => general(build(e, e.declaredName)));
   const unnamed: Element[] = unnamedRaw.map((e) => {
     // 名稱：被重定義的特徵（解析器已經推出來）→ 原始碼的第一行 → 關鍵字
@@ -468,5 +492,48 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       push("succession", ref(e.sourceFeature), refs(e.targetFeature)[0] ?? null, e);
     }
   }
-  return { elements, relations, unnamed, links, imports };
+
+  // ───────── 階段 4：轉換的觸發條件、起點、連結的端點 ─────────
+  const transitions: Transition[] = [], entries: Entry[] = [], connectors: Connector[] = [];
+  const typeName = (id: string) => (generals.get(id) ?? []).map((g) => lastName(qn(g)) || String(byId.get(g)?.declaredName ?? "")).filter(Boolean).join(", ");
+  const featureName = (id: string) => { const x = byId.get(id); return String(x?.declaredName ?? x?.name ?? "") || lastName(qn(id)) || (generals.get(id) ?? []).map((g) => byId.get(g)?.declaredName).find(Boolean) || ""; };
+  /** 連結的一端：直接寫的特徵，或特徵鏈 a.b.c。 */
+  const chainOf = (end: Raw | undefined): string[] => {
+    if (!end) return [];
+    const sub = byId.get(ref(end.ownedReferenceSubsetting) ?? "");
+    const target = ref(sub?.referencedFeature) ?? ref(sub?.general);
+    if (!target) return [];
+    const chain = refs(byId.get(target)?.chainingFeature);
+    return chain.length ? chain : [target];
+  };
+  for (const e of raw) {
+    const t = e["@type"];
+    if (t === "TransitionUsage" && inProject(e) && ref(e.source) && ref(e.target) && known.has(ref(e.source) as string) && known.has(ref(e.target) as string)) {
+      const trig = refs(e.triggerAction).map((a) => {
+        const acc = byId.get(a);
+        const p = byId.get(ref(acc?.payloadParameter) ?? "");
+        const names = p ? typeName(p["@id"]) : "";
+        return names || String(p?.declaredName ?? "") || textAt(acc).replace(/^\s*accept\s+/, "").split(/\s+(?:if|do|then)\b/)[0].trim();
+      }).filter(Boolean).join(", ");
+      const guard = refs(e.guardExpression).map((g) => String(byId.get(g)?.["sysx:sourceText"] ?? "").trim()).filter(Boolean).join(" and ");
+      const effect = refs(e.effectAction).map((a) => featureName(a) || "action").join(", ");
+      transitions.push({ from: ref(e.source) as string, to: ref(e.target) as string, trigger: trig, guard, effect, file: fileOf(e), line: e["sysx:sourceLine"] ?? null });
+    } else if (t === "SuccessionAsUsage" && byId.get(ref(e["sysx:sourceMember"]) ?? "")?.["@type"] === "StateSubactionMembership" && byId.get(ref(e["sysx:sourceMember"]) ?? "")?.kind === "entry") {
+      const owner = namedOwner(ref(e.owner)), to = refs(e.targetFeature)[0];
+      if (owner && to && known.has(to) && inProject(e)) entries.push({ owner, to });
+    } else if ((t === "ConnectionUsage" || t === "InterfaceUsage") && inProject(e) && !(tagsOf.get(e["@id"]) ?? []).includes(DERIVATION)) {
+      const direct = refs(e.relatedFeature);
+      // 端點寫在主體裡（end a ::> x;）時沒有 connectorEnd，改看擁有的 end 特徵
+      const ce = refs(e.connectorEnd);
+      const ends = (ce.length ? ce : refs(e.ownedFeature).filter((x) => byId.get(x)?.isEnd)).map((x) => byId.get(x));
+      const chains = ends.length >= 2 ? ends.map(chainOf) : [];
+      const from = chains[0]?.length ? chains[0] : direct[0] ? [direct[0]] : [];
+      const to = chains[1]?.length ? chains[1] : direct[1] ? [direct[1]] : [];
+      if (!from.length || !to.length) continue;
+      const path = (end: Raw | undefined, chain: string[]) => (ce.length ? String(end?.["sysx:sourceText"] ?? "").trim() : "") || chain.map(featureName).join(".");
+      connectors.push({ kind: t === "InterfaceUsage" ? "interface" : "connection", id: e.declaredName && listed.has(e["@id"]) ? e["@id"] : null, name: String(e.declaredName ?? ""), type: typeName(e["@id"]),
+        fromChain: from, toChain: to, fromPath: path(ends[0], from), toPath: path(ends[1], to), file: fileOf(e), line: e["sysx:sourceLine"] ?? null });
+    }
+  }
+  return { elements, relations, unnamed, links, imports, transitions, entries, connectors };
 }

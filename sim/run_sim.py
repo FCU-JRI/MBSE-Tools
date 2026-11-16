@@ -103,7 +103,26 @@ def main() -> None:
     n = 160
     trajectory = [[round(t_final * i / n, 3), round(float(flight.z(t_final * i / n)) - elevation, 2)] for i in range(n + 1)]
 
-    print(json.dumps({"engine": "RocketPy " + metadata.version("rocketpy"), "outputs": outputs, "trajectory": trajectory, "warnings": notes}, ensure_ascii=False))
+    # P7：模擬圖用的時間序列。某個量這一版 RocketPy 沒有時，那一欄省略，網站就不畫那張圖
+    times = [t_final * i / n for i in range(n + 1)]
+    series = {"t": [round(t, 3) for t in times]}
+    for key, fn, offset in (
+        ("altitude", lambda t: flight.z(t), elevation),
+        ("speed", lambda t: flight.speed(t), 0.0),
+        ("acceleration", lambda t: flight.acceleration(t), 0.0),
+        ("mach", lambda t: flight.mach_number(t), 0.0),
+        ("stability", lambda t: flight.stability_margin(t), 0.0),
+        ("x", lambda t: flight.x(t), 0.0),
+        ("y", lambda t: flight.y(t), 0.0),
+    ):
+        try:
+            vals = [float(fn(t)) - offset for t in times]
+            if all(math.isfinite(v) for v in vals):
+                series[key] = [round(v, 4) for v in vals]
+        except Exception:
+            pass
+
+    print(json.dumps({"engine": "RocketPy " + metadata.version("rocketpy"), "outputs": outputs, "trajectory": trajectory, "warnings": notes, "series": series}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

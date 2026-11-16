@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Background, BackgroundVariant, ConnectionMode, Handle, MarkerType, NodeResizer, Position, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, useEdgesState, useNodesState, useReactFlow, useStoreApi } from "@xyflow/react";
-import type { Connection, Edge, Node, NodeProps } from "@xyflow/react";
+import { Background, BackgroundVariant, BaseEdge, ConnectionMode, EdgeLabelRenderer, Handle, MarkerType, NodeResizer, Position, ReactFlow, ReactFlowProvider, SelectionMode, ViewportPortal, useEdgesState, useNodesState, useReactFlow, useStoreApi } from "@xyflow/react";
+import type { Connection, Edge, EdgeProps, Node, NodeProps } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { api } from "./api.ts";
 import type { Annotation, Diagrams, Element, Layout, Meta, View } from "./api.ts";
-import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, seedLayout, suggestPartName } from "./model.ts";
+import { ALL_LINKS, ANALYSIS_LINKS, analysisPalette, BEND, bendsOf, moveBends, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, insertAt, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, rocketLayout, seedLayout, STRUCTURAL_KINDS, suggestPartName, withBends } from "./model.ts";
+import { expandFirst, PACKAGE_ZH, zhKeyword } from "./method/zh.ts";
 import type { DiagramDef, GEdge, GNode, Graph, LinkTool } from "./model.ts";
-import { annotationSvg, edgeMarkers, FRAME_HEAD, frameSvg, iconSvg, MARKERS, markerSvg, nodeSvg, SCREEN } from "./shapes.ts";
+import { annotationSvg, edgeMarkers, frameLayout, frameSvg, iconSvg, MARKERS, markerSvg, nodeSvg, SCREEN } from "./shapes.ts";
 import { downloadPng, downloadSvg, toSvg } from "./exportSvg.ts";
 
 /** g：模型元素的節點；a：草稿標註（便箋、外框、文字，不進模型）。 */
@@ -23,6 +24,8 @@ function ElementNode({ data, selected }: NodeProps<FlowNode>) {
     <div className={`sysml-node ${selected ? "is-selected" : ""}`} style={{ width: g.width, height: g.height }}>
       <svg width={g.width} height={g.height} viewBox={`0 0 ${g.width} ${g.height}`} role="img" aria-label={`${g.keyword} ${g.name}`.trim() || g.shape} dangerouslySetInnerHTML={{ __html: svg }} />
       {SIDES.map((p) => <Handle key={p} id={p} type="source" position={p} isConnectable={!!g.el} style={g.el ? undefined : { visibility: "hidden" }} />)}
+      {/* 連接埠與參數的小方塊：連線接在方塊上（規範 8.2.3.12、8.2.3.17）；不能從這裡拉新的線 */}
+      {(g.ports ?? []).map((p) => <Handle key={`p:${p.key}`} id={`p:${p.key}`} type="source" position={p.side === "left" ? Position.Left : Position.Right} isConnectable={false} className="port-handle" style={{ top: p.y }} />)}
     </div>
   );
 }
@@ -52,12 +55,57 @@ function PackageNode({ id, data, selected, width, height }: NodeProps<FlowNode>)
     <div className={`sysml-node pkg ${selected ? "is-selected" : ""}`} style={{ width: w, height: h }}>
       {data.editable && <NodeResizer isVisible={selected} minWidth={120} minHeight={72} lineClassName="note-resize-line" handleClassName="note-resize-handle"
         onResizeEnd={(_e, p) => data.onResize?.(id, { x: snap(p.x), y: snap(p.y), w: snap(p.width), h: snap(p.height) })} />}
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`package ${g.name}`} dangerouslySetInnerHTML={{ __html: svg }} />
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={g.container ? `${g.keyword} ${g.name}` : `package ${g.name}`} dangerouslySetInnerHTML={{ __html: svg }} />
+      {/* 系統簡圖的外框（P2）是模型元素，連線可以接在它上面 */}
+      {g.container && SIDES.map((p) => <Handle key={p} id={p} type="source" position={p} />)}
     </div>
   );
 }
 const MARKER_DEFS = Object.values(MARKERS).map((m) => markerSvg(m, "jri-", SCREEN, "auto-start-reverse")).join("");
 const nodeTypes = { el: ElementNode, note: NoteNode, pkg: PackageNode };
+
+type Pt0 = { x: number; y: number };
+/** onBends：拖曳中（commit 為 false）只更新畫面，放開時才存進版面紀錄 */
+type EData = { g: GEdge; bends?: Pt0[]; editable?: boolean; onBends?: (edgeId: string, list: Pt0[], commit: boolean) => void };
+/**
+ * 手動連線（P2，METHOD.md 1.1 節）：路線完全由使用者決定，不自動繞線。
+ * 選取連線後，方塊是轉折點（拖曳移動、按兩下刪除），圓點在每一段的中間（拖曳就多一個轉折點）。在線上按兩下也會加一個轉折點。
+ */
+function BendEdge({ id, sourceX, sourceY, targetX, targetY, markerStart, markerEnd, style, label, data, selected, interactionWidth }: EdgeProps<Edge<EData>>) {
+  const flow = useReactFlow();
+  const pts = data?.bends ?? [];
+  const all = [{ x: sourceX, y: sourceY }, ...pts, { x: targetX, y: targetY }];
+  const path = all.map((p, i) => `${i ? "L" : "M"}${p.x} ${p.y}`).join(" ");
+  // 標籤放在中間那一段的中點
+  const mid = Math.floor((all.length - 1) / 2);
+  const lx = (all[mid].x + all[mid + 1].x) / 2, ly = (all[mid].y + all[mid + 1].y) / 2;
+  const drag = (index: number, insert: boolean) => (ev: React.PointerEvent) => {
+    if (!data?.editable || !data.onBends || ev.button !== 0) return;
+    ev.stopPropagation(); ev.preventDefault();
+    let list = [...pts];
+    if (insert) list.splice(index, 0, { x: Math.round((all[index].x + all[index + 1].x) / 2), y: Math.round((all[index].y + all[index + 1].y) / 2) });
+    const at = (e: PointerEvent) => { const p = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }); return { x: snap(p.x), y: snap(p.y) }; };
+    const move = (e: PointerEvent) => { const p = at(e); list = list.map((q, k) => (k === index ? p : q)); data.onBends!(id, list, false); };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); data.onBends!(id, list, true); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  const remove = (index: number) => (ev: React.MouseEvent) => { ev.stopPropagation(); data?.onBends?.(id, pts.filter((_, k) => k !== index), true); };
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerStart={markerStart} markerEnd={markerEnd} style={style} interactionWidth={interactionWidth ?? 16} />
+      <EdgeLabelRenderer>
+        {label && <div className="edge-label" style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)` }}>{label}</div>}
+        {selected && data?.editable && <>
+          {pts.map((p, i) => <div key={`b${i}`} className="bend-handle nodrag nopan" role="button" aria-label={`轉折點 ${i + 1}`} title="拖曳移動；按兩下刪除這個轉折點"
+            style={{ transform: `translate(-50%, -50%) translate(${p.x}px, ${p.y}px)` }} onPointerDown={drag(i, false)} onDoubleClick={remove(i)} />)}
+          {all.slice(0, -1).map((p, i) => <div key={`m${i}`} className="bend-handle add nodrag nopan" role="button" aria-label={`在第 ${i + 1} 段加轉折點`} title="拖曳，在這一段加一個轉折點"
+            style={{ transform: `translate(-50%, -50%) translate(${(p.x + all[i + 1].x) / 2}px, ${(p.y + all[i + 1].y) / 2}px)` }} onPointerDown={drag(i, true)} />)}
+        </>}
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+const edgeTypes = { bend: BendEdge };
 
 type Spot = { x: number; y: number; w?: number; h?: number };
 const PKG_PAD = 24;
@@ -137,21 +185,40 @@ function sides(a: Box, b: Box, vertical: boolean): [Position, Position] {
   return (vertical ? v ?? h : h ?? v) ?? (vertical ? [Position.Bottom, Position.Top] : [Position.Right, Position.Left]);
 }
 
-function toEdge(e: GEdge, pos: Map<string, Box>, vertical: boolean, straight: boolean): Edge {
+/**
+ * bends：使用者拉的轉折點（P2）。有轉折點的連線、以及分析圖上的連線，畫成照轉折點走的折線（沒有轉折點就是直線），不自動繞線；
+ * 兩端接在朝向第一個（最後一個）轉折點的那一邊。其餘照舊。
+ */
+function toEdge(e: GEdge, pos: Map<string, Box>, vertical: boolean, straight: boolean, bends: Pt0[] = [], manual = false, onBends?: EData["onBends"]): Edge {
   const a = pos.get(e.source), b = pos.get(e.target);
-  const [sh, th] = a && b ? sides(a, b, vertical) : vertical ? [Position.Bottom, Position.Top] : [Position.Right, Position.Left];
+  const dot = (p: Pt0): Box => ({ x: p.x, y: p.y, w: 0, h: 0 });
+  const [sh, th] = a && b ? (bends.length ? [sides(a, dot(bends[0]), vertical)[0], sides(dot(bends[bends.length - 1]), b, vertical)[1]] : sides(a, b, vertical)) : vertical ? [Position.Bottom, Position.Top] : [Position.Right, Position.Left];
   const marks = edgeMarkers(e);
+  const free = manual || bends.length > 0;
   return {
-    id: e.id, source: e.source, target: e.target, sourceHandle: sh, targetHandle: th, label: e.label || undefined, data: { g: e },
-    type: straight ? "straight" : "smoothstep", pathOptions: { borderRadius: 0 },
+    id: e.id, source: e.source, target: e.target, sourceHandle: e.sourcePort ? `p:${e.sourcePort}` : sh, targetHandle: e.targetPort ? `p:${e.targetPort}` : th, label: e.label || undefined,
+    data: { g: e, bends, editable: !!onBends, onBends },
+    type: free ? "bend" : straight ? "straight" : "smoothstep", pathOptions: { borderRadius: 0 },
     style: { strokeWidth: 1, strokeDasharray: e.dashed ? "6 4" : undefined }, labelBgPadding: [4, 2],
     markerStart: marks.start ? `jri-${marks.start.id}` : undefined,
     markerEnd: e.head === "open" ? { type: MarkerType.Arrow, color: "currentColor", width: 18, height: 18, strokeWidth: 1.2 } : marks.end ? `jri-${marks.end.id}` : undefined,
-    selectable: e.remove !== null, focusable: e.remove !== null,
+    // 每條線都選得到，才拉得了轉折點；不能刪的線（例如「由誰定義」）仍不能刪
+    selectable: true, focusable: e.remove !== null,
   } as Edge;
 }
 const boxes = (list: { id: string; position: { x: number; y: number }; data: NData }[]) =>
   new Map<string, Box>(list.filter((n) => n.data.g).map((n) => [n.id, { x: n.position.x, y: n.position.y, w: n.data.g!.width, h: n.data.g!.height }]));
+
+/** 圖框的留白（畫面）。 */
+const FRAME_PAD = 36;
+/** 貼在圖框邊上的節點（參數、這個定義自己的連接埠）跟著圖框放；其餘節點不動。 */
+function placeBoundary(list: FlowNode[], notes: Annotation[]): FlowNode[] {
+  const edge = list.filter((n) => n.data.g?.boundary);
+  if (!edge.length) return list;
+  const inner = list.filter((n) => !n.data.g?.boundary).map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g?.width ?? n.width ?? n.data.a?.w ?? 0, h: n.data.g?.height ?? n.height ?? n.data.a?.h ?? 0 }));
+  const fl = frameLayout(inner.length ? inner : notes.map((a) => ({ x: a.x, y: a.y, w: a.w, h: a.h })), edge.map((n) => ({ id: n.id, boundary: n.data.g!.boundary!, width: n.data.g!.width, height: n.data.g!.height })), FRAME_PAD);
+  return list.map((n) => (fl.places.has(n.id) ? { ...n, position: fl.places.get(n.id)! } : n));
+}
 
 export interface DiagramProps {
   readOnly?: boolean;
@@ -196,6 +263,9 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const flow = useReactFlow();
   const rf = useStoreApi();
   const custom = def.kind === "custom";
+  /** 分析圖（P2）：一個階段一張，成員由使用者放進來，和自訂圖一樣可以放任何元素 */
+  const analysis = def.kind === "analysis";
+  const av = def.view;
   const [layout, setLayout] = useState<Layout | null>(null);
   const catPkgs = useMemo(() => new Set(meta.categories.map((c) => c.pkg)), [meta]);
   // 剛在這張圖上建立、還沒有成員的套件與還沒有對象的註解：只要在這張圖有位置就畫出來
@@ -250,11 +320,12 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const drag = useRef<{ starts: Map<string, { x: number; y: number }>; pkgs: Map<string, { x: number; y: number }>; members: Map<string, { pkg: string; x: number; y: number }> } | null>(null);
 
   // 第一層工具：一般的圖用該圖固定的項目，自訂圖用釘選的項目
-  const elTools = custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c)) : paletteOf(def, view.analysis, meta.categories);
+  const elTools = custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c))
+    : analysis ? (av?.pinned ?? []).filter((c) => meta.categories.some((x) => x.id === c)) : paletteOf(def, view.analysis, meta.categories);
   // 套件內容圖與分解圖的內容由擁有關係決定，不在這裡畫套件的框
-  const structural = def.kind === "pkg" || def.kind === "decomp";
+  const structural = STRUCTURAL_KINDS.has(def.kind);
   const allowedLinks = LINK_TOOLS[def.kind];
-  const linkTools: LinkTool[] = custom ? ALL_LINKS.filter((t) => pins.links.includes(t.kind)) : allowedLinks;
+  const linkTools: LinkTool[] = custom ? ALL_LINKS.filter((t) => pins.links.includes(t.kind)) : analysis ? ALL_LINKS.filter((t) => (av?.links ?? ANALYSIS_LINKS).includes(t.kind)) : allowedLinks;
 
   useEffect(() => { api<Layout>(`/projects/${pid}/layout`).then((l) => { layoutRef.current = l; setLayout(l); }).catch(() => setLayout({})); }, [pid]);
   useEffect(() => { setTool("select"); setSelEdge(null); setSelNote(null); setConfirm(null); setPanel(null); setMenu(null); multiRef.current = []; setMulti([]); pending.current = null; }, [def.id]);
@@ -285,52 +356,89 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   }, [def.id, onExtra]);
   const setMembers = useCallback((fn: (ids: string[]) => string[]) => {
     const cur = extraRef.current;
-    const next = { ...cur, custom: cur.custom.map((c) => (c.id === def.id ? { ...c, members: fn(c.members) } : c)) };
+    const next = def.kind === "analysis"
+      ? { ...cur, views: { ...(cur.views ?? {}), [def.id]: fn(cur.views?.[def.id] ?? []) } }
+      : { ...cur, custom: cur.custom.map((c) => (c.id === def.id ? { ...c, members: fn(c.members) } : c)) };
     extraRef.current = next; onExtra(next);
-  }, [def.id, onExtra]);
+  }, [def.id, def.kind, onExtra]);
   const onResize = useCallback((id: string, b: { x: number; y: number; w: number; h: number }) => setNotes((l) => l.map((n) => (n.id === id ? { ...n, ...b } : n))), [setNotes]);
 
   // 自訂圖：剛建立的項目放進這張圖
   useEffect(() => {
-    if (!custom || !pending.current) return;
+    if (!(custom || analysis) || !pending.current) return;
     const before = pending.current;
     const fresh = modelItems(view.analysis.elements).filter((e) => !before.has(e.id)).map((e) => e.id);
     if (fresh.length === 0) return;
     pending.current = null;
     setMembers((ids) => [...ids, ...fresh.filter((x) => !ids.includes(x))]);
-  }, [view.analysis, custom, setMembers]);
+  }, [view.analysis, custom, analysis, setMembers]);
+
+  // ───────── 手動連線（P2）：轉折點存在版面紀錄裡，不自動繞線 ─────────
+  const bendsRef = useRef<(edgeId: string, list: Pt0[], commit: boolean) => void>(() => {});
+  const onBends = useCallback((edgeId: string, list: Pt0[], commit: boolean) => bendsRef.current(edgeId, list, commit), []);
+  const edgesOf = (b: Map<string, Box>) => graph.edges.map((e) => toEdge(e, b, vertical, straight, bendsOf(layoutRef.current[def.id], e.key ?? e.id), analysis, readOnly ? undefined : onBends));
+  bendsRef.current = (edgeId, list, commit) => {
+    const g = graph.edges.find((e) => e.id === edgeId);
+    if (!g) return;
+    const b = boxes(flow.getNodes() as FlowNode[]);
+    setEdges((es) => es.map((x) => (x.id === edgeId ? { ...toEdge(g, b, vertical, straight, list, analysis, onBends), selected: x.selected } : x)));
+    if (commit) saveLayout({ ...layoutRef.current, [def.id]: withBends(layoutRef.current[def.id], g.key ?? g.id, list) });
+  };
+  /** 在線上按兩下：在最近的那一段加一個轉折點 */
+  const addBend = (ev: React.MouseEvent, ed: Edge) => {
+    if (readOnly) return;
+    const d = ed.data as EData;
+    const p = flow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+    const mid = (id: string) => { const n = flow.getNode(id) as FlowNode | undefined; return n ? { x: n.position.x + (n.data.g?.width ?? 0) / 2, y: n.position.y + (n.data.g?.height ?? 0) / 2 } : p; };
+    const list = [...(d.bends ?? [])];
+    const at = insertAt([mid(ed.source), ...list, mid(ed.target)], p);
+    list.splice(at, 0, { x: snap(p.x), y: snap(p.y) });
+    onBends(ed.id, list, true);
+  };
+  const hasBends = Object.keys(layout?.[def.id] ?? {}).some((k) => k.startsWith(BEND));
+  /** 「自動排列」前的位置：排好之後用來把轉折點跟著節點移過去 */
+  const rearrangeFrom = useRef<Record<string, Spot> | null>(null);
 
   useEffect(() => {
     if (!layout) return;
     // 位置一旦決定就存起來，之後編輯模型不會重排；只有「自動排列」會整張重排。
     // 新的套件內容圖與分解圖還沒有紀錄時，沿用舊結構分解圖裡同一個節點的位置
-    const saved = seedLayout(layoutRef.current, def, graph.nodes.map((g) => g.id));
-    const missing = graph.nodes.filter((g) => !saved[g.id]);
+    // 貼在圖框邊上的節點不排版、不存位置，由圖框決定
+    const inner = { ...graph, nodes: graph.nodes.filter((g) => !g.boundary) };
+    const saved = seedLayout(layoutRef.current, def, inner.nodes.map((g) => g.id));
+    const missing = inner.nodes.filter((g) => !saved[g.id]);
     let pos: Record<string, Spot> = saved;
     if (missing.length > 0) {
-      if (!graph.nodes.some((g) => saved[g.id])) pos = { ...saved, ...autoLayout(graph) };
+      if (inner.arrange === "rocket") {
+        // 系統簡圖（P2）：外框裡的零件由上而下疊成一枚火箭，其餘的再找空位
+        pos = { ...saved, ...rocketLayout(inner, saved) };
+        pos = { ...pos, ...placeNew(inner, pos) };
+      } else if (!inner.nodes.some((g) => saved[g.id])) pos = { ...saved, ...autoLayout(inner) };
       else {
         // 還沒有位置的套件：先讓成員各自就位，再用框包住它們
-        const plain = { ...graph, nodes: graph.nodes.filter((g) => g.shape !== "package" || saved[g.id]) };
+        const plain = { ...inner, nodes: inner.nodes.filter((g) => g.shape !== "package" || saved[g.id]) };
         pos = { ...saved, ...placeNew(plain, saved) };
-        for (const g of graph.nodes) {
+        for (const g of inner.nodes) {
           if (g.shape !== "package" || pos[g.id]) continue;
-          const members = graph.nodes.filter((m) => m.parent === g.id && pos[m.id]).map((m) => ({ ...pos[m.id], w: m.width, h: m.height }));
-          pos = { ...pos, ...(members.length ? { [g.id]: boxAround(members) } : placeNew({ ...graph, nodes: [g] }, {})) };
+          const members = inner.nodes.filter((m) => m.parent === g.id && pos[m.id]).map((m) => ({ ...pos[m.id], w: m.width, h: m.height }));
+          pos = { ...pos, ...(members.length ? { [g.id]: boxAround(members) } : placeNew({ ...inner, nodes: [g] }, {})) };
         }
       }
+      // 自動排列：保留手動轉折點，跟著兩端節點的新位置移動
+      if (rearrangeFrom.current) { pos = moveBends(rearrangeFrom.current, pos, graph.edges); rearrangeFrom.current = null; }
       saveLayout({ ...layoutRef.current, [def.id]: pos });
-    } else if (saved !== layoutRef.current[def.id] && graph.nodes.length > 0) saveLayout({ ...layoutRef.current, [def.id]: pos }); // 全部沿用舊位置時也記到這張圖底下
+    } else if (saved !== layoutRef.current[def.id] && inner.nodes.length > 0) saveLayout({ ...layoutRef.current, [def.id]: pos }); // 全部沿用舊位置時也記到這張圖底下
     const isSel = (id: string, single: boolean) => (multiRef.current.length ? multiRef.current.includes(id) : single);
-    const els: FlowNode[] = graph.nodes.map((g0) => {
-      const p = pos[g0.id];
-      if (g0.shape !== "package") return { id: g0.id, type: "el", position: { x: p.x, y: p.y }, data: { g: g0 }, selected: isSel(g0.id, g0.id === selectedId), selectable: !!g0.el, width: g0.width, height: g0.height };
+    const els: FlowNode[] = placeBoundary(graph.nodes.map((g0) => {
+      const p = pos[g0.id] ?? { x: 0, y: 0 };
+      if (g0.boundary) return { id: g0.id, type: "el", position: { x: p.x, y: p.y }, data: { g: g0 }, selected: isSel(g0.id, g0.id === selectedId), selectable: !!g0.el, draggable: false, width: g0.width, height: g0.height };
+      if (g0.shape !== "package" && !g0.container) return { id: g0.id, type: "el", position: { x: p.x, y: p.y }, data: { g: g0 }, selected: isSel(g0.id, g0.id === selectedId), selectable: !!g0.el, width: g0.width, height: g0.height };
       const g = { ...g0, width: p.w ?? g0.width, height: p.h ?? g0.height };
-      return { id: g.id, type: "pkg", position: { x: p.x, y: p.y }, data: { g, editable: !readOnly, onResize: onPkgResize }, selected: isSel(g.id, g.id === selectedId), connectable: false, width: g.width, height: g.height, zIndex: -1 };
-    });
+      return { id: g.id, type: "pkg", position: { x: p.x, y: p.y }, data: { g, editable: !readOnly, onResize: onPkgResize }, selected: isSel(g.id, g.id === selectedId), connectable: !!g.container, width: g.width, height: g.height, zIndex: -1 };
+    }), notes);
     const marks: FlowNode[] = notes.map((a) => ({ id: a.id, type: "note", position: { x: a.x, y: a.y }, data: { a, editable: !readOnly, onResize }, selected: isSel(a.id, a.id === selNote), draggable: !readOnly, connectable: false, width: a.w, height: a.h, zIndex: a.type === "frame" ? -1 : 2 }));
     setNodes([...marks.filter((n) => n.data.a!.type === "frame"), ...els, ...marks.filter((n) => n.data.a!.type !== "frame")]);
-    setEdges(graph.edges.map((e) => toEdge(e, boxes(els), vertical, straight)));
+    setEdges(edgesOf(boxes(els)));
     // selectedId 的變化由下一個 effect 處理，避免重排版面
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, layout, def.id, notes]);
@@ -380,7 +488,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
       starts: new Map(moving.map((n) => [n.id, { ...n.position }])),
       pkgs: new Map(moving.filter((n) => n.type === "pkg").map((n) => [n.id, { ...n.position }])),
       // 套件的成員跟著套件走（自己也在拖曳中的除外）
-      members: new Map(all.filter((n) => n.data.g?.parent && ids.has(n.data.g.parent) && !ids.has(n.id)).map((n) => [n.id, { pkg: n.data.g!.parent!, ...n.position }])),
+      // 系統簡圖（P2）外框裡的零件也跟著外框走
+      members: new Map(all.flatMap((n) => { const o = n.data.g?.parent ?? n.data.g?.inside; return o && ids.has(o) && !ids.has(n.id) ? [[n.id, { pkg: o, ...n.position }] as const] : []; })),
     };
   }, [flow]);
   const onNodeDrag = useCallback((_e: unknown, _n: FlowNode, moving: FlowNode[]) => {
@@ -401,12 +510,14 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     }
     if (moved.some((n) => !n.data.a)) saveLayout({ ...layoutRef.current, [def.id]: cur });
     if (marks.size > 0) setNotes((l) => l.map((a) => (marks.has(a.id) ? { ...a, ...marks.get(a.id)! } : a)));
-    // 節點移動後重新挑選連接點
-    setEdges(graph.edges.map((e) => toEdge(e, boxes(all), vertical, straight)));
+    // 節點移動後，貼在圖框邊上的節點跟著圖框走，再重新挑選連接點
+    const placed = placeBoundary(all, notes);
+    if (placed !== all) setNodes((ns) => { const at = new Map(placed.map((n) => [n.id, n.position])); return ns.map((n) => (n.data.g?.boundary && at.has(n.id) ? { ...n, position: at.get(n.id)! } : n)); });
+    setEdges(edgesOf(boxes(placed)));
 
     // 放進套件的框裡就歸屬那個套件，拖出框外就移出
     if (readOnly) return;
-    const pkgBoxes = all.filter((n) => n.type === "pkg").map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: n.data.g!.width, h: n.data.g!.height }));
+    const pkgBoxes = all.filter((n) => n.type === "pkg" && n.data.g?.shape === "package").map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: n.data.g!.width, h: n.data.g!.height }));
     const groups = new Map<string | null, string[]>();
     for (const n of moved) {
       const g = n.data.g;
@@ -427,15 +538,24 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         applyLayout({ ...layoutRef.current, [def.id]: back });
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [def.id, saveLayout, setNotes, graph, flow, setEdges, vertical, straight, readOnly, byId, moveTo, applyLayout]);
 
-  const resetLayout = () => { const next = { ...layoutRef.current }; delete next[def.id]; saveLayout(next); setLayout(next); setTimeout(() => flow.fitView({ padding: 0.15, maxZoom: 1 }), 60); };
+  // 自動排列：節點重新排，手動拉的轉折點留著、排好後跟著節點移動（Mars：不可以清掉轉折點）
+  const resetLayout = () => {
+    const cur = layoutRef.current[def.id] ?? {};
+    const keep = Object.fromEntries(Object.entries(cur).filter(([k]) => k.startsWith(BEND)));
+    const next = { ...layoutRef.current };
+    if (Object.keys(keep).length) { rearrangeFrom.current = cur; next[def.id] = keep; } else { rearrangeFrom.current = null; delete next[def.id]; }
+    saveLayout(next); setLayout(next); setTimeout(() => flow.fitView({ padding: 0.15, maxZoom: 1 }), 60);
+  };
 
   const onConnect = useCallback((c: Connection) => {
     if (readOnly || !c.source || !c.target || c.source === c.target) return;
     const kind = tool !== "select" ? tool : linkTools[0]?.kind;
     if (!kind) return;
-    act(() => api<View>(`/projects/${pid}/relations`, "POST", { kind, from: c.source, to: c.target }));
+    // P4：介面走介面的路由（自動找兩邊的連接埠與介面定義）
+    act(() => api<View>(kind === "interface" ? `/projects/${pid}/interfaces/connect` : `/projects/${pid}/relations`, "POST", { kind, from: c.source, to: c.target }));
   }, [readOnly, tool, linkTools, pid, act]);
 
   const clearSel = () => { setSelEdge(null); setSelNote(null); setConfirm(null); onSelectEdge(null); };
@@ -642,11 +762,12 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
 
   // 圖框：包住目前所有節點與標註，跟著內容伸縮
   const frame = useMemo(() => {
-    const boxes = nodes.map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g?.width ?? n.width ?? n.data.a?.w ?? 0, h: n.data.g?.height ?? n.height ?? n.data.a?.h ?? 0 }));
-    if (!boxes.length) return null;
-    const pad = 36;
-    const x = Math.min(...boxes.map((b) => b.x)) - pad, y = Math.min(...boxes.map((b) => b.y)) - pad - FRAME_HEAD;
-    const w = Math.max(...boxes.map((b) => b.x + b.w)) + pad - x, h = Math.max(...boxes.map((b) => b.y + b.h)) + pad - y;
+    // 貼在圖框邊上的節點不算在內：圖框由其餘的節點決定，它們再排到框線上（shapes.ts 的 frameLayout，匯出相同）
+    const inner = nodes.filter((n) => !n.data.g?.boundary);
+    const boxes = inner.map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g?.width ?? n.width ?? n.data.a?.w ?? 0, h: n.data.g?.height ?? n.height ?? n.data.a?.h ?? 0 }));
+    if (!nodes.length) return null;
+    const edge = nodes.filter((n) => n.data.g?.boundary).map((n) => ({ id: n.id, boundary: n.data.g!.boundary!, width: n.data.g!.width, height: n.data.g!.height }));
+    const { x, y, w, h } = frameLayout(boxes, edge, FRAME_PAD);
     return { x, y, w, h, svg: frameSvg(frameLabel(def), 0, 0, w, h, SCREEN) };
   }, [nodes, def]);
 
@@ -654,7 +775,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     const placed = (flow.getNodes() as FlowNode[]).filter((n) => n.data.g).map((n) => ({ g: n.data.g!, x: n.position.x, y: n.position.y }));
     const drafts = withDraft ? notes : []; // 草稿標註不是模型的一部分，預設不輸出
     if (placed.length + drafts.length === 0) return;
-    const svg = toSvg(frameLabel(def), placed, graph.edges, vertical, straight, drafts);
+    const bends = new Map(graph.edges.map((e) => [e.key ?? e.id, bendsOf(layoutRef.current[def.id], e.key ?? e.id)] as const).filter(([, b]) => b.length > 0));
+    const svg = toSvg(frameLabel(def), placed, graph.edges, vertical, straight, drafts, bends, analysis);
     const name = `${view.project.id}-${def.code}-${def.title}`;
     if (kind === "svg") downloadSvg(svg, name); else downloadPng(svg, name).catch((e) => onError((e as Error).message));
   };
@@ -680,11 +802,81 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const NA = "這張圖不顯示這類項目。要把不同類別放在一起，請用自訂圖。";
   const empty = graph.nodes.length + notes.length === 0;
 
+  // ───────── 分析圖（P2）：要回答的問題、還缺什麼、元素清單（釘選亮色、其他暗色）─────────
+  const missingList = useMemo(() => { if (!analysis || !av?.missing) return []; try { return av.missing(view.analysis); } catch { return [{ id: null, text: "這張圖的檢查無法執行" }]; } }, [analysis, av, view.analysis]);
+  const palette = useMemo(() => (analysis && av ? analysisPalette(view.analysis, av, def.members ?? []) : { pinned: [], other: [] }), [analysis, av, view.analysis, def.members]);
+  const [listOpen, setListOpen] = useState(() => load("jri.analysisList", { open: true }).open);
+  const [listQ, setListQ] = useState("");
+  const lq = listQ.trim().toLowerCase();
+  const hitEl = (e: Element) => !lq || [e.name, e.shortName, e.keyword, catOf(e.category)?.zh, zhKeyword(e.keyword).zh].some((x) => x?.toLowerCase().includes(lq));
+  const gateZh = (g: string) => { const m = meta.gates.find((x) => x.id === g); return m ? `${m.zh}（${m.en}）` : g; };
+  /** 放進這張圖；at 是放下的位置（拖進來的），沒有就由畫面找空位 */
+  const addToView = (ids: string[], at?: { x: number; y: number }) => {
+    if (readOnly || ids.length === 0) return;
+    if (at && ids.length === 1) place(ids[0], at);
+    setMembers((m) => [...m, ...ids.filter((x) => !m.includes(x))]);
+  };
+  const DRAG_TYPE = "application/x-jri-element";
+  const onDrop = (ev: React.DragEvent) => {
+    const id = ev.dataTransfer.getData(DRAG_TYPE);
+    if (!id || !analysis) return;
+    ev.preventDefault();
+    let p = { x: 24, y: 24 };
+    try { p = flow.screenToFlowPosition({ x: ev.clientX, y: ev.clientY }); } catch { /* 畫布還沒有建立時放在左上角 */ }
+    addToView([id], { x: snap(p.x - 110), y: snap(p.y - 24) });
+  };
+  const pkgZh = (e: Element) => { const top = e.qualifiedName.split("::")[1]; return top ? PACKAGE_ZH[top] ?? top : ""; };
+  const elRow = (e: Element, bright: boolean) => {
+    const c = catOf(e.category), k = zhKeyword(e.keyword);
+    return (
+      <li key={e.id} className={`el-item ${bright ? "pinned" : "dim"}`} draggable={!readOnly} onDragStart={(ev) => { ev.dataTransfer.setData(DRAG_TYPE, e.id); ev.dataTransfer.effectAllowed = "copy"; }}
+        title={`${e.qualifiedName}${readOnly ? "" : "\n拖進圖裡，或按「放入」"}`}>
+        <span className="el-name">{e.shortName ? `${e.shortName} ` : ""}{e.unnamed ? `（${e.name}）` : e.name}</span>
+        <span className="el-kind">{c ? c.zh : k.zh || k.en}<small>{c ? c.en : k.zh ? k.en : ""}</small>{pkgZh(e) && <small>　{pkgZh(e)}</small>}</span>
+        {!readOnly && <button className="tbtn" onClick={() => addToView([e.id])} aria-label={`把 ${e.name} 放入這張圖`}>放入</button>}
+      </li>
+    );
+  };
+  const OTHER_LIMIT = 200;
+  const otherHits = analysis ? palette.other.filter(hitEl) : [];
+  const listPanel = analysis && av && listOpen && (
+    <aside className="analysis-list" aria-label="這張圖的元素清單">
+      <div className="section-head"><h2 className="section-title">元素</h2><button className="tbtn" onClick={() => setListOpen(() => { store("jri.analysisList", { open: false }); return false; })}>收合</button></div>
+      <input className="input" type="search" value={listQ} onChange={(e) => setListQ(e.target.value)} placeholder="搜尋名稱、類別、關鍵字" aria-label="搜尋元素" />
+      <p className="caption">每種 SysML v2 元素都可以拉進這張圖。亮色是這一步預設會用到的（釘選），暗色的照樣可以拉進來。</p>
+      {!readOnly && palette.pinned.length > 0 && <button className="tbtn" onClick={() => addToView(palette.pinned.map((e) => e.id))}>放入全部釘選的元素（{palette.pinned.length}）</button>}
+      <h3 className="label">釘選　{av.pinned.map((c) => catOf(c)?.zh ?? c).join("、")}</h3>
+      {palette.pinned.filter(hitEl).length ? <ul className="el-list">{palette.pinned.filter(hitEl).map((e) => elRow(e, true))}</ul> : <p className="caption muted">{lq ? "沒有符合的。" : "模型裡還沒有，或都已經在圖上了。可以用左邊工具列的「元素」新增。"}</p>}
+      <h3 className="label">其他元素</h3>
+      {otherHits.length ? <ul className="el-list">{otherHits.slice(0, OTHER_LIMIT).map((e) => elRow(e, false))}</ul> : <p className="caption muted">{lq ? "沒有符合的。" : "沒有其他元素。"}</p>}
+      {otherHits.length > OTHER_LIMIT && <p className="caption">還有 {otherHits.length - OTHER_LIMIT} 個，請用搜尋縮小範圍。</p>}
+    </aside>
+  );
+  const seen = new Set<string>();
+  const analysisHead = analysis && av && (
+    <div className="analysis-head" role="region" aria-label="這一步要回答的問題">
+      <div className="analysis-q">
+        <span className="tag">圖 {av.order}</span>
+        <span className="tag" title="對應的審查節點">{gateZh(av.gate)}</span>
+        <p className="body">{expandFirst(av.question, seen)}</p>
+        {!listOpen && <button className="tbtn" onClick={() => setListOpen(() => { store("jri.analysisList", { open: true }); return true; })}>元素清單</button>}
+      </div>
+      {missingList.length === 0
+        ? <p className="caption"><span className="tag done">齊了</span>　這一步要的項目都有了。可以繼續往下一張圖。</p>
+        : <details className="analysis-missing" open={missingList.length <= 4}>
+          <summary className="caption">還缺 {missingList.length} 項（只是提示，不擋你往下做）</summary>
+          <ul>{missingList.map((m, i) => <li key={i} className="caption">{m.id ? <button className="linklike" onClick={() => onSelectElement(m.id)}>{m.text}</button> : m.text}</li>)}</ul>
+        </details>}
+    </div>
+  );
+  const selFlowEdge = edges.find((e) => e.selected);
+  const selBends = (selFlowEdge?.data as EData | undefined)?.bends ?? [];
+
   return (
     <div className="diagram">
       <div className={`toolbox ${collapsed ? "collapsed" : ""}`} role="toolbar" aria-label="圖形編輯工具">
         <div className="tool-group">
-          <span className="label">{def.code} · {def.title}</span>
+          <span className="label" title={analysis ? av?.question : undefined}>{analysis ? def.title : `${def.code} · ${def.title}`}</span>
           <Tool onClick={toggleCollapsed} glyph={collapsed ? "»" : "«"} text={collapsed ? "展開工具列" : "收合工具列"} />
           <Tool on={tool === "select"} onClick={() => setTool("select")} icon="select" text="選取" sub="Shift＋捲動平移" title="點選、拖曳移動。在空白處拖曳可以框選多個一起移動；按住 Ctrl 或 Shift 點選可以加選；Ctrl+A 全選。按右鍵有快速功能。要移動畫面：按住 Shift 捲動（滾輪或觸控板兩指滑動）；也可以按住滑鼠右鍵或中鍵拖曳，或按住空白鍵拖曳。" />
         </div>
@@ -727,7 +919,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
               ? <><Tool danger onClick={doDelete} disabled={busy} glyph="✓" text="確定刪除" /><Tool onClick={() => setConfirm(null)} glyph="×" text="取消" /></>
               : <Tool disabled={!canDelete || busy} onClick={() => setConfirm("selection")} glyph="✕" text={multi.length ? `刪除選取（${delCount}）` : "刪除選取"} title={note ? "刪除選取的標註（Delete 鍵）" : "從模型刪除選取的元素或連線（Delete 鍵）"} />}
             {outIds.length > 0 && <Tool disabled={busy} onClick={moveOut} glyph="⇱" text="移出套件" title="把選取的項目移回上一層套件（也可以直接把它拖出框外）" />}
-            {custom && <Tool disabled={!onThisDiagram} onClick={() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); }} glyph="−" text="移出此圖" title="只從這張圖拿掉，模型裡仍然保留" />}
+            {(custom || analysis) && <Tool disabled={!onThisDiagram || !(def.members ?? []).includes(selectedId ?? "")} onClick={() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); }} glyph="−" text="移出此圖" title="只從這張圖拿掉，模型裡仍然保留" />}
+            {selFlowEdge && <Tool disabled={selBends.length === 0} onClick={() => onBends(selFlowEdge.id, [], true)} glyph="⟋" text="拉直連線" title="清掉這條線的轉折點。要加轉折點：選取連線後拖曳線段中間的圓點，或在線上按兩下。" />}
             <Tool disabled={busy || !view.history?.undo} onClick={() => stepHistory("undo")} glyph="↶" text="復原" sub="Ctrl+Z" title="回到上一步（對模型的修改）。可以連續按，一步一步往回。" />
             <Tool disabled={busy || !view.history?.redo} onClick={() => stepHistory("redo")} glyph="↷" text="重做" sub="Ctrl+Y" title="把剛才復原的那一步做回來。復原之後若做了新的修改，就不能再重做。" />
           </div>
@@ -737,7 +930,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           <Tool onClick={() => flow.zoomIn()} glyph="＋" text="放大" />
           <Tool onClick={() => flow.zoomOut()} glyph="－" text="縮小" />
           <Tool onClick={() => flow.fitView({ padding: 0.15, maxZoom: 1 })} glyph="⤢" text="全覽" />
-          <Tool onClick={resetLayout} glyph="▦" text="自動排列" title="重新排列這張圖的所有節點（標註不動）" />
+          <Tool onClick={resetLayout} glyph="▦" text="自動排列" title={hasBends ? "重新排列這張圖的所有節點（標註不動）；手動拉的轉折點會保留，跟著節點移動" : "重新排列這張圖的所有節點（標註不動）"} />
         </div>
         <div className="tool-group">
           <span className="label">匯出</span>
@@ -755,7 +948,10 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           </div>
         )}
       </div>
-      <div ref={canvasRef} className={`canvas ${activeLink ? "linking" : ""}`} tabIndex={0} onKeyDown={onKey}>
+      <div className="canvas-col">
+      {analysisHead}
+      <div ref={canvasRef} className={`canvas ${activeLink ? "linking" : ""}`} tabIndex={0} onKeyDown={onKey}
+        onDragOver={analysis && !readOnly ? (e) => { if (e.dataTransfer.types.includes(DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } } : undefined} onDrop={analysis && !readOnly ? onDrop : undefined}>
         {!!graph.folded && !activeLink && panel === null && !selectedId && !selNote && (
           <div className="canvas-hint"><span className="tag warn">上限</span><span className="caption">這張圖最多畫 {NODE_LIMIT} 個節點，其餘 {graph.folded} 個改列在節點的隔間裡。</span></div>
         )}
@@ -829,7 +1025,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
                   <div className="tool-group" key={p}>
                     <span className="label">{pzh}</span>
                     {cats.map((c) => {
-                      const ok = custom || elTools.includes(c.id);
+                      const ok = custom || analysis || elTools.includes(c.id);
                       return (
                         <div className="tool-row" key={c.id}>
                           <Tool disabled={!ok} onClick={() => newElement(c.id)} icon={CATEGORY_SHAPE[c.id] ?? "usage"} text={c.zh} title={ok ? c.help : NA} />
@@ -899,7 +1095,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
                 {multiItems.length > 0 && <Item text="放進新套件" onClick={run(() => { pkgFor.current = multiItems.map((n) => n.id); setPanel("pkg"); })} />}
                 {outIds.length > 0 && <Item text="移出套件" disabled={busy} onClick={run(moveOut)} />}
                 {note?.type === "frame" && <Item text="轉成套件" disabled={busy} onClick={run(() => frameToPackage(note))} />}
-                {custom && !multi.length && onThisDiagram && <Item text="移出此圖" onClick={run(() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); })} />}
+                {(custom || analysis) && !multi.length && onThisDiagram && (def.members ?? []).includes(selectedId ?? "") && <Item text="移出此圖" onClick={run(() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); })} />}
                 <Item danger text={delText} disabled={!canDelete || busy} onClick={() => setMenu({ ...menu, ask: true })} />
               </>}
             </div>
@@ -909,8 +1105,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           {/* 連線端點的記號：實心與空心菱形、defined by、特化、重定義、參照子集。形狀和匯出檔共用 shapes.ts 的 MARKERS */}
           <defs dangerouslySetInnerHTML={{ __html: MARKER_DEFS }} />
         </svg>
-        {empty ? <p className="body muted empty">{custom ? "這張圖還沒有內容。用工具列的「加入既有項目」放進模型裡已有的項目，或用「元素」建立新的。" : "這張圖還沒有內容。用左邊工具列的「元素」開始。"}</p> : (
-          <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+        {empty ? <p className="body muted empty">{analysis ? "這張圖還是空的。從右邊的元素清單把元素拖進來（亮色是這一步預設會用到的），或用左邊工具列的「元素」新增。" : custom ? "這張圖還沒有內容。用工具列的「加入既有項目」放進模型裡已有的項目，或用「元素」建立新的。" : "這張圖還沒有內容。用左邊工具列的「元素」開始。"}</p> : (
+          <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onEdgeDoubleClick={addBend} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
             onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
             onSelectionDragStart={(e, ns) => onNodeDragStart(e, ns[0] as FlowNode, ns as FlowNode[])} onSelectionDrag={(e, ns) => onNodeDrag(e, ns[0] as FlowNode, ns as FlowNode[])} onSelectionDragStop={(e, ns) => onNodeDragStop(e, ns[0] as FlowNode, ns as FlowNode[])} onConnect={onConnect} connectionMode={ConnectionMode.Loose} nodesConnectable={!readOnly} deleteKeyCode={null}
             snapToGrid snapGrid={[SNAP, SNAP]} fitView fitViewOptions={{ padding: 0.22, maxZoom: 1 }} minZoom={0.15}
@@ -929,6 +1125,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           </ReactFlow>
         )}
       </div>
+      </div>
+      {listPanel}
     </div>
   );
 }
