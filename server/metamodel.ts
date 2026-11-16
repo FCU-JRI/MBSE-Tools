@@ -101,6 +101,21 @@ export const CATEGORIES: Category[] = [
       { name: "preSignOff", zh: "加工前簽核", type: "text" }, { name: "machinist", zh: "加工者", type: "text" },
       { name: "postSignOff", zh: "加工後簽核", type: "text" }, { name: "finalSignOff", zh: "最終簽核（總工程師）", type: "text" },
       { name: "status", zh: "狀態", type: "text" } ] },
+  // METHOD.md 實作：各期只改自己的區塊（docs/IMPL-PLAN.md）
+  // [P1 需求屬性與需求矩陣]
+  // [/P1]
+  // [P2 分析圖骨架與中文化]
+  // [/P2]
+  // [P3 任務剖面、功能分配、MOE／MOP／TPM]
+  // [/P3]
+  // [P4 介面與 N² 矩陣]
+  // [/P4]
+  // [P5 FMEA、風險與圖表]
+  // [/P5]
+  // [P6 方案比較與模型內公式]
+  // [/P6]
+  // [P7 火箭外形與模擬圖]
+  // [/P7]
 ];
 
 export const CATEGORY = new Map(CATEGORIES.map((c) => [c.id, c]));
@@ -113,4 +128,19 @@ export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
   verify: { zh: "驗證", help: "哪個驗證事件用來證明這條需求。" },
   allocate: { zh: "分配給", help: "這個功能由哪個次系統或元件執行。" },
   include: { zh: "包含", help: "這個使用案例進行時會用到另一個使用案例。" },
+  // METHOD.md 實作：各期只改自己的區塊
+  // [P1 需求屬性與需求矩陣]
+  // [/P1]
+  // [P2 分析圖骨架與中文化]
+  // [/P2]
+  // [P3 任務剖面、功能分配、MOE／MOP／TPM]
+  // [/P3]
+  // [P4 介面與 N² 矩陣]
+  // [/P4]
+  // [P5 FMEA、風險與圖表]
+  // [/P5]
+  // [P6 方案比較與模型內公式]
+  // [/P6]
+  // [P7 火箭外形與模擬圖]
+  // [/P7]
 };

@@ -20,6 +20,14 @@ import { buildReport, renderDocx, renderHtml } from "./report.ts";
 import { paramLines, paramWord } from "./modernize.ts";
 import * as reference from "./reference.ts";
 import type { User } from "./auth.ts";
+// METHOD.md 實作：各期的路由（docs/IMPL-PLAN.md）
+import { mount as mountP1 } from "./method/p1.ts";
+import { mount as mountP2 } from "./method/p2.ts";
+import { mount as mountP3 } from "./method/p3.ts";
+import { mount as mountP4 } from "./method/p4.ts";
+import { mount as mountP5 } from "./method/p5.ts";
+import { mount as mountP6 } from "./method/p6.ts";
+import { mount as mountP7 } from "./method/p7.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAIN_FILE = "model.sysml";
@@ -742,6 +750,16 @@ if (fs.existsSync(dist)) {
   app.use(express.static(dist, { setHeaders: (res, file) => { if (file.endsWith(".html")) noCache(res as Response); } }));
   app.get(/^(?!\/api\/).*/, (_req, res) => { noCache(res); res.sendFile(path.join(dist, "index.html")); });
 }
+
+// METHOD.md 實作：各期的路由掛在統一的錯誤處理之前
+const methodCtx = { wrap, pid, author, view, store };
+mountP1(app, methodCtx);
+mountP2(app, methodCtx);
+mountP3(app, methodCtx);
+mountP4(app, methodCtx);
+mountP5(app, methodCtx);
+mountP6(app, methodCtx);
+mountP7(app, methodCtx);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof store.UserError) return res.status(400).json({ error: err.message });

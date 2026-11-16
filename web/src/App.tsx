@@ -18,6 +18,7 @@ import { VersionsView } from "./Versions.tsx";
 import { PlanView } from "./Plan.tsx";
 import { SimView } from "./Sim.tsx";
 import { SourceTab } from "./SourceTab.tsx";
+import { METHOD_PAGES } from "./method/registry.ts";
 
 export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -191,8 +192,10 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
   );
 }
 
-type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history";
-const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
+type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history" | `m:${string}`;
+const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"],
+  // METHOD.md 實作的頁面（web/src/method/registry.ts）
+  ...METHOD_PAGES.map((p): [Mode, string] => [`m:${p.id}`, p.zh])];
 
 /** id 是專案參照：main 或某個分支。分支和 main 用同一個畫面，所有分頁都能看、能改（F-33）。 */
 function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
@@ -310,6 +313,7 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
           {mode === "deliver" && <Deliverables view={view} meta={meta} user={user} tab={deliverTab} setTab={setDeliverTab} selectedId={selectedId} onSelect={(eid) => setSel({ type: "element", id: eid })} onChanged={setView} />}
           {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
           {mode === "plan" && <div className="center-scroll"><PlanView view={view} meta={meta} user={user} /></div>}
+          {METHOD_PAGES.filter((p) => mode === `m:${p.id}`).map((p) => <div key={p.id} className="center-scroll"><p.Component view={view} meta={meta} user={user} onChanged={setView} onOpen={(eid) => openElement(eid)} /></div>)}
           {mode === "sim" && <div className="center-scroll"><SimView view={view} user={user} onChanged={setView} /></div>}
           {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} at={sourceAt} /></div>}
           {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} branch={view.branch ?? null} onOpen={onOpen} onChanged={(v) => { setView(v); api<Diagrams>(`/projects/${id}/diagrams`).then(setExtra).catch(() => {}); }} /></div>}
