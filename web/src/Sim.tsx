@@ -134,7 +134,7 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
             ))}</tbody>
           </table>
           {!ro && <div style={{ marginTop: 8 }}><button className="tbtn primary" disabled={!!busy || dirty} onClick={apply}>寫回模型</button>
-            <p className="caption">只能寫入這個零件的定義裡已有的屬性。沒有對應的屬性時，先到結構分解加上（例如 attribute maxSpeed : SpeedValue）。</p></div>}
+            <p className="caption">只能寫入這個零件的定義裡已有的屬性。沒有對應的屬性時，先到它的定義加上（例如 attribute maxSpeed : SpeedValue）。</p></div>}
         </section>
       )}
 

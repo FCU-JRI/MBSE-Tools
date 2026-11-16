@@ -1,6 +1,6 @@
 // 把圖匯出成 SVG／PNG，放進審查報告用。固定用白底黑線，列印時清楚。
 import type { GEdge, GNode } from "./model.ts";
-import { annotationSvg, esc, FRAME_HEAD, frameSvg, nodeSvg, PRINT } from "./shapes.ts";
+import { annotationSvg, edgeMarkers, esc, FRAME_HEAD, frameSvg, MARKERS, markerSvg, nodeSvg, PRINT } from "./shapes.ts";
 import type { Annotation } from "./api.ts";
 
 export interface Placed { g: GNode; x: number; y: number }
@@ -48,8 +48,11 @@ export function toSvg(frame: string, nodes: Placed[], edges: GEdge[], vertical =
   const out: string[] = [];
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`);
   out.push(`<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#111" stroke-width="1.2"/></marker>`);
-  out.push(`<marker id="dia" viewBox="0 0 20 12" refX="1" refY="6" markerWidth="18" markerHeight="11" orient="auto"><path d="M1 6 L10 1 L19 6 L10 11 Z" fill="#111"/></marker>`);
-  out.push(`<marker id="typ" viewBox="0 0 20 14" refX="19" refY="7" markerWidth="20" markerHeight="14" markerUnits="userSpaceOnUse" orient="auto"><circle cx="3" cy="3" r="1.4" fill="#111"/><circle cx="3" cy="11" r="1.4" fill="#111"/><path d="M6 1 L19 7 L6 13 Z" fill="#fff" stroke="#111" stroke-width="1"/></marker></defs>`);
+  // 只放這張圖用到的記號；形狀和畫面上的相同（shapes.ts 的 MARKERS）
+  const used = new Set(edges.flatMap((e) => { const k = edgeMarkers(e); return [k.start?.id, k.end?.id]; }));
+  // 「由誰定義」的記號沿用原本的識別碼 typ
+  const mid = (id: string) => (id === "typing" ? "typ" : id);
+  out.push(Object.values(MARKERS).filter((k) => used.has(k.id)).map((k) => markerSvg({ ...k, id: mid(k.id) }, "", PRINT, "auto")).join("") + `</defs>`);
   out.push(`<rect width="${W}" height="${H}" fill="#fff"/>`);
   out.push(frameSvg(frame, m, m, W - m * 2, H - m * 2, PRINT));
   for (const a of notes) if (a.type === "frame") out.push(annotationSvg(a, a.x + ox, a.y + oy, PRINT));
@@ -61,7 +64,8 @@ export function toSvg(frame: string, nodes: Placed[], edges: GEdge[], vertical =
     const o = straight ? null : ortho(a, b, vertical);
     const [x1, y1] = edgePoint(a, b.x + b.g.width / 2, b.y + b.g.height / 2);
     const [x2, y2] = edgePoint(b, a.x + a.g.width / 2, a.y + a.g.height / 2);
-    const marks = `${e.tail === "diamond" ? `marker-start="url(#dia)"` : ""} ${e.head === "open" ? `marker-end="url(#arr)"` : e.head === "typing" ? `marker-end="url(#typ)"` : ""}`;
+    const k = edgeMarkers(e);
+    const marks = `${k.start ? `marker-start="url(#${mid(k.start.id)})"` : ""} ${e.head === "open" ? `marker-end="url(#arr)"` : k.end ? `marker-end="url(#${mid(k.end.id)})"` : ""}`;
     if (o) out.push(`<path d="${o.pts.map(([x, y], i) => `${i ? "L" : "M"}${(x + ox).toFixed(1)} ${(y + oy).toFixed(1)}`).join(" ")}" fill="none" stroke="#111" stroke-width="1" ${e.dashed ? `stroke-dasharray="6 4"` : ""} ${marks}/>`);
     else out.push(`<line x1="${(x1 + ox).toFixed(1)}" y1="${(y1 + oy).toFixed(1)}" x2="${(x2 + ox).toFixed(1)}" y2="${(y2 + oy).toFixed(1)}" stroke="#111" stroke-width="1" ${e.dashed ? `stroke-dasharray="6 4"` : ""} ${marks}/>`);
     if (e.label) {

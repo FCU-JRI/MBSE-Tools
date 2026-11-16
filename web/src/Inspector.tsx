@@ -57,7 +57,7 @@ function ReadPanel({ view, meta, setSel, el, readOnly, onSource }: Props & { el:
     <>
       <div className="section">
         <div className="section-head"><h2 className="section-title">屬性</h2><span className="label">{cat?.zh ?? (el.keyword ? `«${el.keyword}»` : stereotype(el))}</span></div>
-        {el.shared && <p className="caption" style={{ marginBottom: 12 }}>來自共用元件庫，專案內不能修改。可以在結構分解圖把它拉進自己的系統。</p>}
+        {el.shared && <p className="caption" style={{ marginBottom: 12 }}>來自共用元件庫，專案內不能修改。可以在自訂圖把它拉進自己的系統。</p>}
         {!el.shared && !readOnly && <p className="caption" style={{ marginBottom: 12 }}>這類元素目前只能到「原始碼」分頁修改。</p>}
         <div className="field"><span className="label">編號</span><span className="data">{el.shortName ?? "—"}</span></div>
         <div className="field"><span className="label">名稱</span><span className="heading">{el.name}</span></div>

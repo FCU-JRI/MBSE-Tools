@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { api, baseOf, getAuthor, setAuthor } from "./api.ts";
 import type { Diagrams, Element, Me, Meta, MeResponse, Project, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
-import { diagramsOf, isPackage, packageOf, treeOf } from "./model.ts";
+import { diagramsOf, isPackage, packageOf, TOP_DIAGRAM, treeOf } from "./model.ts";
 import type { DiagramDef } from "./model.ts";
 import { Diagram } from "./Diagram.tsx";
 import { Inspector } from "./Inspector.tsx";
@@ -204,7 +204,7 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
   const [notice, setNotice] = useState("");
   const [mode, setMode] = useState<Mode>("home");
   const [deliverTab, setDeliverTab] = useState<DeliverTab>("req");
-  const [diagramId, setDiagramId] = useState("bdd");
+  const [diagramId, setDiagramId] = useState(TOP_DIAGRAM);
   // 表列的是哪個套件（含底下各層）；null 是整個模型
   const [scopeId, setScopeId] = useState<string | null>(null);
   const [sourceAt, setSourceAt] = useState<{ file: string; line: number } | null>(null);
@@ -252,6 +252,8 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
   /** 從樹上點選：點套件，表就列出它底下的元素；點其他元素，選到它，表列出它所在的套件。 */
   const pick = (e: Element) => {
     if (isPackage(e)) {
+      // 正在看圖時，點套件就切到它的套件內容圖（F-76）；其他時候表列出它底下的元素
+      if (mode === "diagram") { setScopeId(e.id); setDiagramId(`pkg:${e.qualifiedName}`); return; }
       setScopeId(e.id);
       setSel({ type: "new", category: meta.categories.find((c) => c.pkg === e.name)?.id ?? "SystemRequirement", parentId: null });
       setMode("table");
@@ -359,20 +361,42 @@ interface TreeProps {
   onDiagram: (id: string) => void; onAddDiagram?: (title: string) => void; onPick: (e: Element) => void; onGate: (id: string) => void;
 }
 
+/** 圖的清單分成幾組，各自可以收合（F-76）。 */
+const DIAGRAM_GROUPS: [id: string, zh: string, kinds: DiagramDef["kind"][]][] = [
+  ["pkg", "套件內容", ["pkg"]], ["decomp", "分解", ["decomp"]], ["other", "需求、行為與互連", ["req", "uc", "ibd", "act", "stm"]], ["custom", "自訂圖", ["custom"]],
+];
+
 /** 左側欄：圖、模型樹（依套件，F-74）、節點進度。 */
 function Tree({ view, diagrams, onAddDiagram, mode, diagramId, scopeId, gateId, selectedId, onDiagram, onPick, onGate }: TreeProps) {
   const els = view.analysis.elements;
   const [naming, setNaming] = useState(false);
   const finish = (v: string) => { setNaming(false); if (v.trim()) onAddDiagram?.(v); };
+  // 圖的清單分組收合；選擇記在瀏覽器裡
+  const [open, setOpen] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem("jri.diagramGroups") ?? "{}"); } catch { return {}; } });
+  const toggle = (gid: string, v: boolean) => setOpen((cur) => { const next = { ...cur, [gid]: v }; try { localStorage.setItem("jri.diagramGroups", JSON.stringify(next)); } catch { /* 無法儲存時只在本次有效 */ } return next; });
   return (
     <>
       <div className="section">
         <div className="section-head"><h2 className="section-title">圖</h2><span className="label">{diagrams.length}</span></div>
-        <ul className="tree">{diagrams.map((d) => (
-          <li key={d.id}><button className="tree-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)}>
-            <span className="tid">{d.code}</span><span className="tn">{d.title}</span>
-          </button></li>
-        ))}</ul>
+        {DIAGRAM_GROUPS.map(([gid, zh, kinds]) => {
+          const list = diagrams.filter((d) => kinds.includes(d.kind));
+          if (list.length === 0) return null;
+          // 正在看的圖所在的那一組一定展開，其餘依使用者上次的選擇
+          const current = mode === "diagram" && list.some((d) => d.id === diagramId);
+          const expanded = open[gid] ?? (current || gid === "other" || gid === "custom");
+          return (
+            <div key={gid} className="diagram-group">
+              <button className="tree-row group-row" aria-expanded={expanded} onClick={() => toggle(gid, !expanded)}>
+                <span className="tid">{expanded ? "▾" : "▸"}</span><span className="tn">{zh}</span><span className="tc">{list.length}</span>
+              </button>
+              {expanded && <ul className="tree">{list.map((d) => (
+                <li key={d.id}><button className="tree-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)} title={d.id.includes(":") && d.kind !== "custom" ? d.id.slice(d.id.indexOf(":") + 1).replaceAll("::", " › ") || d.title : d.title}>
+                  <span className="tid">{d.code}</span><span className="tn">{d.title}</span>
+                </button></li>
+              ))}</ul>}
+            </div>
+          );
+        })}
         {onAddDiagram && (naming
           ? <input className="input" autoFocus placeholder="圖的名稱，例如：任務總覽" maxLength={60} aria-label="新自訂圖的名稱"
               onKeyDown={(e) => { if (e.key === "Enter") finish((e.target as HTMLInputElement).value); if (e.key === "Escape") setNaming(false); }} onBlur={(e) => finish(e.target.value)} />

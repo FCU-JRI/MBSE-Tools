@@ -832,7 +832,10 @@ test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字�
   const defs = diagramsOf(a);
   const g = (kind: string) => buildGraph(defs.find((d: any) => d.kind === kind) as any, a);
   // 圖框：«view» 名稱 : 標準檢視定義
-  assert.equal(frameLabel(defs.find((d: any) => d.kind === "bdd") as any), "«view» 結構分解 : GeneralView");
+  // 結構的圖（F-76）：舊的「結構分解」換成 Structure 套件的套件內容圖
+  const structure = defs.find((d: any) => d.id === "pkg:Project::Structure") as any;
+  assert.equal(defs.some((d: any) => d.kind === "bdd"), false);
+  assert.equal(frameLabel(structure), "«view» Structure : GeneralView");
   assert.deepEqual(["ibd", "act", "stm"].map((k) => defs.find((d: any) => d.kind === k)?.viewDef), ["InterconnectionView", "ActionFlowView", "StateTransitionView"]);
   const uc = g("uc");
   assert.ok(uc.nodes.some((n: any) => n.keyword === "«use case»" && n.shape === "usage"), "使用案例是圓角的 «use case»");
@@ -852,7 +855,7 @@ test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字�
   const r1 = req.nodes.find((n: any) => n.keyword === "«requirement»" && n.title.join("").startsWith("<REQ-"));
   assert.ok(r1 && r1.shape === "usage" && r1.compartments[0]?.[0] === "doc", "需求顯示編號與 doc 隔間");
   assert.ok(req.nodes.some((n: any) => n.keyword === "«verification»"));
-  const bdd = g("bdd");
+  const bdd = buildGraph(structure, a);
   assert.ok(bdd.nodes.filter((n: any) => n.shape === "def").every((n: any) => n.keyword === "«part def»"));
   // 組成：定義 ◆— 零件（使用），零件再以「defined by」指向它的定義
   const comp = bdd.edges.filter((e: any) => e.kind === "compose");

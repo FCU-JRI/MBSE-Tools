@@ -134,6 +134,9 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) 0; font
 .tree-row .tc { font-size: 11px; color: var(--ink-faint); }
 .tree-row .tid { font-size: 10px; letter-spacing: 0.06em; color: var(--ink-faint); white-space: nowrap; }
 .tree-row.unnamed .tn { color: var(--ink-faint); font-style: italic; }
+/* 圖的清單分組收合（F-76） */
+.tree-row.group-row .tn { font-weight: 600; color: var(--ink); }
+.diagram-group > .tree { margin-left: var(--space-2); }
 .gate-row { display: grid; grid-template-columns: 1fr 64px auto; align-items: center; gap: var(--space-3); }
 
 /* 表格：只有列與列之間的髮絲線 */
