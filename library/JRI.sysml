@@ -169,7 +169,8 @@ package JRI {
     port def InterfacePort;
     /* 介面：兩端各一個連接埠。具體的介面特化它，兩端依序重定義 endA、endB。
        負責人是兩端次系統的負責人，變更要兩人都同意才定案（同意紀錄在專案的 interfaces.json）。
-       驗證欄位和需求的共同屬性同名（P1）。 */
+       驗證欄位和 P1 的需求屬性同名：驗證方法用標準的 @VerificationMethod，理由用 @Rationale（ModelingMetadata），
+       驗證負責人 verificationLead、驗證層級 verificationLevel（system／subsystem／component）。 */
     abstract interface def Interface {
         end port endA : InterfacePort;
         end port endB : InterfacePort;
@@ -178,11 +179,9 @@ package JRI {
         attribute maturity : String[0..1];
         attribute ownerA : String[0..1];
         attribute ownerB : String[0..1];
-        /* 驗證方法：inspect／demo／analyze／test */
-        attribute verificationMethod : String[0..1];
-        attribute verificationOwner : String[0..1];
+        attribute verificationLead : String[0..1];
+        /* system／subsystem／component */
         attribute verificationLevel : String[0..1];
-        attribute rationale : String[0..1];
     }
     /* 外部提供的次系統：只管介面，規格是給定值；收到時要檢查並確認適用於這次的用途與環境（SE Handbook 5.1.1.2.2）。
        用法：#given part def 官方推進 :> Subsystem { ... } */

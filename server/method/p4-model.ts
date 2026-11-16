@@ -12,8 +12,9 @@ export const INTERFACE_KINDS: Record<string, string> = { mechanical: "機械", t
 export const MATURITY = ["存在", "暫定", "凍結"];
 /** 驗證方法：和標準庫 VerificationMethodKind 的值相同 */
 export const VERIFY_METHODS: Record<string, string> = { inspect: "檢查", demo: "展示", analyze: "分析", test: "測試" };
-/** 驗證層級（和 P1 的需求屬性相同） */
-export const VERIFY_LEVELS = ["系統", "次系統", "元件"];
+/** 驗證層級（和 P1 的 VerificationLevelKind 同值） */
+export const VERIFY_LEVELS: Record<string, string> = { system: "系統", subsystem: "次系統", component: "元件" };
+const methodsOf = (v: string | undefined) => [...(v ?? "").matchAll(/VerificationMethodKind::(\w+)/g)].map((m) => m[1]).filter((m) => VERIFY_METHODS[m]);
 /** 連接埠屬性可用的型別。unit 是預設單位（填數字時自動補上） */
 export const PORT_TYPES: { id: string; zh: string; unit: string }[] = [
   { id: "ScalarValues::Real", zh: "實數", unit: "" },
@@ -40,6 +41,8 @@ export interface PortDefInfo { id: string; name: string; shortName: string | nul
 export interface InterfaceDefInfo {
   id: string; name: string; shortName: string | null; qualifiedName: string; doc: string; shared: boolean;
   kind: string; ends: { name: string; portDef: string | null }[]; constraints: { name: string; text: string }[];
+  /** 驗證方法（@VerificationMethod）與理由（@Rationale），和 P1 的需求相同 */
+  methods: string[]; rationale: string;
   attrs: Record<string, string>;
 }
 export interface Approval { by: string; at: string; hash: string }
@@ -66,10 +69,10 @@ export interface InterfaceInfo {
   agreed: boolean;
   verification: VerificationRow;
 }
-/** 驗證清單的一列。欄位名稱和 P1 的需求屬性相同 */
+/** 驗證清單的一列。欄位名稱和 P1 的 reqInfo 相同；type 是 P1 需求類型的 interfacing（介面） */
 export interface VerificationRow {
-  id: string; name: string; source: "interface" | "given";
-  verificationMethod: string; verificationOwner: string; verificationLevel: string; owner: string; rationale: string;
+  id: string; name: string; source: "interface" | "given"; type: "interfacing";
+  methods: string[]; verificationLead: string; verificationLevel: string; responsible: string; rationale: string;
   /** pass 通過、fail 不通過、open 待驗證 */
   result: "pass" | "fail" | "open";
 }
@@ -79,7 +82,7 @@ export interface N2 {
   cells: Record<string, string[]>;
 }
 export interface InterfaceReport {
-  kinds: Record<string, string>; maturity: string[]; methods: Record<string, string>; levels: string[]; portTypes: typeof PORT_TYPES;
+  kinds: Record<string, string>; maturity: string[]; methods: Record<string, string>; levels: Record<string, string>; portTypes: typeof PORT_TYPES;
   portDefs: PortDefInfo[]; interfaceDefs: InterfaceDefInfo[]; interfaces: InterfaceInfo[];
   /** 次系統、元件與外部對象的定義，和它們身上的連接埠 */
   parts: { id: string; name: string; category: string | null; given: boolean; ports: { id: string; name: string; portDef: string | null; values: Record<string, string> }[] }[];
@@ -137,6 +140,7 @@ export function interfaceDefsOf(a: Analysis, texts: (e: Element) => string): Int
         const t = texts(c);
         return { name: c.name, text: t.match(/\{([\s\S]*)\}\s*$/)?.[1]?.trim() ?? t };
       }),
+      methods: methodsOf(e.attrs.kind), rationale: e.tags.includes("Rationale") ? clean(e.attrs.text) : "",
       attrs: Object.fromEntries(Object.entries(e.attrs).map(([k, v]) => [k, clean(v)])),
     };
   });
@@ -215,9 +219,9 @@ export function report(a: Analysis, texts: (e: Element) => string, plan: EvalPla
     const at = (k: string) => clean(u.el.attrs[k]) || d.attrs[k] || "";
     const kind = kindOfValue(u.el.attrs.interfaceKind) || d.kind;
     const verification: VerificationRow = {
-      id: u.el.id, name: `${u.el.name}（${ends[0].partDefName || ends[0].partName} ↔ ${ends[1].partDefName || ends[1].partName}）`, source: "interface",
-      verificationMethod: at("verificationMethod"), verificationOwner: at("verificationOwner"), verificationLevel: at("verificationLevel") || "次系統",
-      owner: [at("ownerA"), at("ownerB")].filter(Boolean).join("、"), rationale: at("rationale"),
+      id: u.el.id, name: `${u.el.name}（${ends[0].partDefName || ends[0].partName} ↔ ${ends[1].partDefName || ends[1].partName}）`, source: "interface", type: "interfacing",
+      methods: d.methods, verificationLead: at("verificationLead"), verificationLevel: at("verificationLevel") || "subsystem",
+      responsible: [at("ownerA"), at("ownerB")].filter(Boolean).join("、"), rationale: d.rationale,
       result: result === "pass" ? "pass" : result === "fail" ? "fail" : "open",
     };
     return {
@@ -248,8 +252,8 @@ export function report(a: Analysis, texts: (e: Element) => string, plan: EvalPla
 
   // 外部提供的次系統：收到時檢查、確認適用於這次的用途與環境（SE Handbook 5.1.1.2.2）
   const givenRows: VerificationRow[] = structural.filter(isGiven).map((e) => ({
-    id: e.id, name: `${e.name}：收到時檢查與適用性確認`, source: "given", verificationMethod: "inspect", verificationOwner: "", verificationLevel: "次系統",
-    owner: clean(e.attrs.supplier), rationale: "外部提供：只管介面，規格當給定值；收到時檢查並確認適用於這次的用途與環境。", result: "open",
+    id: e.id, name: `${e.name}：收到時檢查與適用性確認`, source: "given", type: "interfacing", methods: ["inspect"], verificationLead: "", verificationLevel: "subsystem",
+    responsible: clean(e.attrs.supplier), rationale: "外部提供：只管介面，規格當給定值；收到時檢查並確認適用於這次的用途與環境。", result: "open",
   }));
 
   const warnings: { id: string | null; text: string }[] = [];
@@ -305,7 +309,9 @@ export function portDefText(n: PortDefInput, shortName: string, indent: string):
 export interface InterfaceDefInput {
   name: string; doc?: string; kind: string; maturity?: string;
   ends: { name: string; portDef: string }[]; constraints?: { name: string; text: string }[];
-  ownerA?: string; ownerB?: string; verificationMethod?: string; verificationOwner?: string; verificationLevel?: string; rationale?: string;
+  ownerA?: string; ownerB?: string;
+  /** 和 P1 相同：驗證方法（可多個）、驗證負責人、驗證層級、理由 */
+  methods?: string[]; verificationLead?: string; verificationLevel?: string; rationale?: string;
 }
 const EXPR_BAD = /[{};]|\/\*|\*\/|\/\//;
 /** 式子裡的中文名稱自動加單引號（SysML v2 的名稱只有英文字母、數字、底線可以不加）；引號裡的不動 */
@@ -325,10 +331,15 @@ export function interfaceDefText(n: InterfaceDefInput, shortName: string, portDe
   });
   if (n.ends[0].name.trim() === n.ends[1].name.trim()) throw new UserError("兩端的名稱不能相同。");
   if (n.maturity && !MATURITY.includes(n.maturity)) throw new UserError("成熟度只能是存在、暫定、凍結。");
-  if (n.verificationMethod && !VERIFY_METHODS[n.verificationMethod]) throw new UserError("驗證方法只能是檢查、展示、分析、測試。");
-  if (n.verificationLevel && !VERIFY_LEVELS.includes(n.verificationLevel)) throw new UserError("驗證層級只能是系統、次系統、元件。");
+  const methods = [...new Set((n.methods ?? []).filter(Boolean))];
+  if (methods.some((m) => !VERIFY_METHODS[m])) throw new UserError("驗證方法只能是檢查、展示、分析、測試。");
+  if (n.verificationLevel && !VERIFY_LEVELS[n.verificationLevel]) throw new UserError("驗證層級只能是系統、次系統、元件。");
   const attrs: string[] = [`attribute :>> interfaceKind = JRI::InterfaceKind::${n.kind};`];
-  for (const k of ["maturity", "ownerA", "ownerB", "verificationMethod", "verificationOwner", "verificationLevel", "rationale"] as const) {
+  // 驗證方法與理由用標準庫的標記，和 P1 的需求寫法相同
+  const kinds = methods.map((m) => `VerificationMethodKind::${m}`);
+  if (kinds.length) attrs.unshift(`@VerificationMethod { kind = ${kinds.length === 1 ? kinds[0] : `(${kinds.join(", ")})`}; }`);
+  if (n.rationale?.trim()) attrs.splice(kinds.length ? 1 : 0, 0, `@ModelingMetadata::Rationale { text = ${str(n.rationale.trim())}; }`);
+  for (const k of ["maturity", "ownerA", "ownerB", "verificationLead", "verificationLevel"] as const) {
     const v = String(n[k] ?? "").trim();
     // 成熟度與負責人寫成預設值，單一介面可以蓋過（SysML v2 的 = 是固定值，不能再重定義）
     if (v) attrs.push(`attribute :>> ${k} ${["maturity", "ownerA", "ownerB"].includes(k) ? "default " : ""}= ${str(v)};`);

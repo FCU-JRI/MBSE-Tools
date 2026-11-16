@@ -98,7 +98,7 @@ test("新增帶物理量的連接埠與電介面", async () => {
   assert.equal(port.category, "InterfacePort");
   assert.equal(port.shortName, "IFP-001");
   await ok("/interfaces/defs", "POST", {
-    name: "供電介面", kind: "electrical", maturity: "暫定", ownerA: "甲", ownerB: "乙", verificationMethod: "test", verificationOwner: "丙", verificationLevel: "次系統",
+    name: "供電介面", kind: "electrical", maturity: "暫定", ownerA: "甲", ownerB: "乙", methods: ["test"], verificationLead: "丙", verificationLevel: "subsystem", rationale: "合成的理由",
     ends: [{ name: "供電端", portDef: port.id }, { name: "用電端", portDef: port.id }],
     constraints: [{ name: "電壓相符", text: "供電端.電壓 == 用電端.電壓" }, { name: "電流足夠", text: "用電端.最大電流 <= 供電端.最大電流" }],
   });
@@ -109,6 +109,9 @@ test("新增帶物理量的連接埠與電介面", async () => {
   assert.deepEqual(info.ends.map((e: any) => e.portDef), [port.id, port.id]);
   assert.deepEqual(info.constraints.map((c: any) => c.name), ["電壓相符", "電流足夠"]);
   assert.equal(info.attrs.ownerA, "甲");
+  // 驗證方法與理由用標準庫的標記（和 P1 的需求相同）
+  assert.deepEqual([info.methods, info.rationale], [["test"], "合成的理由"]);
+  assert.ok(el("供電介面", "InterfaceDefinition").tags.includes("VerificationMethod"));
   // 種類不合法、兩端不齊時不寫入
   assert.equal((await call(`${I}/api/projects/p4/interfaces/defs`, "POST", { name: "X", kind: "magic", ends: [] })).status, 400);
 });
@@ -135,9 +138,9 @@ test("數字不符時判定不過、符合時通過；N² 矩陣正確", async (
   assert.equal(ifr.n2.cells[`${b}|${a}`], undefined);
   assert.equal(Object.keys(ifr.n2.cells).length, 1);
   assert.ok(ifr.warnings.some((w: any) => w.text.includes("「回收次系統」還沒有任何介面")));
-  // 驗證清單：和 P1 的需求屬性同名
+  // 驗證清單：欄位和 P1 的 reqInfo 同名
   const row = ifr.verification.find((r: any) => r.id === i.id);
-  assert.deepEqual([row.verificationMethod, row.verificationOwner, row.verificationLevel, row.result], ["test", "丙", "次系統", "fail"]);
+  assert.deepEqual([row.type, row.methods, row.verificationLead, row.verificationLevel, row.responsible, row.rationale, row.result], ["interfacing", ["test"], "丙", "subsystem", "甲、乙", "合成的理由", "fail"]);
 
   // 改成 5 V：兩條限制都成立
   const pwr = v.analysis.elements.find((e: any) => e.kind === "PortUsage" && e.owner === a);
@@ -183,8 +186,9 @@ test("外部提供的次系統：只管介面、規格當給定值，列出收�
 test("修改介面定義與單一介面的負責人；可從互連圖刪除", async () => {
   const d = el("供電介面", "InterfaceDefinition");
   const info = ifr.interfaceDefs.find((x: any) => x.id === d.id);
-  await ok("/interfaces/defs", "POST", { ...info.attrs, id: d.id, kind: "electrical", ends: info.ends, constraints: [...info.constraints, { name: "電壓上限", text: "供電端.電壓 <= 12 [V]" }] });
+  await ok("/interfaces/defs", "POST", { ...info.attrs, id: d.id, kind: "electrical", methods: info.methods, rationale: info.rationale, ends: info.ends, constraints: [...info.constraints, { name: "電壓上限", text: "供電端.電壓 <= 12 [V]" }] });
   assert.equal(ifr.interfaceDefs.find((x: any) => x.id === d.id).constraints.length, 3);
+  assert.deepEqual(ifr.interfaceDefs.find((x: any) => x.id === d.id).methods, ["test"], "修改時保留驗證方法");
   assert.equal(ifr.interfaces[0].result, "pass");
   const i = ifr.interfaces[0];
   await ok("/interfaces/usage", "POST", { id: i.id, ownerA: "丁", ownerB: "乙", maturity: "凍結" });

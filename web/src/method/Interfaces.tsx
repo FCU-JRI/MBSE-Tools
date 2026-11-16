@@ -15,11 +15,12 @@ interface Iface {
   approvals: { a: Approval | null; b: Approval | null }; agreed: boolean;
 }
 interface PortDef { id: string; name: string; shortName: string | null; qualifiedName: string; doc: string; attrs: { name: string; type: string; unit: string }[]; shared: boolean }
-interface IfDef { id: string; name: string; shortName: string | null; qualifiedName: string; doc: string; shared: boolean; kind: string; ends: { name: string; portDef: string | null }[]; constraints: { name: string; text: string }[]; attrs: Record<string, string> }
-interface Row { id: string; name: string; source: "interface" | "given"; verificationMethod: string; verificationOwner: string; verificationLevel: string; owner: string; rationale: string; result: "pass" | "fail" | "open" }
+interface IfDef { id: string; name: string; shortName: string | null; qualifiedName: string; doc: string; shared: boolean; kind: string; ends: { name: string; portDef: string | null }[]; constraints: { name: string; text: string }[]; methods: string[]; rationale: string; attrs: Record<string, string> }
+/** 欄位和 P1 的需求（reqInfo）同名 */
+interface Row { id: string; name: string; source: "interface" | "given"; type: string; methods: string[]; verificationLead: string; verificationLevel: string; responsible: string; rationale: string; result: "pass" | "fail" | "open" }
 interface Part { id: string; name: string; category: string | null; given: boolean; ports: { id: string; name: string; portDef: string | null; values: Record<string, string> }[] }
 export interface InterfaceReport {
-  kinds: Record<string, string>; maturity: string[]; methods: Record<string, string>; levels: string[]; portTypes: { id: string; zh: string; unit: string }[];
+  kinds: Record<string, string>; maturity: string[]; methods: Record<string, string>; levels: Record<string, string>; portTypes: { id: string; zh: string; unit: string }[];
   portDefs: PortDef[]; interfaceDefs: IfDef[]; interfaces: Iface[]; parts: Part[];
   n2: { nodes: { id: string; name: string; category: string | null; given: boolean }[]; cells: Record<string, string[]> };
   verification: Row[]; warnings: { id: string | null; text: string }[];
@@ -28,7 +29,7 @@ type Saved = View & { interfaces?: InterfaceReport };
 
 const fmt = (v: Val) => (v.value === null ? "—" : `${typeof v.value === "number" ? +v.value.toPrecision(6) : String(v.value)}${v.unit ? ` ${v.unit}` : ""}`);
 const ResultTag = ({ r }: { r: Result | "open" }) => (r === "pass" ? <span className="tag done">OK</span> : r === "fail" ? <span className="tag danger">不符</span> : <span className="tag">未判定</span>);
-const blankDef = (): Omit<IfDef, "id" | "shortName" | "qualifiedName" | "shared"> & { id: string } => ({ id: "", name: "", doc: "", kind: "electrical", ends: [{ name: "a", portDef: null }, { name: "b", portDef: null }], constraints: [], attrs: { maturity: "存在" } });
+const blankDef = (): Omit<IfDef, "id" | "shortName" | "qualifiedName" | "shared"> & { id: string } => ({ id: "", name: "", doc: "", kind: "electrical", ends: [{ name: "a", portDef: null }, { name: "b", portDef: null }], constraints: [], methods: [], rationale: "", attrs: { maturity: "存在" } });
 
 export function Interfaces({ view, user, onChanged, onOpen }: MethodPageProps) {
   const pid = view.project.id;
@@ -71,7 +72,7 @@ export function Interfaces({ view, user, onChanged, onOpen }: MethodPageProps) {
 
   const saveDef = (ev: FormEvent) => {
     ev.preventDefault();
-    void run(() => post("defs", { id: def.id || undefined, name: def.name, doc: def.doc, kind: def.kind, ends: def.ends, constraints: def.constraints, ...def.attrs }), def.id ? "已更新介面定義。" : "已新增介面定義。").then((ok) => { if (ok) setDef(blankDef()); });
+    void run(() => post("defs", { ...def.attrs, id: def.id || undefined, name: def.name, doc: def.doc, kind: def.kind, ends: def.ends, constraints: def.constraints, methods: def.methods, rationale: def.rationale }), def.id ? "已更新介面定義。" : "已新增介面定義。").then((ok) => { if (ok) setDef(blankDef()); });
   };
   const savePort = (ev: FormEvent) => {
     ev.preventDefault();
@@ -190,7 +191,7 @@ export function Interfaces({ view, user, onChanged, onOpen }: MethodPageProps) {
           <table style={{ marginBottom: 16 }}>
             <thead><tr><th>編號</th><th>名稱</th><th>種類</th><th>兩端</th><th>限制</th><th>負責人</th></tr></thead>
             <tbody>{r.interfaceDefs.map((d) => (
-              <tr key={d.id} className="rowbtn" aria-selected={def.id === d.id} tabIndex={0} onClick={() => !d.shared && setDef({ id: d.id, name: d.name, doc: d.doc, kind: d.kind || "electrical", ends: d.ends.length === 2 ? d.ends : blankDef().ends, constraints: d.constraints, attrs: d.attrs })}>
+              <tr key={d.id} className="rowbtn" aria-selected={def.id === d.id} tabIndex={0} onClick={() => !d.shared && setDef({ id: d.id, name: d.name, doc: d.doc, kind: d.kind || "electrical", ends: d.ends.length === 2 ? d.ends : blankDef().ends, constraints: d.constraints, methods: d.methods, rationale: d.rationale, attrs: d.attrs })}>
                 <td className="id">{d.shortName}</td><td>{d.name}</td><td>{r.kinds[d.kind] ?? "未定"}</td><td>{d.ends.map((e) => `${e.name} : ${portDefName(e.portDef)}`).join("、")}</td>
                 <td>{d.constraints.map((c) => c.name).join("、") || "—"}</td><td>{[d.attrs.ownerA, d.attrs.ownerB].filter(Boolean).join("、") || "—"}</td>
               </tr>
@@ -223,10 +224,12 @@ export function Interfaces({ view, user, onChanged, onOpen }: MethodPageProps) {
             ))}
             <div className="tbtn-row"><button type="button" className="tbtn" onClick={() => setDef({ ...def, constraints: [...def.constraints, { name: `檢查${def.constraints.length + 1}`, text: "" }] })}>加一條檢查</button></div>
             <div className="row">
-              <label className="field"><span className="label">驗證方法</span><select className="input" value={def.attrs.verificationMethod ?? ""} onChange={(e) => setDef({ ...def, attrs: { ...def.attrs, verificationMethod: e.target.value } })}><option value="">待補</option>{Object.entries(r.methods).map(([k, z]) => <option key={k} value={k}>{z}</option>)}</select></label>
-              <label className="field"><span className="label">驗證負責人</span><input className="input" value={def.attrs.verificationOwner ?? ""} onChange={(e) => setDef({ ...def, attrs: { ...def.attrs, verificationOwner: e.target.value } })} /></label>
-              <label className="field"><span className="label">驗證層級</span><select className="input" value={def.attrs.verificationLevel ?? ""} onChange={(e) => setDef({ ...def, attrs: { ...def.attrs, verificationLevel: e.target.value } })}><option value="">（次系統）</option>{r.levels.map((l) => <option key={l}>{l}</option>)}</select></label>
-              <label className="field" style={{ flex: 2 }}><span className="label">理由</span><input className="input" value={def.attrs.rationale ?? ""} onChange={(e) => setDef({ ...def, attrs: { ...def.attrs, rationale: e.target.value } })} /></label>
+              <div className="field"><span className="label">驗證方法</span><div className="row" style={{ gap: 12 }}>{Object.entries(r.methods).map(([k, z]) => (
+                <label key={k} className="check"><input type="checkbox" checked={def.methods.includes(k)} onChange={(e) => setDef({ ...def, methods: e.target.checked ? [...def.methods, k] : def.methods.filter((m) => m !== k) })} /><span className="caption">{z}</span></label>
+              ))}</div></div>
+              <label className="field"><span className="label">驗證負責人</span><input className="input" value={def.attrs.verificationLead ?? ""} onChange={(e) => setDef({ ...def, attrs: { ...def.attrs, verificationLead: e.target.value } })} /></label>
+              <label className="field"><span className="label">驗證層級</span><select className="input" value={def.attrs.verificationLevel ?? ""} onChange={(e) => setDef({ ...def, attrs: { ...def.attrs, verificationLevel: e.target.value } })}><option value="">（次系統）</option>{Object.entries(r.levels).map(([k, z]) => <option key={k} value={k}>{z}</option>)}</select></label>
+              <label className="field" style={{ flex: 2 }}><span className="label">理由</span><input className="input" value={def.rationale} onChange={(e) => setDef({ ...def, rationale: e.target.value })} /></label>
             </div>
             <label className="field"><span className="label">說明</span><input className="input" value={def.doc} onChange={(e) => setDef({ ...def, doc: e.target.value })} /></label>
             <div className="tbtn-row"><button className="tbtn primary" disabled={busy}>{def.id ? "更新介面定義" : "新增介面定義"}</button>{def.id && <button type="button" className="tbtn" onClick={() => setDef(blankDef())}>取消</button>}
@@ -313,7 +316,7 @@ export function Interfaces({ view, user, onChanged, onOpen }: MethodPageProps) {
             <thead><tr><th>項目</th><th>驗證方法</th><th>驗證負責人</th><th>驗證層級</th><th>負責人</th><th>理由</th><th>結果</th></tr></thead>
             <tbody>{r.verification.map((v) => (
               <tr key={`${v.source}:${v.id}`} className="rowbtn" tabIndex={0} onClick={() => (v.source === "interface" ? setSel(v.id) : onOpen(v.id))}>
-                <td>{v.name}</td><td>{r.methods[v.verificationMethod] ?? <span className="tag warn">待補</span>}</td><td>{v.verificationOwner || "—"}</td><td>{v.verificationLevel}</td><td>{v.owner || "—"}</td><td className="caption">{v.rationale}</td>
+                <td>{v.name}</td><td>{v.methods.map((m) => r.methods[m] ?? m).join("、") || <span className="tag warn">待補</span>}</td><td>{v.verificationLead || "—"}</td><td>{r.levels[v.verificationLevel] ?? v.verificationLevel}</td><td>{v.responsible || "—"}</td><td className="caption">{v.rationale}</td>
                 <td>{v.result === "pass" ? <span className="tag done">通過</span> : v.result === "fail" ? <span className="tag danger">不通過</span> : <span className="tag">待驗證</span>}</td>
               </tr>
             ))}</tbody>
