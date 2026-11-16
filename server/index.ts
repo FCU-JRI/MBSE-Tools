@@ -8,7 +8,7 @@ import { ROOT_PACKAGE, shutdown } from "./engine.ts";
 import { evaluateGates, GATES } from "./gates.ts";
 import { CATEGORIES, PILLARS, RELATION_LABELS } from "./metamodel.ts";
 import * as store from "./projects.ts";
-import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, setSourceText, snippetFor } from "./edits.ts";
+import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, setSourceText, snippetFor, addPartText } from "./edits.ts";
 import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
 import * as auth from "./auth.ts";
@@ -319,6 +319,23 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   }
   const zh = RELATION_LABELS[kind]?.zh ?? ({ compose: "組成", connect: "連接", succession: "之後是", transition: "轉換到" } as Record<string, string>)[kind] ?? kind;
   const r = await store.saveFile(id, file, next, author(req), `新增關係：${from.name} ${zh} ${to.name}`);
+  if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+  res.json({ saved: true, ...(await view(id)) });
+}));
+
+// 分解圖上的「加入零件」（階段 3b）：可跨套件，型別在別的套件時自動補 private import
+app.post("/api/projects/:id/parts", wrap(async (req, res) => {
+  const id = pid(req);
+  const before = await store.analyzeProject(id);
+  if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正後再新增。");
+  const owner = before.elements.find((e) => e.id === req.body.owner);
+  const type = before.elements.find((e) => e.id === req.body.type);
+  if (!owner || !type) throw new store.UserError("找不到要加入的定義。");
+  if (owner.kind !== "PartDefinition" || type.kind !== "PartDefinition") throw new store.UserError("只能在零件定義（part def）裡加入以零件定義為型別的零件。");
+  if (owner.id === type.id) throw new store.UserError("不能把元素放進自己裡面。");
+  const file = editable(owner).file;
+  const out = addPartText(await store.readFile(id, file), before.elements, before.imports ?? [], owner, type);
+  const r = await store.saveFile(id, file, out.content, author(req), `新增零件：${owner.name} 加入 ${type.name}${out.imported ? "（補匯入）" : ""}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));

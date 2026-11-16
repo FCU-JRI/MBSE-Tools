@@ -398,3 +398,55 @@ export function setCommentText(content: string, el: Element, body: string): stri
   if (!/\/\*[\s\S]*\*\//.test(src)) throw new UserError("這則註解的寫法無法自動修改，請到「原始碼」分頁修改。");
   return replaceLoc(content, el.loc, src.replace(/\/\*[\s\S]*\*\//, () => `/* ${commentBody(body)} */`).replace(/\n$/, ""));
 }
+
+// ───────── 分解圖上的「加入零件」（階段 3b）─────────
+import type { Import } from "./extract.ts";
+
+const isPkg = (e: Element | undefined) => e?.kind === "Package" || e?.kind === "LibraryPackage";
+/** 元素所在的最近一層套件。 */
+export function packageOfElement(elements: Element[], el: Element): Element | undefined {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  let cur = byId.get(el.owner ?? "");
+  for (let i = 0; cur && !isPkg(cur) && i < 60; i++) cur = byId.get(cur.owner ?? "");
+  return isPkg(cur) ? cur : undefined;
+}
+
+/**
+ * 在 owner（定義）裡加一個以 type 為型別的零件。
+ * 同一個套件：照「組成」的寫法（零件名稱＝型別名稱、型別寫完整名稱）。
+ * 型別在別的套件：在 owner 所在的套件補 `private import <套件>::<定義>;`（已經看得到就不重複），型別用短名稱。
+ * 零件和型別同名時短名稱會解析成零件自己，所以這時零件名稱改成小寫開頭（Apollo 11 的寫法，例如 part engine : Engine）；
+ * 名稱開頭沒有大小寫（中文等）、或短名稱在那個套件裡會和別的元素撞名時，不補 import，照「組成」的寫法。
+ * owner 與套件在同一個檔案（套件的主體只寫在一個地方），content 就是那個檔案。
+ */
+export function addPartText(content: string, elements: Element[], imports: Import[], owner: Element, type: Element): { content: string; imported: boolean } {
+  const here = packageOfElement(elements, owner), there = packageOfElement(elements, type);
+  const part = (src: string, name: string, t: string) => insertInside(src, owner, (indent) => `${indent}part ${quote(name)} : ${t};\n`);
+  const plain = () => ({ content: part(content, type.name, qname(type.qualifiedName)), imported: false });
+  if (!here || !there || here.id === there.id) return plain();
+  const lower = type.name.charAt(0).toLowerCase() + type.name.slice(1);
+  if (lower === type.name) return plain();
+  const mine = imports.filter((i) => i.from === here.id);
+  // 套件裡已經有同名的元素（自己的成員或匯入進來的），短名稱會指到別處
+  const names = new Map<string, string>();
+  for (const e of elements) if (e.owner === here.id) names.set(e.name, e.id);
+  for (const i of mine) {
+    if (!i.to) continue;
+    if (i.member) { const t = elements.find((e) => e.id === i.to); if (t) names.set(t.name, t.id); }
+    else for (const e of elements) if (e.owner === i.to) names.set(e.name, e.id);
+  }
+  const clash = names.get(type.name);
+  if (clash && clash !== type.id) return plain();
+  if (mine.some((i) => i.to === type.id || (i.to === there.id && !i.member))) return { content: part(content, lower, quote(type.name)), imported: false };
+  const text = `private import ${qname(there.qualifiedName)}::${quote(type.name)};`;
+  const lines = content.split("\n");
+  const at = (here.line ?? 0) - 1;
+  if (at >= 0 && /\{\s*$/.test(lines[at] ?? "") && (here.endLine ?? 0) > (here.line ?? 0)) {
+    // 先寫零件（在套件開頭之後），再把 import 插在套件開頭那一行的下一行，前面的行號不受影響
+    const next = part(content, lower, quote(type.name)).split("\n");
+    next.splice(at + 1, 0, `${(lines[at].match(/^\s*/)?.[0] ?? "")}    ${text}`);
+    return { content: next.join("\n"), imported: true };
+  }
+  // 套件開頭那一行不是以 { 結尾：先把 import 插在套件主體結尾（在 owner 之後，不影響 owner 的行號），再寫零件
+  return { content: part(insertInside(content, here, (indent) => `${indent}${text}\n`), lower, quote(type.name)), imported: true };
+}

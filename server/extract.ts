@@ -49,6 +49,23 @@ export interface Link {
   line: number | null;
 }
 
+/**
+ * 套件之間的匯入（階段 3b）：`import A::B;`（匯入一個成員）或 `import A::*;`／`import A::**;`（匯入命名空間的內容）。
+ * from：寫這句 import 的命名空間。to：對象有列出來就是它的 id；在標準庫或沒有列出來時是 null，只留 toName。
+ * private：沒有寫 public／protected 時，語言預設就是 private。
+ */
+export interface Import {
+  from: string;
+  to: string | null;
+  toName: string;
+  member: boolean;
+  recursive: boolean;
+  private: boolean;
+  file: string;
+  line: number | null;
+  loc: Loc | null;
+}
+
 export interface Relation {
   kind: "derive" | "trace" | "refine" | "satisfy" | "verify" | "allocate" | "succession" | "connect" | "transition" | "include";
   from: string;
@@ -68,6 +85,7 @@ export interface Extracted {
   /** 沒有名字、但有意義的使用（重定義的零件與屬性、perform、require constraint 等）。不在 elements 裡 */
   unnamed: Element[];
   links: Link[];
+  imports: Import[];
 }
 
 type Raw = Record<string, any>;
@@ -367,6 +385,20 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
     links.push({ kind: "perform", from, to: listed.has(target) ? target : null, toName: nameOf(target), file: fileOf(e), line: e["sysx:sourceLine"] ?? null });
   }
 
+  // 匯入（階段 3b）
+  const imports: Import[] = [];
+  for (const e of raw) {
+    const t = e["@type"];
+    if ((t !== "MembershipImport" && t !== "NamespaceImport") || e.isImplied || !inProject(e)) continue;
+    const ns = ref(e.importOwningNamespace) ?? ref(e.owner);
+    const from = ns && listed.has(ns) ? ns : byId.has(ns ?? "") ? parentOf(byId.get(ns as string) as Raw) : null;
+    if (!from) continue;
+    const target = t === "MembershipImport" ? ref(byId.get(ref(e.importedMembership) ?? "")?.memberElement) : ref(e.importedNamespace);
+    const to = target && listed.has(target) ? target : null;
+    const writtenName = (textAt(e).match(new RegExp(`\\bimport\\s+(${NAME}(?:::${NAME})*)`)) ?? [])[1] ?? "";
+    imports.push({ from, to, toName: (to ? qn(to) : "") || writtenName, member: t === "MembershipImport", recursive: !!e.isRecursive, private: e.visibility !== "public" && e.visibility !== "protected", file: fileOf(e), line: e["sysx:sourceLine"] ?? null, loc: locOf(e) });
+  }
+
   const known = new Set(elements.map((e) => e.id));
   const relations: Relation[] = [];
   const push = (kind: Relation["kind"], from: string | null, to: string | null, src: Raw | undefined, whole?: Raw, form?: Relation["form"]) => {
@@ -436,5 +468,5 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       push("succession", ref(e.sourceFeature), refs(e.targetFeature)[0] ?? null, e);
     }
   }
-  return { elements, relations, unnamed, links };
+  return { elements, relations, unnamed, links, imports };
 }

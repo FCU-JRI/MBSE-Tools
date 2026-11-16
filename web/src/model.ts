@@ -179,7 +179,7 @@ function commentNode(el: Element): GNode {
 
 const edge = (id: string, source: string, target: string, kind: string, text: string, remove: GEdge["remove"]): GEdge => ({
   id, source, target, kind, label: text, remove,
-  dashed: ["refine", "trace", "annotate"].includes(kind),
+  dashed: ["refine", "trace", "annotate", "import"].includes(kind),
   head: kind === "define" ? "typing" : kind === "specialize" || kind === "subset" ? "triangle" : kind === "redefine" ? "redefine" : kind === "reference" ? "refsubset"
     : ["compose", "refpart", "connect", "annotate"].includes(kind) ? "none" : "open",
   tail: kind === "compose" ? "diamond" : kind === "refpart" ? "hollow" : "none",
@@ -428,6 +428,25 @@ function linkEdges(a: Analysis, ids: Set<string>, edges: GEdge[]): void {
     edges.push(edge(`${kind}:${l.from}:${l.to}`, l.from, l.to, kind, "", null));
   }
 }
+/**
+ * 匯入（階段 3b，規範 8.2.3.5）：虛線開放箭頭、標 «import»，由匯入的一方指向被匯入的一方。
+ * 匯入某個成員（或對象不在圖上）時，線接到對象所在、且在圖上的最近一層套件；同一對節點之間只畫一條。
+ */
+export function importEdges(a: Analysis, t: TreeIndex, ids: Set<string>, edges: GEdge[]): void {
+  const seen = new Set<string>();
+  const onGraph = (id: string): string | null => {
+    if (ids.has(id)) return id;
+    for (const up of ancestorsOf(t, id)) { const e = t.byId.get(up); if (e && isPackage(e) && ids.has(up)) return up; }
+    return null;
+  };
+  for (const i of a.imports ?? []) {
+    if (!i.to || !ids.has(i.from)) continue;
+    const to = onGraph(i.to);
+    if (!to || to === i.from || seen.has(`${i.from}|${to}`)) continue;
+    seen.add(`${i.from}|${to}`);
+    edges.push(edge(`import:${i.from}:${to}`, i.from, to, "import", "«import»", null));
+  }
+}
 const ownEdge = (owner: string, u: Element): GEdge => edge(`compose:${u.id}`, owner, u.id, isRef(u) ? "refpart" : "compose", "", u.unnamed ? null : { type: "element", id: u.id });
 
 /**
@@ -468,7 +487,9 @@ function packageGraph(d: DiagramDef, a: Analysis): Graph {
     folded = rest.length;
     nodes.push(packageBox(`${d.id}#more`, null, `${d.title}（其餘 ${rest.length} 個成員）`, rows, covers));
   }
-  linkEdges(a, new Set(nodes.map((n) => n.id)), edges);
+  const drawn = new Set(nodes.map((n) => n.id));
+  linkEdges(a, drawn, edges);
+  importEdges(a, s.t, drawn, edges);
   return { nodes, edges, direction: "TB", reverse: GENERAL, ...(folded ? { folded } : {}) };
 }
 

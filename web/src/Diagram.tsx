@@ -229,7 +229,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     return () => el.removeEventListener("wheel", onWheel, { capture: true });
   }, [flow]);
   const [confirm, setConfirm] = useState<null | "selection" | "diagram">(null);
-  const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg">(null);
+  const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg" | "part">(null);
   const [withDraft, setWithDraft] = useState(() => load("jri.export", { draft: false }).draft);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -670,6 +670,10 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const match = (...s: (string | null | undefined)[]) => !q || s.some((x) => x?.toLowerCase().includes(q));
   const memberSet = new Set(def.members ?? []);
   const candidates = panel === "add" ? modelItems(view.analysis.elements).filter((e) => !memberSet.has(e.id) && match(e.name, e.shortName, catOf(e.category)?.zh)) : [];
+  // 分解圖上的「加入零件」（階段 3b）：加到選取的定義，沒有選取時加到圖的根定義
+  const partOwner = def.kind === "decomp" ? (selectedEl?.kind === "PartDefinition" && onThisDiagram ? selectedEl : byId.get(def.context ?? "")) : undefined;
+  const partTypes = panel === "part" && partOwner ? view.analysis.elements.filter((e) => e.kind === "PartDefinition" && e.id !== partOwner.id && match(e.name, e.shortName, e.qualifiedName)) : [];
+  const addPart = async (type: string) => { if (partOwner && await act(() => api<View>(`/projects/${pid}/parts`, "POST", { owner: partOwner.id, type }))) setPanel(null); };
   const NA = "這張圖不顯示這類項目。要把不同類別放在一起，請用自訂圖。";
   const empty = graph.nodes.length + notes.length === 0;
 
@@ -698,6 +702,12 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
             <span className="label">組織</span>
             {!structural && <Tool on={panel === "pkg"} onClick={() => setPanel(panel === "pkg" ? null : "pkg")} icon="package" text="套件" sub="package" title="把屬於同一群的項目放在一起。把項目拖進框裡就歸屬這個套件，拖出來就移出。會寫進模型。" />}
             <Tool disabled={busy} onClick={() => addComment("註解", undefined, onThisDiagram && selectedEl?.kind !== "Comment" && selectedEl?.kind !== "Package" ? selectedEl?.id : undefined)} icon="comment" text="註解" sub="comment" title="先選一個項目再按，註解就會連到它；沒有選取就是整個模型的註解。會寫進模型。" />
+          </div>
+        )}
+        {!readOnly && def.kind === "decomp" && partOwner && !partOwner.shared && (
+          <div className="tool-group">
+            <span className="label">零件</span>
+            <Tool on={panel === "part"} disabled={busy} onClick={() => { setQuery(""); setPanel(panel === "part" ? null : "part"); }} glyph="◆" text="加入零件" sub="part" title={`在「${partOwner.name}」裡加入一個零件，型別可以是任何套件的零件定義；在別的套件時會自動補 import。先選圖上的定義就加到那個定義。`} />
           </div>
         )}
         {!readOnly && (
@@ -780,6 +790,19 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
             <span className="tag">名稱</span>
             <input className="input" style={{ width: 240 }} defaultValue={def.title} maxLength={60} aria-label="圖的名稱" autoFocus
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} onBlur={(e) => rename(e.target.value)} />
+          </div>
+        )}
+        {panel === "part" && partOwner && (
+          <div className="canvas-panel" role="dialog" aria-label="加入零件">
+            <div className="section-head"><h2 className="section-title">加入零件到「{partOwner.name}」</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
+            <input className="input" placeholder="搜尋零件定義" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="搜尋零件定義" autoFocus />
+            {partTypes.length === 0
+              ? <p className="caption muted">{q ? "沒有符合的零件定義。" : "模型裡沒有其他零件定義。"}</p>
+              : <ul className="tree">{partTypes.slice(0, 200).map((e) => (
+                <li key={e.id}><button className="tree-row" disabled={busy} onClick={() => addPart(e.id)} title={`加入 part ${e.name} : ${e.name}`}>
+                  <span className="tid">{e.shortName ?? ""}</span><span className="tn">{e.name}</span><span className="tc">{e.qualifiedName.split("::").slice(0, -1).join("::")}</span>
+                </button></li>
+              ))}</ul>}
           </div>
         )}
         {(panel === "all" || panel === "add") && (

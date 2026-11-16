@@ -8,12 +8,16 @@ export interface Element {
 }
 /** 通用的關係（F-71）。to 是 null 時對象在標準庫或沒有列出來，名稱在 toName */
 export interface Link { kind: "specialize" | "type" | "subset" | "redefine" | "reference" | "perform"; from: string; to: string | null; toName: string; file: string; line: number | null }
+/** 匯入（階段 3b）。member：匯入單一成員（A::B）或命名空間的內容（A::*、A::**）；to 是 null 時對象在標準庫或沒有列出來，名稱在 toName */
+export interface Import { from: string; to: string | null; toName: string; member: boolean; recursive: boolean; private: boolean; file: string; line: number | null }
 /** form：追溯到利害關係人時用的內建寫法（需求的 stakeholder、使用案例的 actor）；用 #trace 相依的沒有這個欄位 */
 export interface Relation { kind: string; from: string; to: string; line: number | null; form?: "stakeholder" | "actor" }
 export interface Diagnostic { severity: string; message: string; file: string; line: number; column: number }
 export interface Analysis { ok: boolean; diagnostics: Diagnostic[]; elements: Element[]; relations: Relation[]; satisfaction: { requirement: string; subject: string; status: string }[];
   /** 沒有名字但有意義的使用，與通用的關係（F-71）。模型有錯誤時是空的 */
-  unnamed: Element[]; links: Link[] }
+  unnamed: Element[]; links: Link[];
+  /** 匯入（階段 3b）；舊的伺服器沒有這個欄位 */
+  imports?: Import[] }
 export interface Check { id: string; label: string; hint: string; manual: boolean; pass: boolean; detail: string; missing: { id: string; name: string }[] }
 export interface Gate { id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean; checks: Check[]; done: number; total: number }
 export interface Signoff { gate: string; subsystem: string | null; decision: "APPROVE" | "DENY"; by: string; role: string; comment: string; at: string; commit: string }
