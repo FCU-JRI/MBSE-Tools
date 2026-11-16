@@ -18,12 +18,13 @@ export const label = (e: Element) => (e.shortName ? `${e.shortName} ${e.name}` :
 /** 與伺服器相同的規則：結構類別只列定義，其餘只列使用。 */
 export function listOf(elements: Element[], ...cats: string[]): Element[] {
   return elements.filter((e) => e.category !== null && cats.includes(e.category) && e.kind !== "ReferenceUsage" &&
-    (STRUCTURAL.has(e.category) ? e.kind === "PartDefinition" : e.kind.endsWith("Usage")));
+    // CoSMA 的類別（F-84）幾乎都是定義；歸類時已經決定哪些使用算數
+    (e.category.startsWith("CoSMA.") || (STRUCTURAL.has(e.category) ? e.kind === "PartDefinition" : e.kind.endsWith("Usage"))));
 }
 
 /** 可以放進圖裡的模型項目：有類別的元素；結構類別只取定義，其餘只取使用。 */
 export function modelItems(elements: Element[]): Element[] {
-  return elements.filter((e) => e.category !== null && e.kind !== "ReferenceUsage" && (STRUCTURAL.has(e.category) ? e.kind === "PartDefinition" : e.kind.endsWith("Usage")));
+  return elements.filter((e) => e.category !== null && e.kind !== "ReferenceUsage" && (e.category.startsWith("CoSMA.") || (STRUCTURAL.has(e.category) ? e.kind === "PartDefinition" : e.kind.endsWith("Usage"))));
 }
 
 // ───────── 依套件瀏覽（F-74、F-75）─────────
@@ -577,6 +578,10 @@ export const ALL_LINKS: LinkTool[] = [
   { kind: "connect", zh: "連接", en: "connect", hint: "在同一個系統內的兩個零件之間拉線" },
   { kind: "succession", zh: "先後", en: "succession", hint: "從前一步拉到下一步（同一個任務內）" },
   { kind: "transition", zh: "轉換", en: "transition", hint: "從原狀態拉到新狀態（同一個模式內）" },
+  // CoSMA 專案（F-85）
+  { kind: "perform", zh: "執行", en: "perform action", hint: "從邏輯元件拉到它執行的功能" },
+  { kind: "specialize", zh: "特化", en: ":>", hint: "從定義拉到它特化的定義" },
+  { kind: "participant", zh: "參與者", en: "ref part", hint: "從作業拉到參與的利害關係人或外部系統" },
 ];
 const link = (...kinds: string[]) => kinds.map((k) => ALL_LINKS.find((t) => t.kind === k)!);
 /** 自訂圖第一層預設顯示的工具；使用者可以自行釘選。 */

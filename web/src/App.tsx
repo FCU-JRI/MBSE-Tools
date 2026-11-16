@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { api, baseOf, getAuthor, setAuthor } from "./api.ts";
+import { api, baseOf, getAuthor, projectMeta, setAuthor } from "./api.ts";
 import type { Diagrams, Element, Me, Meta, MeResponse, Project, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
 import { diagramsOf, isPackage, packageOf, TOP_DIAGRAM, treeOf } from "./model.ts";
@@ -107,15 +107,16 @@ function Login({ github }: { github: boolean }) {
   );
 }
 
-const TEMPLATES: { id: "blank" | "sample" | "guided"; zh: string; help: string }[] = [
-  { id: "guided", zh: "流程範本專案", help: "從利害關係人開始，一步一個問題帶你完成分析。前一步沒完成不能跳到下一步。建議新專案使用。" },
-  { id: "sample", zh: "範本專案", help: "附一份探空火箭的示範內容，可以對照著修改。適合想先看完整範例的人。" },
-  { id: "blank", zh: "空白專案", help: "從空的模型開始，順序自己決定。適合已經熟悉方法的人。" },
+const TEMPLATES: { id: "blank" | "sample" | "guided" | "cosma"; zh: string; help: string }[] = [
+  { id: "cosma", zh: "CoSMA 範本專案", help: "照 Airbus CoSMA 的五層（Purpose、Operational、Functional、Logical、Technical）與 Apollo 11 參考模型的套件結構，附合成的示範內容。建議新專案使用。" },
+  { id: "guided", zh: "流程範本專案（舊版 JRI 類別）", help: "從利害關係人開始，一步一個問題帶你完成分析。前一步沒完成不能跳到下一步。給還沒轉成 CoSMA 的專案沿用。" },
+  { id: "sample", zh: "範本專案（舊版 JRI 類別）", help: "附一份探空火箭的示範內容，可以對照著修改。" },
+  { id: "blank", zh: "空白專案（舊版 JRI 類別）", help: "從空的模型開始，順序自己決定。" },
 ];
 
 function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: string) => void }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
-  const [form, setForm] = useState({ id: "", name: "", kind: "annual" as "annual" | "small", gates: ["mdr", "cdr", "trr"], template: "guided" as "blank" | "sample" | "guided" });
+  const [form, setForm] = useState({ id: "", name: "", kind: "annual" as "annual" | "small", gates: ["mdr", "cdr", "trr"], template: "cosma" as "blank" | "sample" | "guided" | "cosma" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<Project | null>(null);
@@ -195,8 +196,11 @@ type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "pl
 const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
 
 /** id 是專案參照：main 或某個分支。分支和 main 用同一個畫面，所有分頁都能看、能改（F-33）。 */
-function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
+function Workspace({ id, meta: baseMeta, user: me, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
   const [view, setView] = useState<View | null>(null);
+  // CoSMA 專案用五層的類別，其餘專案照舊（F-83）
+  const meta = useMemo(() => projectMeta(baseMeta, !!view?.cosma), [baseMeta, view?.cosma]);
+  const fallbackCategory = view?.cosma ? meta.categories[0]?.id ?? "" : "SystemRequirement";
   // 唯讀的專案（F-72）對任何身分都是唯讀：畫面上的編輯功能一律收起來，伺服器也會擋
   const user = useMemo<Me>(() => (view?.project.readOnly ? { ...me, caps: { ...me.caps, edit: false, confirm: false, merge: false } } : me), [me, view?.project.readOnly]);
   const readOnly = !user.caps.edit;
@@ -247,7 +251,7 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
   const selectedId = sel.type === "element" ? sel.id : null;
   // 新增元素時預設的類別：正在看的套件若是某個類別的套件（例如 Requirements），就用那個類別
   const scopeName = scopeId ? tree?.byId.get(scopeId)?.name : undefined;
-  const newCategory = meta.categories.find((c) => c.pkg === scopeName)?.id ?? "SystemRequirement";
+  const newCategory = meta.categories.find((c) => c.pkg === scopeName)?.id ?? fallbackCategory;
   const selectElement = (eid: string | null) => setSel(eid ? { type: "element", id: eid } : { type: "new", category: newCategory, parentId: null });
   /** 從樹上點選：點套件，表就列出它底下的元素；點其他元素，選到它，表列出它所在的套件。 */
   const pick = (e: Element) => {
@@ -255,7 +259,7 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
       // 正在看圖時，點套件就切到它的套件內容圖（F-76）；其他時候表列出它底下的元素
       if (mode === "diagram") { setScopeId(e.id); setDiagramId(`pkg:${e.qualifiedName}`); return; }
       setScopeId(e.id);
-      setSel({ type: "new", category: meta.categories.find((c) => c.pkg === e.name)?.id ?? "SystemRequirement", parentId: null });
+      setSel({ type: "new", category: meta.categories.find((c) => c.pkg === e.name)?.id ?? fallbackCategory, parentId: null });
       setMode("table");
       return;
     }
@@ -296,6 +300,7 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
         <section className="center">
           {view.branch && <div className="banner"><span className="tag warn">分支</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>正在{readOnly ? "瀏覽" : "編輯"}分支 <b>{view.branch.name}</b>。{readOnly ? "這裡的內容還沒有合併進 main。" : "這裡的修改只存在這個分支，合併後才會進入 main。"}</span><button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main</button></div>}
           {view.project.reference && <div className="banner"><span className="tag">參考</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>第三方的參考模型，唯讀、內容未經修改。{view.project.reference.name}，提交 <span className="data">{view.project.reference.commit.slice(0, 7)}</span>，授權 {view.project.reference.license}。</span><a className="tbtn" href={view.project.reference.source} target="_blank" rel="noreferrer">來源</a></div>}
+          {!view.cosma && view.analysis.ok && <div className="banner" data-testid="not-cosma"><span className="tag">JRI</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>這個專案還沒有轉成 CoSMA，表單、流程與節點檢查沿用 JRI 的類別。</span></div>}
           {view.warning && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ maxWidth: "none" }}>{view.warning}</span></div>}
           {errors.length > 0 && mode !== "source" && (
             <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>

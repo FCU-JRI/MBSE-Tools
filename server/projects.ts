@@ -15,6 +15,10 @@ export const HOME_DIR = path.resolve(process.env.JRI_HOME ?? path.join(ROOT, "da
 export const DATA_DIR = path.join(HOME_DIR, "projects");
 const TEMPLATE_DIR = path.join(ROOT, "templates");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
+/** CoSMA 基礎庫（原封不動，F-82）與 JRI 附加庫（F-87）。只有 CoSMA 專案載入 */
+const COSMA_DIR = path.join(ROOT, "library", "cosma");
+const ADDON_FILE = path.join(ROOT, "library", "addon", "JRIAddonPackage.sysml");
+const COSMA_FILES = ["CoSMAPackage.sysml", "CoSMAQuantitiesAndUnitsPackage.sysml", "CoSMAViewsPackage.sysml"];
 
 export interface Signoff {
   gate: string;
@@ -33,8 +37,8 @@ export interface Project {
   kind: "annual" | "small";
   createdAt: string;
   gates: string[];
-  /** blank 空白、sample 範本（附示範內容）、guided 流程範本（逐步引導，不可跳步） */
-  template?: "blank" | "sample" | "guided";
+  /** cosma CoSMA 範本（F-86，預設）；舊版 JRI 類別：blank 空白、sample 範本（附示範內容）、guided 流程範本（逐步引導，不可跳步） */
+  template?: "blank" | "sample" | "guided" | "cosma";
   highPower?: boolean; // 高功率（H 級以上）：TRR／FRR 只有指導老師能核可
   manual: Record<string, boolean>;
   signoffs: Signoff[];
@@ -281,7 +285,7 @@ async function writeProject(ref: string, p: Project): Promise<void> {
 }
 
 export async function createProject(input: { id: string; name: string; kind: "annual" | "small"; gates?: string[]; template?: string; author: string }): Promise<Project> {
-  const template: Project["template"] = input.template === "blank" || input.template === "guided" ? input.template : "sample";
+  const template: Project["template"] = input.template === "blank" || input.template === "guided" || input.template === "cosma" ? input.template : "sample";
   const dir = dirOf(mainOnly(input.id, "建立專案"));
   if (!input.name.trim()) throw new UserError("請填專案名稱。");
   if (await fs.stat(dir).catch(() => null)) throw new UserError("這個專案代號已經被使用。");
@@ -291,7 +295,8 @@ export async function createProject(input: { id: string; name: string; kind: "an
 
   await fs.mkdir(path.join(dir, "model"), { recursive: true });
   await fs.mkdir(path.join(dir, "lib"), { recursive: true });
-  await fs.copyFile(path.join(TEMPLATE_DIR, template === "sample" ? "sounding-rocket" : "blank", "model.sysml"), path.join(dir, "model", "model.sysml"));
+  if (template === "cosma") await fs.cp(path.join(TEMPLATE_DIR, "cosma"), path.join(dir, "model"), { recursive: true }); // 照 Apollo 的資料夾與套件（F-86）
+  else await fs.copyFile(path.join(TEMPLATE_DIR, template === "sample" ? "sounding-rocket" : "blank", "model.sysml"), path.join(dir, "model", "model.sysml"));
   await syncSkill(dir);
   await fs.copyFile(LIBRARY, path.join(dir, "lib", "JRI.sysml"));
   await fs.copyFile(path.join(TEMPLATE_DIR, "CLAUDE.md"), path.join(dir, "CLAUDE.md")).catch(() => {});
@@ -348,6 +353,20 @@ export async function saveShared(file: string, content: string): Promise<{ saved
   return { saved: true, analysis };
 }
 
+/**
+ * CoSMA 基礎庫與附加庫，以共用元件庫的方式載入（F-82、F-87）。條件：模型檔提到 CoSMAPackage，而且模型自己沒有帶一份基礎庫
+ * （例如原封不動的 Apollo 參考專案）。其他專案（包括 rtc-2027）回傳空的，解析結果完全不變。
+ */
+export async function frameworkSources(texts: readonly string[]): Promise<Source[]> {
+  if (!texts.some((t) => /\bCoSMAPackage\b/.test(t)) || texts.some((t) => /\blibrary\s+package\s+CoSMAPackage\b/.test(t))) return [];
+  const out: Source[] = [];
+  for (const f of COSMA_FILES) out.push([`cosma:${f}`, await fs.readFile(path.join(COSMA_DIR, f), "utf8")]);
+  out.push(["addon:JRIAddonPackage.sysml", await fs.readFile(ADDON_FILE, "utf8")]);
+  return out;
+}
+/** 以共用元件庫方式載入的來源（專案內唯讀） */
+export const isFrameworkSource = (name: string) => name.startsWith("cosma:") || name.startsWith("addon:");
+
 export async function sources(id: string, override?: { file: string; content: string }): Promise<Source[]> {
   const dir = dirOf(id);
   const project = await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
@@ -371,19 +390,27 @@ export async function sources(id: string, override?: { file: string; content: st
   }
   const files = await listFiles(id);
   if (override && !files.includes(override.file)) files.push(override.file);
+  const own: Source[] = [];
   for (const f of files) {
-    if (override?.file === f) { out.push([f, upgradeText(override.content)]); continue; }
+    if (override?.file === f) { own.push([f, upgradeText(override.content)]); continue; }
     // 舊寫法（#derive dependency 等）轉成標準庫的寫法並寫回檔案，隨下一次儲存提交（F-36）
     const text = await fs.readFile(path.join(dir, "model", f), "utf8");
     const next = upgradeText(text);
     if (next !== text) await fs.writeFile(path.join(dir, "model", f), next, "utf8").catch(() => {});
-    out.push([f, next]);
+    own.push([f, next]);
   }
-  return out;
+  // CoSMA 專案：基礎庫與附加庫的副本放進 lib/cosma/、lib/addon/，讓儲存庫自給自足（F-82）
+  for (const [n, text] of await frameworkSources(own.map(([, t]) => t))) {
+    out.push([n, text]);
+    const copy = path.join(dir, "lib", n.startsWith("cosma:") ? "cosma" : "addon", n.slice(n.indexOf(":") + 1));
+    if ((await fs.readFile(copy, "utf8").catch(() => "")) !== text) await fs.mkdir(path.dirname(copy), { recursive: true }).then(() => fs.writeFile(copy, text, "utf8")).catch(() => {});
+  }
+  return [...out, ...own];
 }
 
 export async function analyzeProject(id: string, override?: { file: string; content: string }): Promise<Analysis> {
-  return analyze(await sources(id, override), (await readProject(id)).pristine ? [] : await listShared());
+  const list = await sources(id, override);
+  return analyze(list, (await readProject(id)).pristine ? [] : [...await listShared(), ...list.map(([n]) => n).filter(isFrameworkSource)]);
 }
 
 /** 儲存前先解析；有錯誤就不寫入，回傳診斷讓使用者修正。 */

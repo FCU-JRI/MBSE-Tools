@@ -250,7 +250,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const drag = useRef<{ starts: Map<string, { x: number; y: number }>; pkgs: Map<string, { x: number; y: number }>; members: Map<string, { pkg: string; x: number; y: number }> } | null>(null);
 
   // 第一層工具：一般的圖用該圖固定的項目，自訂圖用釘選的項目
-  const elTools = custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c)) : paletteOf(def, view.analysis, meta.categories);
+  // 只列這個專案用的類別（CoSMA 專案的非套件圖不列 JRI 的類別，F-83）
+  const elTools = (custom ? pins.els : paletteOf(def, view.analysis, meta.categories)).filter((c) => meta.categories.some((x) => x.id === c));
   // 套件內容圖與分解圖的內容由擁有關係決定，不在這裡畫套件的框
   const structural = def.kind === "pkg" || def.kind === "decomp";
   const allowedLinks = LINK_TOOLS[def.kind];

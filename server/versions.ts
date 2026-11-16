@@ -8,7 +8,7 @@ import type { Element } from "./extract.ts";
 import os from "node:os";
 import { upgradeText } from "./upgrade.ts";
 import { embeddable, embedStakeholders, sameRelations } from "./modernize.ts";
-import { analyzeProject, commit, dirOf, git, gitRaw, listFiles, listShared, lock, onPushRejected, parseRef, pushLater, readProject, readShared, refOf, refOfDir, repoConfig, sources, UserError } from "./projects.ts";
+import { analyzeProject, commit, dirOf, frameworkSources, git, gitRaw, isFrameworkSource, listFiles, listShared, lock, onPushRejected, parseRef, pushLater, readProject, readShared, refOf, refOfDir, repoConfig, sources, UserError } from "./projects.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
@@ -26,8 +26,11 @@ async function analyzeAt(dir: string, sha: string): Promise<Analysis> {
   const list: Source[] = [["JRI.sysml", await fs.readFile(LIBRARY, "utf8")]];
   for (const f of shared) list.push([f, await readShared(f)]);
   // 舊版本可能還是舊寫法，先在記憶體裡轉換才解析得了（不動到版本紀錄）
-  for (const n of names) list.push([inModel(n), upgradeText(await git(dir, "show", `${sha}:${n}`) + "\n")]);
-  return analyze(list, shared);
+  const own: Source[] = [];
+  for (const n of names) own.push([inModel(n), upgradeText(await git(dir, "show", `${sha}:${n}`) + "\n")]);
+  // CoSMA 專案的基礎庫與附加庫（F-82）；其他專案是空的
+  const framework = await frameworkSources(own.map(([, t]) => t));
+  return analyze([...list, ...framework, ...own], [...shared, ...framework.map(([n]) => n)]);
 }
 
 /** 某個版本裡的模型檔（儲存庫內的完整路徑，含子資料夾，F-70）。 */
@@ -266,7 +269,7 @@ async function modernizeWorktree(ref: string): Promise<boolean> {
   const dir = dirOf(ref);
   if ((await readProject(ref)).pristine) return false; // 原封不動的專案不轉換（F-72）
   const list = await sources(ref); // 文字層的舊寫法（F-36）在這裡轉換並寫回
-  const shared = await listShared();
+  const shared = [...await listShared(), ...list.map(([n]) => n).filter(isFrameworkSource)];
   const own = new Set(await listFiles(ref));
   const texts = new Map(list.filter(([n]) => own.has(n)).map(([n, t]) => [n, t]));
   const next = await embedChecked(list.filter(([n]) => !own.has(n)), texts, shared);

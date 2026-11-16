@@ -2,6 +2,7 @@
 import { connect } from "@openmbee/opensysml";
 import { createHash } from "node:crypto";
 import { extract } from "./extract.ts";
+import { applyCosma } from "./cosma.ts";
 import type { Extracted } from "./extract.ts";
 
 export interface Diagnostic {
@@ -77,6 +78,8 @@ export async function analyze(sources: readonly Source[], shared: readonly strin
       // 解析器回報的欄位是 UTF-8 位元組位置，中文字一個字佔三個位元組，不能直接當字串索引
       (file, loc) => Buffer.from(lines.get(file)?.[loc.line - 1] ?? "", "utf8").subarray(Math.max(0, loc.col - 1)).toString("utf8"),
       sources.length === 1 ? sources[0][0] : "");
+    // CoSMA 專案（模型裡有元素特化 CoSMA 套件的定義）才加上 CoSMA 的類別與層；其他專案的結果完全不變（F-83）
+    applyCosma(extracted);
     try {
       const verdicts = await model.verifySatisfaction();
       satisfaction = verdicts.map((v: any) => ({

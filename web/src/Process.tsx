@@ -25,7 +25,7 @@ export function ProcessView({ view, meta, user, onChanged, onOpen }: Props) {
   return (
     <div className="proc">
       <ol className="proc-steps" aria-label="分析步驟">
-        <li className="proc-head"><span className="label">分析流程 · NASA-HDBK-1009A</span><span className="data">{done} / {steps.length}</span></li>
+        <li className="proc-head"><span className="label">分析流程 · {view.cosma ? "CoSMA" : "NASA-HDBK-1009A"}</span><span className="data">{done} / {steps.length}</span></li>
         {steps.map((s, i) => (
           <li key={s.id}>
             <button className={`proc-step ${s.state}`} aria-current={s.id === step.id} onClick={() => setStepId(s.id)}>

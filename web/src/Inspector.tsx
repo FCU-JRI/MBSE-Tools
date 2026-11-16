@@ -122,13 +122,17 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
   const isVer = cat.keyword === "verification";
   const reqs = listOf(view.analysis.elements, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
   const parent = parentId ? view.analysis.elements.find((e) => e.id === parentId) : undefined;
+  // CoSMA：Concern 放在利害關係人裡、Goal 放在任務裡（F-85）
+  const hosts = cat.parent ? view.analysis.elements.filter((e) => e.category === cat.parent && !e.shared && (e.kind === "PartUsage" || /Definition$/.test(e.kind))) : [];
+  const [hostId, setHostId] = useState("");
+  const host = hostId || hosts[0]?.id || "";
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
     setBusy(true); setMsg(null);
     try {
       const before = new Set(view.analysis.elements.map((e) => e.id));
-      const v = await api<View>(`/projects/${view.project.id}/elements`, "POST", { category: cat.id, name, doc, attrs, source: src.doc ? src : undefined, parentId: parentId ?? undefined, ...(isVer ? { verifies: verifies || undefined, method } : {}) });
+      const v = await api<View>(`/projects/${view.project.id}/elements`, "POST", { category: cat.id, name, doc, attrs, source: src.doc ? src : undefined, parentId: parentId ?? (cat.parent ? host || undefined : undefined), ...(isVer ? { verifies: verifies || undefined, method } : {}) });
       onChanged(v);
       const created = v.analysis.elements.find((e) => !before.has(e.id) && e.name === name.trim());
       if (created) setSel({ type: "element", id: created.id });
@@ -143,13 +147,16 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
       <label className="field"><span className="label">類別</span>
         <select className="input" value={cat.id} onChange={(e) => setSel({ type: "new", category: e.target.value, parentId: null })}>
           {Object.entries(meta.pillars).map(([pid, pzh]) => (
-            <optgroup key={pid} label={pzh}>{meta.categories.filter((c) => c.pillar === pid).map((c) => <option key={c.id} value={c.id}>{c.zh} {c.en}</option>)}</optgroup>
+            <optgroup key={pid} label={pzh}>{meta.categories.filter((c) => c.pillar === pid && c.creatable !== false).map((c) => <option key={c.id} value={c.id}>{c.zh} {c.en}</option>)}</optgroup>
           ))}
         </select>
       </label>
       <p className="body" style={{ marginBottom: 8 }}>{cat.help}</p>
       <p className="caption" style={{ marginBottom: 16 }}>例：{cat.example}</p>
       {parent && <p className="caption" style={{ marginBottom: 16 }}>會加在「{parent.name}」之內。</p>}
+      {!parent && cat.parent && <label className="field"><span className="label">放在哪個{meta.categories.find((c) => c.id === cat.parent)?.zh}裡</span>
+        <select className="input" value={host} onChange={(e) => setHostId(e.target.value)}>{hosts.length === 0 && <option value="">（還沒有，請先新增）</option>}{hosts.map((h) => <option key={h.id} value={h.id}>{label(h)}</option>)}</select>
+      </label>}
       <label className="field"><span className="label">名稱</span><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label className="field"><span className="label">{cat.keyword === "requirement" ? "內容（用「應」字，一條一件事）" : "說明"}</span>
         <textarea className="input" rows={3} value={doc} onChange={(e) => setDoc(e.target.value)} />
@@ -168,7 +175,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
       </>}
       <Msg m={msg} />
       <div style={{ marginTop: 8 }}><button className="btn" disabled={busy}>{busy ? "寫入中" : "新增"}</button></div>
-      <p className="caption" style={{ marginTop: 12 }}>編號自動產生（{cat.prefix}-001 起），並寫入版本紀錄。</p>
+      <p className="caption" style={{ marginTop: 12 }}>{cat.layer ? (cat.prefix ? `編號自動產生（${cat.prefix}001 起），` : "") : `編號自動產生（${cat.prefix}-001 起），`}並寫入版本紀錄。</p>
     </form>
   );
 }
@@ -186,7 +193,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [relKind, setRelKind] = useState("derive");
+  const [relKind, setRelKind] = useState(meta.relationKinds?.[0] ?? "derive");
   const [relTo, setRelTo] = useState("");
   useEffect(() => { setName(el.name); setSn(el.shortName ?? ""); setSrc({ doc: el.attrs.sourceDoc ?? "", ref: el.attrs.sourceRef ?? "" }); setDoc(el.doc); setAttrs({ ...el.attrs }); }, [el]);
 
@@ -203,14 +210,15 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
   const out = rels.filter((r) => r.from === el.id).map((r) => ({ r, zh: meta.relations[r.kind]?.zh ?? r.kind, other: byId.get(r.to) }));
   const inn = rels.filter((r) => r.to === el.id).map((r) => ({ r, zh: `被${meta.relations[r.kind]?.zh ?? r.kind}`, other: byId.get(r.from) }));
-  const targets = els.filter((e) => e.category && e.kind !== "ReferenceUsage" && e.id !== el.id);
+  // CoSMA 專案：特化的對象可以是基礎庫的定義（沒有類別、但有層）
+  const targets = els.filter((e) => (e.category || (e.layer && /Definition$/.test(e.kind))) && e.kind !== "ReferenceUsage" && e.id !== el.id);
   const sat = view.analysis.satisfaction.find((s) => s.requirement === el.qualifiedName);
 
   return (
     <>
       <form className="section" onSubmit={save}>
         <div className="section-head"><h2 className="section-title">屬性</h2><span className="label">{cat?.zh ?? stereotype(el)}</span></div>
-        <label className="field"><span className="label">編號</span><input className="input" value={sn} onChange={(e) => setSn(e.target.value)} placeholder={cat ? `${cat.prefix}-001` : ""} spellCheck={false} /></label>
+        <label className="field"><span className="label">編號</span><input className="input" value={sn} onChange={(e) => setSn(e.target.value)} placeholder={cat ? (cat.layer ? (cat.prefix ? `${cat.prefix}001` : "") : `${cat.prefix}-001`) : ""} spellCheck={false} /></label>
         <label className="field"><span className="label">名稱</span><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label className="field"><span className="label">{cat?.keyword === "requirement" ? "內容" : "說明"}</span>
           <textarea className="input" rows={4} value={doc} onChange={(e) => setDoc(e.target.value)} />
@@ -241,7 +249,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
         {out.length + inn.length === 0 && <p className="caption">還沒有關係。</p>}
         <div className="row" style={{ marginTop: 12 }}>
           <label className="field" style={{ flex: "0 0 5.5rem", minWidth: 0 }}><span className="label">類型</span>
-            <select className="input" value={relKind} onChange={(e) => setRelKind(e.target.value)}>{["derive", "refine", "trace", "satisfy", "allocate"].map((k) => <option key={k} value={k}>{meta.relations[k]?.zh}</option>)}</select>
+            <select className="input" value={relKind} onChange={(e) => setRelKind(e.target.value)}>{(meta.relationKinds ?? ["derive", "refine", "trace", "satisfy", "allocate"]).map((k) => <option key={k} value={k}>{meta.relations[k]?.zh}</option>)}</select>
           </label>
           <label className="field"><span className="label">對象</span>
             <select className="input" value={relTo} onChange={(e) => setRelTo(e.target.value)}><option value="">請選擇</option>{targets.map((t) => <option key={t.id} value={t.id}>{label(t)}</option>)}</select>

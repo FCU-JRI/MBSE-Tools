@@ -187,9 +187,44 @@ CoSMA 有、JRI 目前沒有的元素，要新增：Program、Capability、Missi
 
 - 放入 CoSMA 的基礎庫（`library/cosma/`，原封不動、保留 MPL-2.0 授權聲明，來源 `reference/apollo-11-sysml-v2/CoSMA`，提交 `0e8a7d6`）。專案以共用元件庫的方式載入。
 - 類別與流程引導改成五層（Purpose、Operational、Functional、Logical、Technical），對象是第 3 節與第 4.1 節「CoSMA 有、JRI 沒有」列出的元素。
-- 新專案的範本照 Apollo 的套件結構（合成內容，不用真實設計參數）；舊範本拿掉。
+- 新專案的範本照 Apollo 的套件結構（合成內容，不用真實設計參數）；~~舊範本拿掉~~ 舊範本保留、改名為「舊版 JRI 類別」（實作時的決定：`rtc-2027` 與其他還沒轉換的專案在第 E 期前仍用 JRI 的類別，新建這類專案也要有範本；既有的測試依賴它們）。
 - 在圖與表上新增、修改、刪除 CoSMA 的各種元素與四種關係（細化、滿足、執行、特化）。
 - 驗收：用新範本建專案，五層各新增、修改、刪除一個元素，模型能解析；Apollo 參考專案的元素都被歸到五層之一（或標為附加庫、標準庫）。
+
+#### 第 C 期閘門檢查表（2026-11-16，等 Mars 核准）
+
+| # | 條件 | 證據 | 結果 |
+|---|---|---|---|
+| 1 | CoSMA 基礎庫原封不動放進 `library/cosma/`，保留 MPL-2.0 | `server/cosma.test.ts`「F-82」：三個檔和參考模型清單的 SHA-256 相同；`LICENSE.md` 與每個檔的版權聲明都在 | 通過 |
+| 2 | 以共用元件庫方式載入；只有 CoSMA 專案載入 | `projects.ts` 的 `frameworkSources`；測試「F-83」：JRI 範本專案沒有 `lib/cosma/`，解析結果沒有任何 CoSMA 的類別或層 | 通過 |
+| 3 | 由模型內容判斷 CoSMA 專案，不加 `project.json` 旗標 | `cosma.ts` 的 `isCosmaProject`；測試「F-83」「F-85」：JRI 範本 `cosma: false`，CoSMA 範本 `cosma: true` | 通過 |
+| 4 | 非 CoSMA 專案（和 `rtc-2027` 同類）表單、流程照舊，畫面註明還沒轉換 | 測試「F-83」：流程步驟和 NASA 的 17 步逐一相同；JRI 類別清單沒有 CoSMA 的 id；瀏覽器實測（下面）；既有 81 項測試沒有改、全過 | 通過 |
+| 5 | 類別與流程改成五層，涵蓋第 3 節與第 4.1 節的元素 | `COSMA_CATEGORIES` 30 類（其中個體、執行紀錄只歸類、不提供新增）；測試「F-84」：Apollo 用到每一類至少一個元素（MOE、MOP 是附加庫，Apollo 沒有）；「F-88」流程含五層 | 通過 |
+| 6 | Apollo 的每個具名元素都歸到五層之一，或標為附加庫、標準庫 | 測試「F-84」：2,188 個元素，基礎庫 90 個，其餘都在五層；**唯一例外是根套件 `Apollo11Model`**（只放匯入，不屬任何一層，標為 `root`），請 Mars 確認 | 通過（一個例外待確認） |
+| 7 | 新範本照 Apollo 的套件結構、合成內容，設為預設 | 測試「F-86」：資料夾與套件名稱都是 Apollo 的；可以解析；五層都有元素；內容不含 `rtc-2027` 或 2027 字樣 | 通過 |
+| 8 | 五層各新增、修改、刪除一個元素後模型仍能解析 | 測試「F-85」第一項：任務需求、作業、功能、邏輯元件、技術元件各走一次，每一步 `analysis.ok` | 通過 |
+| 9 | 四種關係各能建立（細化、滿足、執行、特化），另加參與者 | 測試「F-85」第三項：檢查寫出的原始碼與解析出的關係 | 通過 |
+| 10 | MOE、MOP 照 Mars 的決定：標記過的需求定義，細化到需求 | 解析器先實測通過才寫進範本與表單；測試「F-86」「F-85」第二項 | 通過 |
+| 11 | `npx tsc --noEmit`、`npm test`、`npm run build` 都過 | 見下面 | 通過 |
+| 12 | 瀏覽器實測（只讀 DOM） | 見下面 | 通過 |
+
+指令與輸出（PR 分支的 clone，cwd 是儲存庫根目錄）：
+
+```text
+npx tsc --noEmit   → 沒有輸出（exit 0）
+npm test           → tests 90, pass 89, fail 0, skipped 1（基準 81 項 + 第 C 期 9 項；略過的是沒有設 JRI_PYTHON 的模擬測試）
+npm run build      → ✓ built（exit 0；只有原本就有的 chunk 大於 500 kB 警告）
+```
+
+注意：`server/api.test.ts` 用固定的埠 18787。同一台電腦上另一個工作階段同時跑測試會撞埠，造成二十幾項假失敗；上面的結果是確認埠空著後重跑的。新增的 `server/cosma.test.ts` 用 18797。
+
+瀏覽器實測（本機 `PORT=8792`、暫存的 `JRI_HOME`，只讀 DOM、不截圖）：
+
+- 首頁的建立方式第一個是「CoSMA 範本專案」且預設選中；舊的三個標示「舊版 JRI 類別」。
+- 用 CoSMA 範本建專案：沒有「還沒轉成 CoSMA」的橫幅；表的新增表單分五組（Purpose 12 類、Operational 2、Functional 4、Logical 1、Technical 9）；五層各新增一個（能力、作業、功能、邏輯元件、技術元件），API 回報類別與層正確、寫進 Apollo 對應的檔案；關係的類型只有細化、滿足、執行、特化、參與者；在屬性面板用「特化」把新元件接到 `DemoMotor`，解析出特化連結。
+- 用 JRI 的範本專案建專案：上方出現「這個專案還沒有轉成 CoSMA」；新增表單是原本的七組；沒有任何 CoSMA 的選項；流程標題是 NASA-HDBK-1009A，17 步和原本相同。
+
+沒有驗證的：沒有開 `rtc-2027` 本身；CoSMA 專案的非套件圖（需求、活動等）工具列不列 JRI 的類別，但也還沒有 CoSMA 的新增工具（那些圖由階段 4 換掉，新增請用表或套件內容圖）；刪除特化與參與者要到原始碼刪；共用元件庫與 CoSMA 基礎庫同時載入的組合沒有用實際的共用元件庫檔案測過。
 
 ### 第 D 期：附加庫與審查節點（SPEC 編號 F-90 到 F-97；接在第 C 期之後）
 
@@ -231,7 +266,7 @@ CoSMA 有、JRI 目前沒有的元素，要新增：Program、Capability、Missi
 
 ## 10. 待決事項
 
-1. ~~MOE 與 MOP~~ Claude 代決（2026-11-16，Mars 授權）：併入需求的屬性與限制，不另設元素（「同一概念只留一種」）。MOE 是任務需求（Mission Requirement）裡的屬性加 `require constraint`，屬性標上附加庫的 `#moe`；MOP 是技術需求或技術元件的屬性，標 `#mop`。`#moe`、`#mop` 和 `#tpm` 一樣是附加庫的標記，CoSMA 的元素不變。理由：NASA 的 MOE／MOP 本來就是「可量測的條件」，CoSMA 用屬性加限制表達同一件事；標記保留 NASA 審查要的可追溯性。
+1. ~~MOE 與 MOP~~ **Mars 決定**（2026-11-16，取代原本的 Claude 代決「併入需求的屬性」）：MOE 是一條獨立的需求定義（`#moe requirement def <'MOE-001'> …`），用 `#refinement dependency` 細化到它量測的任務需求；可量化的部分在這條需求定義裡寫屬性加 `require constraint`。MOP 一樣，是標上 `#mop` 的需求定義，細化到技術需求。CoSMA 沒有 `MissionRequirement` 這個定義（Apollo 的任務需求只是放在 `MissionRequirementsPackage` 裡的需求定義），所以 MOE、MOP 不特化任何定義，靠標記與所在的套件歸類。`#moe`、`#mop` 的定義放在附加庫 `library/addon/JRIAddonPackage.sysml`。理由：一條 MOE／MOP 可以被多條需求共用；它本身是需求，能被驗證；MOE → MOP → TPM 能照一般需求的細化追溯；表格與節點檢查直接看得到（是元素，不是藏在別的需求裡的屬性）。解析器實測（opensysml 0.11.0）：標記加在需求定義上、細化到另一條需求定義，沒有錯誤，標記與細化都抽得出來；套件要匯入 `ModelingMetadata::*` 才認得 `#refinement`（和 Apollo 相同）。
 2. ~~使用案例~~ Claude 代決：改成作業（Operation，`action def … :> Operation`），不留在附加庫。參與者寫成作業裡的 `ref part`（指向利害關係人或外部系統），是標準 v2 寫法、不用自訂標記。理由：作業和使用案例回答同一個問題（系統怎麼被使用），留兩種就違反「同一概念只留一種」。
 3. ~~審查節點的三個檢查項目~~ Claude 代決，改為：計畫提案「定義需要、能力、目標、任務需求」（取代需要、目標、目的）；MDR「每條任務需求至少有一個 `#moe` 的屬性與限制」（取代每個目的都有 MOE）；MDR「定義作業，每個作業有參與者」（取代定義使用案例）。PDR 的 TPM 照舊用 `#tpm`。只對 CoSMA 專案生效（第 7 節的適用範圍），`rtc-2027` 在轉換前照舊。核定：這三項的依據是 AEAS 與 NASA 手冊，正式核定仍要 Mars 或組長在節點前確認；工具先照這個寫。
 4. ~~第 A 期是否現在開始。~~ 已決定：2026-11-16 核准開始。它不動 `rtc-2027`，不受 MDR 影響。

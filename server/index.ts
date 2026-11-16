@@ -19,6 +19,8 @@ import { evaluateProcess, stepOfCategory } from "./process.ts";
 import { buildReport, renderDocx, renderHtml } from "./report.ts";
 import { paramLines, paramWord } from "./modernize.ts";
 import * as reference from "./reference.ts";
+import { COSMA_CATEGORIES, COSMA_CATEGORY, COSMA_RELATION_KINDS, COSMA_RELATIONS, evaluateCosmaProcess, isCosmaProject, LAYERS, PLACES } from "./cosma.ts";
+import { cosmaAddElement, cosmaRelation } from "./cosmaEdits.ts";
 import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -78,7 +80,9 @@ async function view(id: string) {
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
   const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id), branch: await versions.branchState(id), warning: versions.syncWarning(id) };
+  // CoSMA 專案（F-83）：由模型內容判斷，不看 project.json。只換流程引導；節點檢查到第 D 期才換
+  const cosma = analysis.ok && isCosmaProject(analysis);
+  return { project, analysis, gates, cosma, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? (cosma ? evaluateCosmaProcess(analysis) : evaluateProcess(analysis)) : [], history: await store.historyState(id), branch: await versions.branchState(id), warning: versions.syncWarning(id) };
 }
 
 app.use((_req, res, next) => {
@@ -164,6 +168,8 @@ app.get("/api/meta", (_req, res) => {
     categories: CATEGORIES,
     pillars: PILLARS,
     relations: RELATION_LABELS,
+    // CoSMA 專案用的類別、五層與關係（F-84、F-85）；head 是函式，不會送出
+    cosma: { categories: COSMA_CATEGORIES.map(({ head, ...c }) => ({ ...c, creatable: head !== null })), layers: LAYERS, places: PLACES, relations: COSMA_RELATIONS, relationKinds: COSMA_RELATION_KINDS },
     gates: GATES.map((g) => ({ id: g.id, zh: g.zh, en: g.en, deadline: g.deadline, approver: g.approver, purpose: g.purpose, perSubsystem: g.perSubsystem })),
   });
 });
@@ -215,6 +221,15 @@ app.post("/api/projects/:id/elements", wrap(async (req, res) => {
   const id = pid(req);
   const before = await store.analyzeProject(id);
   if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正後再新增。");
+  // CoSMA 的類別（F-85）：照 Apollo 的套件與寫法
+  if (COSMA_CATEGORY.has(String(req.body.category))) {
+    if (!isCosmaProject(before)) throw new store.UserError("這個專案還沒有轉成 CoSMA，不能新增 CoSMA 的元素。");
+    const edit = await cosmaAddElement({ category: String(req.body.category), name: String(req.body.name ?? ""), doc: String(req.body.doc ?? ""), parentId: req.body.parentId ? String(req.body.parentId) : null },
+      { elements: before.elements, imports: before.imports ?? [] }, (f) => store.readFile(id, f), await store.listFiles(id));
+    const r = await store.saveFile(id, edit.file, edit.content, author(req), edit.message);
+    if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+    return res.json({ saved: true, ...(await view(id)) });
+  }
   const cat = CATEGORIES.find((c) => c.id === req.body.category);
   if (!cat) throw new store.UserError("未知的元素類別。");
   // 流程範本專案：前面的步驟沒完成，不能新增後面步驟的項目
@@ -251,6 +266,15 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   if (from.id === to.id) throw new store.UserError("不能把元素連到自己。");
   if (before.relations.some((r) => r.kind === req.body.kind && r.from === from.id && r.to === to.id)) throw new store.UserError("這條關係已經存在。");
   const kind0 = String(req.body.kind);
+  // CoSMA 專案的關係（F-85）：細化、滿足、執行、特化，另加作業的參與者
+  if (isCosmaProject(before)) {
+    if (!COSMA_RELATION_KINDS.includes(kind0)) throw new store.UserError("CoSMA 專案的關係只有細化、滿足、執行、特化與參與者。");
+    const edit = await cosmaRelation(kind0, from, to, { elements: before.elements, imports: before.imports ?? [], read: (f) => store.readFile(id, f) });
+    if (!(await store.listFiles(id)).includes(edit.file)) throw new store.UserError("這個元素在基礎庫或共用元件庫裡，不能在專案內修改。");
+    const r = await store.saveFile(id, edit.file, edit.content, author(req), edit.message);
+    if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
+    return res.json({ saved: true, ...(await view(id)) });
+  }
   // 標準庫的需求衍生連結兩端都必須是需求（F-36）
   if (kind0 === "derive" && !(/RequirementUsage$/.test(from.kind) && /RequirementUsage$/.test(to.kind))) throw new store.UserError("衍生只能連接需求類的項目（需要、目標、目的、量度、各層需求）。其他項目之間請用「追溯」。");
   const owner0 = before.elements.find((x) => x.id === from.owner);
@@ -365,7 +389,7 @@ app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
   const target = a.elements.find((e) => e.id === req.body.id);
   if (!target) throw new store.UserError("找不到這個元素。");
   const file = editable(target).file;
-  const cat = CATEGORIES.find((c) => c.id === target.category);
+  const cat = CATEGORIES.find((c) => c.id === target.category) ?? COSMA_CATEGORY.get(target.category ?? "");
   let content = await store.readFile(id, file);
   const steps: ((c: string, el: Element, an: typeof a) => string)[] = [];
   const b = req.body ?? {};

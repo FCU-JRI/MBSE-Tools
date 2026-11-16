@@ -16,6 +16,12 @@
 - **匯出**：Excel 表格、審查報告（可列印成 PDF 的網頁版與 Word）。
 - **共用元件庫**：跨專案共用的元件（以航電為主）。
 - **參考專案**：Airbus 的 Apollo 11 模型（CoSMA 框架的參考實作），由管理員在「管理」頁建立成唯讀的專案。檔案原封不動，建立時逐一核對。
+- **CoSMA 框架**（第 C 期）：新專案預設用 CoSMA 範本（照 Apollo 的套件結構，合成內容）。模型裡有元素特化 `CoSMAPackage` 的定義時是 CoSMA 專案，表單與流程換成五層（Purpose、Operational、Functional、Logical、Technical）；其餘專案照舊，畫面上註明「這個專案還沒有轉成 CoSMA」。節點檢查、匯出與報告目前仍是 JRI 的類別（第 D 期再換）。
+
+## 目前進度
+
+- CoSMA 改造第 A 期：階段 1 到 3b 已合併；階段 4 另一個 PR 進行中。
+- 第 C 期（F-82 到 F-89）：已提交 PR，等 Mars 核准。第 D 期（附加庫縮減、節點檢查、匯出與報告）接在它之後。
 
 ## 存取
 
@@ -61,6 +67,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
 - `server/`：後端。`engine.ts` 呼叫 OpenSysML 解析，`extract.ts` 歸類元素，`gates.ts` 節點檢查，`edits.ts` 把操作轉成 SysML 文字，`auth.ts` 身分與權限，`versions.ts` 分支與基線，`pm.ts` 專案管理，`sim.ts` 模擬，`report.ts` 報告。
 - `web/`：前端（React），介面依 Focus App Design System。
 - `library/JRI.sysml`：JRI 元模型庫。
+- `library/cosma/`：CoSMA 基礎庫（Apollo 參考模型的 `CoSMA/`，原封不動，MPL-2.0）。`library/addon/`：JRI 附加庫（`#moe`、`#mop`）。兩者只有 CoSMA 專案載入。
+- `server/cosma.ts`：CoSMA 的類別、五層歸類、專案判斷與流程；`server/cosmaEdits.ts`：CoSMA 元素與關係的寫法。
 - `sim/run_sim.py`：RocketPy 模擬腳本。
 - `templates/`：新專案的範本模型與給 Claude 的說明。
 - `reference/`：第三方的參考模型，原封不動。來源、提交與授權見 `reference/apollo-11-sysml-v2.md`。
@@ -68,6 +76,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
 ## 授權
 
 - 本儲存庫的程式與文件採 MIT 授權，全文在 `LICENSE`。
+- `library/cosma/` 是同一份 AIRBUS 作品裡的 CoSMA 基礎庫，同樣採 MPL-2.0（全文在 `library/cosma/LICENSE.md`），沒有修改，不適用 MIT。
 - `reference/apollo-11-sysml-v2/` 是 AIRBUS 的作品，採 Mozilla Public License 2.0（全文在該資料夾的 `LICENSE.md`），沒有修改。這個資料夾不適用 MIT。
 
 ## 已知限制
