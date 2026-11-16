@@ -334,8 +334,8 @@ app.post("/api/projects/:id/parts", wrap(async (req, res) => {
   if (owner.kind !== "PartDefinition" || type.kind !== "PartDefinition") throw new store.UserError("只能在零件定義（part def）裡加入以零件定義為型別的零件。");
   if (owner.id === type.id) throw new store.UserError("不能把元素放進自己裡面。");
   const file = editable(owner).file;
-  const out = addPartText(await store.readFile(id, file), before.elements, before.imports ?? [], owner, type);
-  const r = await store.saveFile(id, file, out.content, author(req), `新增零件：${owner.name} 加入 ${type.name}${out.imported ? "（補匯入）" : ""}`);
+  const out = addPartText(await store.readFile(id, file), before.elements, before.imports ?? [], owner, type, String(req.body.name ?? ""));
+  const r = await store.saveFile(id, file, out.content, author(req), `新增零件：${owner.name} 加入 ${String(req.body.name ?? "").trim()} : ${type.name}${out.imported ? "（補匯入）" : ""}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));

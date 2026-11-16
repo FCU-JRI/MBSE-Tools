@@ -447,6 +447,18 @@ export function importEdges(a: Analysis, t: TreeIndex, ids: Set<string>, edges: 
     edges.push(edge(`import:${i.from}:${to}`, i.from, to, "import", "«import»", null));
   }
 }
+/**
+ * 「加入零件」的建議名稱（使用者可以改）：英文大寫開頭改成小寫開頭（Apollo 11 的寫法，例如 engine : Engine）；
+ * 其餘（中文等）在後面加編號。和型別同名、或和擁有者裡已有的名稱重複時，往後加編號。
+ */
+export function suggestPartName(typeName: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  const lower = typeName.charAt(0).toLowerCase() + typeName.slice(1);
+  const base = lower !== typeName ? lower : typeName;
+  if (base !== typeName && !used.has(base)) return base;
+  for (let i = 1; ; i++) if (!used.has(`${base}${i}`)) return `${base}${i}`;
+}
+
 const ownEdge = (owner: string, u: Element): GEdge => edge(`compose:${u.id}`, owner, u.id, isRef(u) ? "refpart" : "compose", "", u.unnamed ? null : { type: "element", id: u.id });
 
 /**
