@@ -6,7 +6,10 @@
 //   需求衍生是連結（#derivation connection，8.2.3.13），畫成實線開放箭頭，從子需求指向母需求，標 «#derivation»；
 //   組成（composite feature membership）在擁有者一端畫實心菱形、另一端是零件（使用）；
 //   「零件由哪個定義所定義」為實線、定義端空心三角形加兩點；起始為實心圓、完成為牛眼。
-import type { Analysis, Diagrams, Element } from "./api.ts";
+//   特化與子集為實線、上位端空心三角形；重定義在三角形後加一條豎線；參照子集在三角形後加四個點（8.2.3.5、8.2.3.6）；
+//   非組成的零件（ref part）在擁有者一端畫空心菱形，節點外框為虛線（8.2.3.11）；
+//   套件不畫成員時名稱寫在資料夾本體中央（8.2.3.5）。
+import type { Analysis, Diagrams, Element, Layout } from "./api.ts";
 
 const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
 
@@ -80,20 +83,21 @@ export function packageOf(t: TreeIndex, id: string): string | null {
 export const LINK_SYMBOL: Record<string, string> = { type: ":", specialize: ":>", subset: ":>", redefine: ":>>", reference: "::>" };
 export const LINK_ZH: Record<string, string> = { specialize: "特化", type: "由…定義", subset: "子集", redefine: "重定義", reference: "參照", perform: "執行" };
 
-export type DiagramKind = "bdd" | "req" | "act" | "ibd" | "uc" | "stm" | "custom";
+export type DiagramKind = "pkg" | "decomp" | "req" | "act" | "ibd" | "uc" | "stm" | "custom";
 /**
  * code／viewDef：SysML v2 標準檢視定義的短名稱與名稱（StandardViewDefinitions）。
  * members 只有自訂圖使用：這張圖放了哪些模型項目。
  */
 export interface DiagramDef { id: string; kind: DiagramKind; code: string; viewDef: string; title: string; context: string | null; members?: string[] }
 const VIEW: Record<DiagramKind, [code: string, viewDef: string]> = {
-  bdd: ["GV", "GeneralView"], req: ["GV", "GeneralView"], uc: ["GV", "GeneralView"], custom: ["GV", "GeneralView"],
+  pkg: ["GV", "GeneralView"], decomp: ["GV", "GeneralView"], req: ["GV", "GeneralView"], uc: ["GV", "GeneralView"], custom: ["GV", "GeneralView"],
   ibd: ["IV", "InterconnectionView"], act: ["AFV", "ActionFlowView"], stm: ["STV", "StateTransitionView"],
 };
 /** 圖框標籤：«view» 名稱 : 檢視定義。 */
 export const frameLabel = (d: DiagramDef) => `«view» ${d.title} : ${d.viewDef}`;
 
-export type Shape = "def" | "usage" | "package" | "comment" | "start" | "done";
+/** pkgbox：不畫成員的套件，名稱寫在資料夾本體中央（一般的節點，不是可以把項目拖進去的框）。 */
+export type Shape = "def" | "usage" | "package" | "pkgbox" | "comment" | "start" | "done";
 export interface GNode {
   id: string;
   el: Element | null; // 起始與完成節點沒有對應的模型元素
@@ -106,17 +110,24 @@ export interface GNode {
   height: number;
   /** 所在的使用者套件（也在這張圖上時才有） */
   parent?: string;
+  /** 外框畫成虛線：參照的使用（ref），不是組成的一部分 */
+  dashed?: boolean;
+  /** 列在這個節點隔間裡的元素（套件內容圖與分解圖才有） */
+  covers?: string[];
 }
 export interface GEdge {
   id: string; source: string; target: string; kind: string; label: string;
   dashed: boolean;
-  head: "open" | "typing" | "none"; // 終點記號：開放箭頭、空心三角形加兩點（defined by）
-  tail: "diamond" | "none"; // 起點記號
+  // 終點記號：開放箭頭、空心三角形加兩點（defined by）、空心三角形（特化、子集）、三角形加豎線（重定義）、三角形加四點（參照子集）
+  head: "open" | "typing" | "triangle" | "redefine" | "refsubset" | "none";
+  tail: "diamond" | "hollow" | "none"; // 起點記號：實心菱形（組成）、空心菱形（非組成）
   /** 刪除這條線時要做的事：刪關係，或刪掉代表它的元素。 */
   remove: { type: "relation"; kind: string; from: string; to: string } | { type: "element"; id: string } | null;
 }
 /** reverse：排版時要反向看待的連線種類（例如追溯是由下層指向上層，上層應排在上方）。 */
-export interface Graph { nodes: GNode[]; edges: GEdge[]; direction: "TB" | "BT" | "LR" | "RL"; reverse?: string[] }
+export interface Graph { nodes: GNode[]; edges: GEdge[]; direction: "TB" | "BT" | "LR" | "RL"; reverse?: string[];
+  /** 節點超過上限時，有幾個元素改列在隔間裡 */
+  folded?: number }
 
 /** SysML v2 的關鍵字：由元類別名稱得出，例如 PartDefinition → «part def»、UseCaseUsage → «use case»。 */
 const KEYWORD: Record<string, string> = { VerificationCaseUsage: "verification", VerificationCaseDefinition: "verification def", Comment: "comment" };
@@ -144,14 +155,15 @@ export function wrap(text: string, units: number, maxLines: number): string[] {
 const NODE_W = 220;
 /** 名稱隔間的寫法：<編號> 名稱 : 型別（定義則為 :> 上層定義）。 */
 function nameOf(el: Element): string {
+  if (el.unnamed) return el.name;
   const sn = el.shortName ? `<${el.shortName}> ` : "";
   const t = el.types[0];
   return `${sn}${el.name}${t ? (el.kind.endsWith("Definition") ? ` :> ${t}` : ` : ${t}`) : ""}`;
 }
 
-function makeNode(el: Element, compartments: string[][] = []): GNode {
+function makeNode(el: Element, compartments: string[][] = [], text = nameOf(el)): GNode {
   const comps = compartments.filter((c) => c.length > 1);
-  const title = wrap(nameOf(el), Math.floor((NODE_W - 20) / 6.6), 3);
+  const title = wrap(text, Math.floor((NODE_W - 20) / 6.6), 3);
   const height = 26 + title.length * 16 + 8 + comps.reduce((s, c) => s + c.length * 16 + 9, 0);
   return { id: el.id, el, shape: el.kind.endsWith("Definition") ? "def" : "usage", keyword: stereotype(el), name: el.name, title, compartments: comps, width: NODE_W, height };
 }
@@ -168,8 +180,9 @@ function commentNode(el: Element): GNode {
 const edge = (id: string, source: string, target: string, kind: string, text: string, remove: GEdge["remove"]): GEdge => ({
   id, source, target, kind, label: text, remove,
   dashed: ["refine", "trace", "annotate"].includes(kind),
-  head: kind === "define" ? "typing" : ["compose", "connect", "annotate"].includes(kind) ? "none" : "open",
-  tail: kind === "compose" ? "diamond" : "none",
+  head: kind === "define" ? "typing" : kind === "specialize" || kind === "subset" ? "triangle" : kind === "redefine" ? "redefine" : kind === "reference" ? "refsubset"
+    : ["compose", "refpart", "connect", "annotate"].includes(kind) ? "none" : "open",
+  tail: kind === "compose" ? "diamond" : kind === "refpart" ? "hollow" : "none",
 });
 
 const REQ_CATS = ["Expectation", "Need", "Goal", "Objective", "MOE", "MOP", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
@@ -184,9 +197,19 @@ function node(e: Element, a: Analysis): GNode {
   return makeNode(e);
 }
 
+/** 最上層的套件內容圖。 */
+export const TOP_DIAGRAM = "pkg:";
+/** 一張圖最多畫幾個節點；超過的改列在隔間裡（F-76）。只是防止極端的模型拖垮瀏覽器的保險，一般的模型不會碰到。 */
+export const NODE_LIMIT = 500;
+
 export function diagramsOf(a: Analysis, extra?: Diagrams): DiagramDef[] {
   const def = (id: string, kind: DiagramKind, title: string, context: string | null, members?: string[]): DiagramDef => ({ id, kind, code: VIEW[kind][0], viewDef: VIEW[kind][1], title, context, members });
-  const out: DiagramDef[] = [def("bdd", "bdd", "結構分解", null), def("req", "req", "需求追溯", null), def("uc", "uc", "使用案例", null)];
+  // 套件內容圖：最上層一張，每個套件一張；分解圖：每個擁有零件的零件定義一張（F-76）
+  const t = treeOf(a);
+  const out: DiagramDef[] = [def(TOP_DIAGRAM, "pkg", "模型", null)];
+  for (const e of t.all) if (isPackage(e)) out.push(def(`pkg:${e.qualifiedName}`, "pkg", e.name, e.id));
+  for (const e of t.all) if (e.kind === "PartDefinition" && !e.unnamed && (t.children.get(e.id) ?? []).some((c) => c.kind === "PartUsage")) out.push(def(`decomp:${e.qualifiedName}`, "decomp", e.name, e.id));
+  out.push(def("req", "req", "需求追溯", null), def("uc", "uc", "使用案例", null));
   const byKind = (id: string | null) => a.elements.find((e) => e.id === id)?.kind;
   const kids = (id: string, kind: string) => a.elements.some((e) => e.owner === id && e.kind === kind);
   for (const e of a.elements) {
@@ -214,9 +237,11 @@ export function buildGraph(d: DiagramDef, a: Analysis, opts?: { packages: Set<st
   const g = baseGraph(d, a);
   if (!opts) return g;
   const ids = new Set(g.nodes.map((n) => n.id));
+  // 套件內容圖與分解圖由模型的擁有關係決定內容，不另外畫套件的框
+  const structural = d.kind === "pkg" || d.kind === "decomp";
   // 套件：有成員在這張圖上，或剛在這張圖上建立
   for (const p of a.elements) {
-    if (!isUserPackage(p, opts.packages)) continue;
+    if (structural || !isUserPackage(p, opts.packages)) continue;
     const members = g.nodes.filter((n) => n.el?.owner === p.id);
     if (members.length === 0 && !opts.shown.has(p.id)) continue;
     for (const m of members) m.parent = p.id;
@@ -226,8 +251,8 @@ export function buildGraph(d: DiagramDef, a: Analysis, opts?: { packages: Set<st
   for (const c of a.elements) {
     if (c.kind !== "Comment" || c.shared) continue;
     const about = (c.about ?? []).filter((x) => ids.has(x));
-    if (about.length === 0 && !opts.shown.has(c.id)) continue;
-    g.nodes.push(commentNode(c));
+    if (about.length === 0 && (structural || !opts.shown.has(c.id))) continue;
+    if (!ids.has(c.id)) g.nodes.push(commentNode(c));
     about.forEach((x) => g.edges.push(edge(`annotate:${c.id}:${x}`, c.id, x, "annotate", "", null)));
   }
   return g;
@@ -271,13 +296,8 @@ function baseGraph(d: DiagramDef, a: Analysis): Graph {
     return { nodes, edges, direction: "TB", reverse: ["derive", "refine", "trace", "satisfy", "verify"] };
   }
 
-  if (d.kind === "bdd") {
-    const defs = a.elements.filter((e) => e.kind === "PartDefinition");
-    const nodes = defs.map((e) => node(e, a));
-    const edges: GEdge[] = [];
-    composition(new Set(defs.map((e) => e.id)), nodes, edges);
-    return { nodes, edges, direction: "TB" };
-  }
+  if (d.kind === "pkg") return packageGraph(d, a);
+  if (d.kind === "decomp") return decompositionGraph(d, a);
 
   if (d.kind === "req") {
     const rels = a.relations.filter((r) => ["derive", "refine", "trace", "satisfy", "verify"].includes(r.kind));
@@ -317,6 +337,200 @@ function baseGraph(d: DiagramDef, a: Analysis): Graph {
   return { nodes, edges, direction: "LR" };
 }
 
+// ───────── 套件內容圖與分解圖（F-76）─────────
+const isRef = (e: Element) => e.kind === "ReferenceUsage" || /(^|\s)ref(\s|$)/.test(e.keyword ?? "");
+/** 隔間的標題（規範 8.2.3.6）：屬性、零件、項目各有自己的隔間，其餘的使用放 features，不是使用的放 members。 */
+const COMPARTMENT: Record<string, [title: string, keyword: string]> = { AttributeUsage: ["attributes", "attribute"], PartUsage: ["parts", "part"], ItemUsage: ["items", "item"] };
+const COMPARTMENT_ORDER = ["attributes", "parts", "items", "features", "members"];
+
+interface Structure { t: TreeIndex; redefines: Map<string, string[]>; a: Analysis;
+  /** 元素的第一個型別是用哪種關係寫的（「元素|對象名稱」→ 關係種類），決定寫成 :、:>、:>> 或 ::> */
+  how: Map<string, string> }
+function structureOf(a: Analysis): Structure {
+  const redefines = new Map<string, string[]>();
+  for (const l of a.links ?? []) if (l.kind === "redefine" && l.to) redefines.set(l.from, [...(redefines.get(l.from) ?? []), l.to]);
+  const how = new Map<string, string>();
+  for (const l of a.links ?? []) if (!how.has(`${l.from}|${l.toName}`)) how.set(`${l.from}|${l.toName}`, l.kind);
+  return { t: treeOf(a), redefines, a, how };
+}
+/** 零件是由哪些定義所定義。重定義而沒有另外寫型別的零件，沿著被重定義的特徵往上找。 */
+function definitionsOf(s: Structure, id: string, seen = new Set<string>()): string[] {
+  if (seen.has(id)) return [];
+  seen.add(id);
+  const e = s.t.byId.get(id);
+  if (!e) return [];
+  const out: string[] = [];
+  for (const x of [...e.typeIds, ...(s.redefines.get(id) ?? [])]) {
+    const te = s.t.byId.get(x);
+    if (!te) continue;
+    for (const d of te.kind.endsWith("Definition") ? [x] : definitionsOf(s, x, seen)) if (!out.includes(d)) out.push(d);
+  }
+  return out;
+}
+/** 名稱的寫法。沒有名字而重定義別的特徵的使用寫成「:>> 名稱」。 */
+function titleOf(s: Structure, e: Element): string {
+  return e.unnamed ? (s.redefines.has(e.id) ? `:>> ${e.name}` : e.name) : `${e.shortName ? `<${e.shortName}> ` : ""}${typed(s, e)}`;
+}
+/** 「名稱 : 型別」，符號和 SysML v2 文字記法一致。 */
+function typed(s: Structure, e: Element): string {
+  const t = e.types[0];
+  if (!t) return e.name;
+  return `${e.name} ${LINK_SYMBOL[s.how.get(`${e.id}|${t}`) ?? ""] ?? (e.kind.endsWith("Definition") ? ":>" : ":")} ${t}`;
+}
+/** 隔間裡的一列。implied：這個隔間本身已經表示的關鍵字（例如 parts 隔間裡的 part 不必再寫）。 */
+function rowOf(s: Structure, e: Element, implied = ""): string {
+  const kw = e.keyword ?? "";
+  if (e.unnamed) { const n = titleOf(s, e); return !kw || n.startsWith(kw) ? n : `${kw} ${n}`; }
+  const text = `${e.tags.includes("TPM") ? "#tpm " : ""}${typed(s, e)}`;
+  return !kw || kw === implied ? text : `${kw} ${text}`;
+}
+/** 元素底下各層的內容排成隔間：直接的下層依種類分隔間，更下層的縮排列在它的上層後面。套件有自己的圖，不再往下列。 */
+function compartmentsOf(s: Structure, e: Element, skip: Set<string> = new Set()): { compartments: string[][]; covers: string[] } {
+  const groups = new Map<string, string[]>(), covers: string[] = [];
+  const below = (p: Element, depth: number, rows: string[]) => {
+    if (isPackage(p)) return;
+    for (const c of s.t.children.get(p.id) ?? []) { rows.push(`${"· ".repeat(depth)}${rowOf(s, c)}`); covers.push(c.id); below(c, depth + 1, rows); }
+  };
+  for (const c of s.t.children.get(e.id) ?? []) {
+    if (skip.has(c.id)) continue;
+    const [title, implied] = COMPARTMENT[c.kind] ?? [c.kind.endsWith("Usage") ? "features" : "members", ""];
+    const rows = groups.get(title) ?? [];
+    rows.push(rowOf(s, c, implied)); covers.push(c.id);
+    below(c, 1, rows);
+    groups.set(title, rows);
+  }
+  return { compartments: COMPARTMENT_ORDER.filter((k) => groups.has(k)).map((k) => [k, ...(groups.get(k) as string[])]), covers };
+}
+/** 不畫成員的套件（name-inside）；rows 有內容時加一個 members 隔間（節點超過上限時用）。 */
+function packageBox(id: string, el: Element | null, name: string, rows: string[] = [], covers: string[] = []): GNode {
+  const title = wrap(name, Math.floor((NODE_W - 20) / 6.6), 3);
+  const compartments = rows.length ? [["members", ...rows]] : [];
+  return { id, el, shape: "pkgbox", keyword: "", name, title, compartments, covers, width: NODE_W, height: PKG_TAB / 2 + 22 + title.length * 16 + 10 + compartments.reduce((n, c) => n + c.length * 16 + 9, 0) };
+}
+/** 套件內容圖與分解圖上的一個節點：名稱、各層內容的隔間；參照的使用外框為虛線。 */
+function structureNode(s: Structure, e: Element, skip?: Set<string>): GNode {
+  if (isPackage(e)) return packageBox(e.id, e, e.name);
+  if (e.kind === "Comment") return commentNode(e);
+  const { compartments, covers } = compartmentsOf(s, e, skip);
+  const doc = (e.kind === "RequirementUsage" || e.kind === "RequirementDefinition") && e.doc ? [["doc", ...wrap(e.doc, 32, 4)]] : [];
+  return { ...makeNode(e, [...doc, ...compartments], titleOf(s, e)), covers, ...(isRef(e) ? { dashed: true } : {}) };
+}
+const GENERAL = ["specialize", "subset", "redefine", "reference"];
+/** 兩端都在圖上的特化、子集、重定義、參照子集，以及「由誰定義」（已經畫過的不重複）。 */
+function linkEdges(a: Analysis, ids: Set<string>, edges: GEdge[]): void {
+  const have = new Set(edges.map((e) => `${e.kind}|${e.source}|${e.target}`));
+  for (const l of a.links ?? []) {
+    const kind = l.kind === "type" ? "define" : l.kind;
+    if (!l.to || l.from === l.to || !ids.has(l.from) || !ids.has(l.to) || !(kind === "define" || GENERAL.includes(kind))) continue;
+    const key = `${kind}|${l.from}|${l.to}`;
+    if (have.has(key)) continue;
+    have.add(key);
+    edges.push(edge(`${kind}:${l.from}:${l.to}`, l.from, l.to, kind, "", null));
+  }
+}
+const ownEdge = (owner: string, u: Element): GEdge => edge(`compose:${u.id}`, owner, u.id, isRef(u) ? "refpart" : "compose", "", u.unnamed ? null : { type: "element", id: u.id });
+
+/**
+ * 套件內容圖：套件的成員是節點（子套件畫成不展開的資料夾），成員底下各層列在隔間。
+ * 定義擁有的零件，型別也在這張圖上時畫成節點，接上組成線與「由誰定義」。context 是 null 時畫最上層。
+ */
+function packageGraph(d: DiagramDef, a: Analysis): Graph {
+  const s = structureOf(a);
+  const members = s.t.children.get(d.context) ?? [];
+  const shown = members.slice(0, NODE_LIMIT), rest = members.slice(NODE_LIMIT);
+  const ids = new Set(shown.map((e) => e.id));
+  // 先決定哪些零件要畫成節點，擁有者的隔間就不再列它
+  const promoted = new Map<string, { u: Element; type: string }[]>();
+  let count = shown.length;
+  for (const m of shown) {
+    if (!m.kind.endsWith("Definition")) continue;
+    for (const u of s.t.children.get(m.id) ?? []) {
+      if (u.kind !== "PartUsage" || count >= NODE_LIMIT) continue;
+      const type = definitionsOf(s, u.id).find((x) => ids.has(x));
+      if (!type) continue;
+      promoted.set(m.id, [...(promoted.get(m.id) ?? []), { u, type }]);
+      count++;
+    }
+  }
+  const nodes: GNode[] = [], edges: GEdge[] = [];
+  for (const m of shown) nodes.push(structureNode(s, m, new Set((promoted.get(m.id) ?? []).map((x) => x.u.id))));
+  for (const [owner, list] of promoted) for (const { u, type } of list) {
+    nodes.push(structureNode(s, u));
+    edges.push(ownEdge(owner, u), edge(`define:${u.id}`, u.id, type, "define", "", null));
+  }
+  let folded = 0;
+  if (rest.length) {
+    const rows: string[] = [], covers: string[] = [];
+    for (const m of rest) {
+      rows.push(rowOf(s, m)); covers.push(m.id);
+      for (const c of isPackage(m) ? [] : descendantsOf(s.t, m.id)) { rows.push(`${"· ".repeat(ancestorsOf(s.t, c.id).indexOf(m.id) + 1)}${rowOf(s, c)}`); covers.push(c.id); }
+    }
+    folded = rest.length;
+    nodes.push(packageBox(`${d.id}#more`, null, `${d.title}（其餘 ${rest.length} 個成員）`, rows, covers));
+  }
+  linkEdges(a, new Set(nodes.map((n) => n.id)), edges);
+  return { nodes, edges, direction: "TB", reverse: GENERAL, ...(folded ? { folded } : {}) };
+}
+
+/**
+ * 分解圖：從一個零件定義出發，定義 ◆— 零件 —▷: 零件的定義，再往下展開。
+ * 每個元素只畫一次，所以循環（例如零件的型別就是擁有它的定義）不會無限展開。
+ */
+function decompositionGraph(d: DiagramDef, a: Analysis): Graph {
+  const s = structureOf(a);
+  const root = d.context ? s.t.byId.get(d.context) : undefined;
+  if (!root) return { nodes: [], edges: [], direction: "TB" };
+  const order: Element[] = [root], seen = new Set([root.id]), edges: GEdge[] = [];
+  const extra = new Map<string, Element[]>(); // 超過上限、改列在擁有者隔間裡的零件
+  let folded = 0;
+  for (let i = 0; i < order.length; i++) {
+    const o = order[i];
+    for (const u of s.t.children.get(o.id) ?? []) {
+      if (u.kind !== "PartUsage" || seen.has(u.id)) continue;
+      if (order.length >= NODE_LIMIT) { extra.set(o.id, [...(extra.get(o.id) ?? []), u]); folded++; continue; }
+      seen.add(u.id); order.push(u);
+      edges.push(ownEdge(o.id, u));
+      for (const type of definitionsOf(s, u.id)) {
+        if (!seen.has(type)) {
+          if (order.length >= NODE_LIMIT) continue;
+          seen.add(type); order.push(s.t.byId.get(type) as Element);
+        }
+        edges.push(edge(`define:${u.id}:${type}`, u.id, type, "define", "", null));
+      }
+    }
+  }
+  const nodes = order.map((e): GNode => {
+    const attrs = (s.t.children.get(e.id) ?? []).filter((c) => c.kind === "AttributeUsage" && !c.unnamed);
+    const parts = extra.get(e.id) ?? [];
+    const comps = [
+      ...(e.kind.endsWith("Definition") ? [["attributes", ...attrs.slice(0, 6).map((c) => rowOf(s, c, "attribute")), ...(attrs.length > 6 ? ["..."] : [])]] : []),
+      ["parts", ...parts.map((c) => rowOf(s, c, "part"))],
+    ];
+    return { ...makeNode(e, comps, titleOf(s, e)), covers: parts.map((c) => c.id), ...(isRef(e) ? { dashed: true } : {}) };
+  });
+  linkEdges(a, seen, edges);
+  return { nodes, edges, direction: "TB", reverse: GENERAL, ...(folded ? { folded } : {}) };
+}
+
+/**
+ * 新圖還沒有位置紀錄時，沿用舊「結構分解」圖（layout.json 的 bdd）裡識別碼相同的節點位置；其餘的由畫面自動安排。
+ * 舊的 bdd 紀錄不刪，退回舊版時還用得到。
+ */
+export function seedLayout(layout: Layout, d: Pick<DiagramDef, "id" | "kind">, nodeIds: string[]): Layout[string] {
+  const own = layout[d.id];
+  if (own && Object.keys(own).length > 0) return own;
+  if (d.kind !== "pkg" && d.kind !== "decomp") return own ?? {};
+  const old = layout.bdd ?? {};
+  return Object.fromEntries(nodeIds.filter((id) => old[id]).map((id) => [id, { x: old[id].x, y: old[id].y }]));
+}
+
+/** 這張圖的工具列可以新增哪些類別。套件內容圖：新增時會放進這個套件的類別。 */
+export function paletteOf(d: DiagramDef, a: Analysis, categories: { id: string; pkg: string }[]): string[] {
+  if (d.kind !== "pkg") return PALETTE[d.kind];
+  const name = a.elements.find((e) => e.id === d.context)?.name;
+  return categories.filter((c) => c.pkg === name).map((c) => c.id);
+}
+
 export interface LinkTool { kind: string; zh: string; en: string; hint: string }
 /** 所有連線種類。 */
 export const ALL_LINKS: LinkTool[] = [
@@ -336,12 +550,13 @@ const link = (...kinds: string[]) => kinds.map((k) => ALL_LINKS.find((t) => t.ki
 export const CUSTOM_DEFAULT = { els: ["Stakeholder", "Expectation", "SystemRequirement", "Subsystem"], links: ["trace", "derive", "satisfy"] };
 /** 每種圖可以用的連線工具（選了工具再從起點拉到終點）。 */
 export const LINK_TOOLS: Record<DiagramKind, LinkTool[]> = {
-  bdd: link("compose"), ibd: link("connect"), req: link("derive", "refine", "satisfy", "trace"),
+  pkg: link("compose"), decomp: link("compose"), ibd: link("connect"), req: link("derive", "refine", "satisfy", "trace"),
   uc: [{ kind: "trace", zh: "參與者", en: "actor", hint: "從使用案例拉到參與的利害關係人" }, ...link("include")],
   act: link("succession"), stm: link("transition"), custom: ALL_LINKS,
 };
 export const PALETTE: Record<DiagramKind, string[]> = {
-  bdd: ["System", "Subsystem", "Component", "ExternalEntity"],
+  pkg: [], // 依套件而定，見 paletteOf
+  decomp: [],
   req: ["Need", "Goal", "Objective", "MOE", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "VerificationEvent"],
   act: ["MissionPhase", "Function"],
   ibd: [],

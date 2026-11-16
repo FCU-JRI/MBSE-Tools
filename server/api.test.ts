@@ -825,14 +825,12 @@ test("重複的關係被拒絕；復原上一步會還原模型修改", async ()
 });
 
 test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字與連線樣式", async () => {
-  const { buildGraph, diagramsOf, frameLabel } = await import("../web/src/model.ts");
-  const { toSvg } = await import("../web/src/exportSvg.ts");
+  const { buildGraph, diagramsOf } = await import("../web/src/model.ts");
   const a = (await call(`${I}/api/projects/t6`)).data.analysis;
   const name = (id: string) => a.elements.find((e: any) => e.id === id)?.name;
   const defs = diagramsOf(a);
   const g = (kind: string) => buildGraph(defs.find((d: any) => d.kind === kind) as any, a);
-  // 圖框：«view» 名稱 : 標準檢視定義
-  assert.equal(frameLabel(defs.find((d: any) => d.kind === "bdd") as any), "«view» 結構分解 : GeneralView");
+  // 標準檢視定義。結構的圖（套件內容圖與分解圖，F-76）在 web/src/diagrams.test.ts 檢查
   assert.deepEqual(["ibd", "act", "stm"].map((k) => defs.find((d: any) => d.kind === k)?.viewDef), ["InterconnectionView", "ActionFlowView", "StateTransitionView"]);
   const uc = g("uc");
   assert.ok(uc.nodes.some((n: any) => n.keyword === "«use case»" && n.shape === "usage"), "使用案例是圓角的 «use case»");
@@ -852,21 +850,11 @@ test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字�
   const r1 = req.nodes.find((n: any) => n.keyword === "«requirement»" && n.title.join("").startsWith("<REQ-"));
   assert.ok(r1 && r1.shape === "usage" && r1.compartments[0]?.[0] === "doc", "需求顯示編號與 doc 隔間");
   assert.ok(req.nodes.some((n: any) => n.keyword === "«verification»"));
-  const bdd = g("bdd");
-  assert.ok(bdd.nodes.filter((n: any) => n.shape === "def").every((n: any) => n.keyword === "«part def»"));
-  // 組成：定義 ◆— 零件（使用），零件再以「defined by」指向它的定義
-  const comp = bdd.edges.filter((e: any) => e.kind === "compose");
-  assert.ok(comp.length >= 3 && comp.every((e: any) => e.tail === "diamond" && bdd.nodes.find((n: any) => n.id === e.target)?.keyword === "«part»"));
-  assert.ok(bdd.edges.filter((e: any) => e.kind === "define").every((e: any) => e.head === "typing" && bdd.nodes.find((n: any) => n.id === e.target)?.shape === "def"));
   const act = g("act");
   assert.deepEqual([act.nodes[0].shape, act.nodes[act.nodes.length - 1].shape], ["start", "done"]);
   assert.ok(act.nodes.filter((n: any) => n.el).every((n: any) => n.keyword === "«action»" && n.shape === "usage"));
   const stm = g("stm");
   assert.ok(stm.nodes.some((n: any) => n.keyword === "«state»") && stm.nodes.some((n: any) => n.shape === "start"));
-  const svg = toSvg("«view» t : GeneralView", bdd.nodes.map((n: any, i: number) => ({ g: n, x: i * 240, y: 0 })), bdd.edges);
-  assert.match(svg, /«view» t : GeneralView/);
-  assert.match(svg, /rx="10"/);
-  assert.match(svg, /url\(#typ\)/);
 });
 
 test("套件：建立、搬進搬出、原有引用不受影響、版面識別碼跟著換", async () => {
