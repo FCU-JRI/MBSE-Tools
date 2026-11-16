@@ -51,8 +51,8 @@ export function ElementTable({ view, meta, scopeId, selectedId, onSelect, onScop
         <label className="field" style={{ flex: 1 }}><span className="label">篩選</span><input className="input" type="search" value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} placeholder="名稱、編號或說明裡的文字" /></label>
       </div>
       {rows.length === 0 ? <p className="body">{base.length === 0 ? "這裡還沒有元素。" : "沒有符合的元素。"}</p> : (
-        <table className="etable">
-          <colgroup><col style={{ width: "10%" }} /><col style={{ width: "9%" }} /><col style={{ width: "17%" }} /><col style={{ width: "13%" }} /><col style={{ width: "27%" }} /><col style={{ width: "15%" }} /><col style={{ width: "9%" }} /></colgroup>
+        <div className="etable-wrap"><table className="etable">
+          <colgroup><col style={{ width: "12%" }} /><col style={{ width: "10%" }} /><col style={{ width: "17%" }} /><col style={{ width: "12%" }} /><col style={{ width: "24%" }} /><col style={{ width: "14%" }} /><col style={{ width: "11%" }} /></colgroup>
           <thead><tr><th>種類</th><th>編號</th><th>名稱</th><th>型別</th><th>內容</th><th>關係</th><th>位置</th></tr></thead>
           <tbody>{rows.slice(0, limit).map((e) => {
             const cat = meta.categories.find((c) => c.id === e.category);
@@ -74,7 +74,7 @@ export function ElementTable({ view, meta, scopeId, selectedId, onSelect, onScop
               </tr>
             );
           })}</tbody>
-        </table>
+        </table></div>
       )}
       {rows.length > limit && <div className="tbtn-row" style={{ marginTop: 12 }}><button className="tbtn" onClick={() => setLimit(limit + PAGE)}>再顯示 {Math.min(PAGE, rows.length - limit)} 列（還有 {rows.length - limit} 列）</button></div>}
     </section>

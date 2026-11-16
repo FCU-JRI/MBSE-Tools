@@ -67,7 +67,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
 
 ## 授權
 
-- 本儲存庫的程式與文件採 MIT 授權。根目錄的授權檔在版權人姓名確認後加入。
+- 本儲存庫的程式與文件採 MIT 授權，全文在 `LICENSE`。
 - `reference/apollo-11-sysml-v2/` 是 AIRBUS 的作品，採 Mozilla Public License 2.0（全文在該資料夾的 `LICENSE.md`），沒有修改。這個資料夾不適用 MIT。
 
 ## 已知限制

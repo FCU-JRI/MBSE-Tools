@@ -142,7 +142,9 @@ th { text-align: left; padding: var(--space-2) var(--space-3) var(--space-2) 0; 
 td { text-align: left; vertical-align: top; padding: var(--space-3) var(--space-3) var(--space-3) 0; border-bottom: var(--stroke-hair) solid var(--line); font-family: var(--font-sans); font-size: 14px; line-height: 22px; }
 td.id { font-family: var(--font-grotesk); font-size: 12px; letter-spacing: 0.06em; color: var(--ink-muted); white-space: nowrap; }
 /* 通用的表（F-75）：欄寬固定，長的名稱與路徑折行，不蓋到隔壁欄 */
-table.etable { table-layout: fixed; } table.etable td { overflow-wrap: anywhere; } table.etable td.id { white-space: normal; }
+/* 畫面窄的時候表維持可讀的寬度，改成左右捲動，不把欄位擠到逐字折行 */
+.etable-wrap { overflow-x: auto; }
+table.etable { table-layout: fixed; min-width: 920px; } table.etable td { overflow-wrap: anywhere; } table.etable td.id { white-space: normal; overflow-wrap: break-word; }
 tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1); } tr.rowbtn[aria-selected="true"] td { background: var(--surface-2); }
 
 /* 檢查清單 */
