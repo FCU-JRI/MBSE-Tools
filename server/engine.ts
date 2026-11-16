@@ -66,7 +66,7 @@ export async function analyze(sources: readonly Source[], shared: readonly strin
   }));
   const ok = !diagnostics.some((d) => d.severity === "error");
 
-  let extracted: Extracted = { elements: [], relations: [], unnamed: [], links: [], imports: [] };
+  let extracted: Extracted = { elements: [], relations: [], unnamed: [], links: [], imports: [], transitions: [], entries: [], connectors: [] };
   let satisfaction: Satisfaction[] = [];
   if (ok) {
     const json = await model.toApiJson();

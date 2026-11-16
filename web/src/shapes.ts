@@ -59,6 +59,11 @@ export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth 
       n.title.forEach((l, i) => { out += text(cx, y + BOX_TAB_H + 27 + i * 16, l, 12.5, c.ink, `text-anchor="middle" font-weight="600"`); });
       return out + compartmentsSvg(n, x, y + BOX_TAB_H + 22 + n.title.length * 16 + 6, c)[0];
     }
+    case "param": {
+      // 參數與連接埠（規範 8.2.3.12、8.2.3.17）：小方塊，名稱寫在旁邊
+      return `<rect x="${x + 0.5}" y="${y + h / 2 - 6}" width="12" height="12" fill="${c.bg}" ${sw}/>` +
+        text(x + 18, y + h / 2 + 4, one(n.title[0] ?? n.name, Math.floor((w - 20) / 6.2)), 11, c.ink);
+    }
     case "comment": {
       const f = 12; // 折角大小
       return `<path d="M${x + 0.5} ${y + 0.5} H${x + w - f} L${x + w - 0.5} ${y + f} V${y + h - 0.5} H${x + 0.5} Z" fill="${c.bg}" ${sw}/>` +

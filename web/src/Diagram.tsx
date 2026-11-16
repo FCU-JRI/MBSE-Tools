@@ -5,7 +5,7 @@ import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { api } from "./api.ts";
 import type { Annotation, Diagrams, Element, Layout, Meta, View } from "./api.ts";
-import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, seedLayout, suggestPartName } from "./model.ts";
+import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, seedLayout, STRUCTURAL_KINDS, suggestPartName } from "./model.ts";
 import type { DiagramDef, GEdge, GNode, Graph, LinkTool } from "./model.ts";
 import { annotationSvg, edgeMarkers, FRAME_HEAD, frameSvg, iconSvg, MARKERS, markerSvg, nodeSvg, SCREEN } from "./shapes.ts";
 import { downloadPng, downloadSvg, toSvg } from "./exportSvg.ts";
@@ -252,7 +252,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   // 第一層工具：一般的圖用該圖固定的項目，自訂圖用釘選的項目
   const elTools = custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c)) : paletteOf(def, view.analysis, meta.categories);
   // 套件內容圖與分解圖的內容由擁有關係決定，不在這裡畫套件的框
-  const structural = def.kind === "pkg" || def.kind === "decomp";
+  const structural = STRUCTURAL_KINDS.has(def.kind);
   const allowedLinks = LINK_TOOLS[def.kind];
   const linkTools: LinkTool[] = custom ? ALL_LINKS.filter((t) => pins.links.includes(t.kind)) : allowedLinks;
 

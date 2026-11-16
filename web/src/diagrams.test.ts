@@ -78,9 +78,9 @@ test("套件內容圖：成員是節點、下層列在隔間、零件畫成節�
   // 參照的使用：虛線外框
   assert.equal(node("Top::other")?.dashed, true);
   assert.equal(node("Top::Car::spare")?.dashed, true);
-  // 隔間：屬性放 attributes，其餘的使用放 features，更下層的縮排；已經畫成節點的零件不再列
+  // 隔間：屬性放 attributes，動作放 actions（階段 4 起分出專屬的隔間，原本放 features），更下層的縮排；已經畫成節點的零件不再列
   const car = node("Top::Car");
-  assert.deepEqual(car?.compartments, [["attributes", "count"], ["features", "action spin", "· action inner"]]);
+  assert.deepEqual(car?.compartments, [["attributes", "count"], ["actions", "spin", "· action inner"]]);
   assert.deepEqual(node("Top::Base")?.compartments, [["attributes", "mass"]]);
   // 組成：擁有者端實心菱形；非組成：空心菱形
   assert.deepEqual(edges("compose"), ["Car :> Base → again : Car", "Car :> Base → wheel : Wheel", "SportsCar :> Car → :>> wheel", "SportsCar :> Car → extra : Wheel", "Wheel :> Base → hub : Hub"]);

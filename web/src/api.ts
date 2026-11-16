@@ -17,7 +17,12 @@ export interface Analysis { ok: boolean; diagnostics: Diagnostic[]; elements: El
   /** 沒有名字但有意義的使用，與通用的關係（F-71）。模型有錯誤時是空的 */
   unnamed: Element[]; links: Link[];
   /** 匯入（階段 3b）；舊的伺服器沒有這個欄位 */
-  imports?: Import[] }
+  imports?: Import[];
+  /** 階段 4：轉換的觸發條件（F-78）、起點（F-78）、連結與介面的端點（F-80）；舊的伺服器沒有這些欄位 */
+  transitions?: Transition[]; entries?: Entry[]; connectors?: Connector[] }
+export interface Transition { from: string; to: string; trigger: string; guard: string; effect: string; file: string; line: number | null }
+export interface Entry { owner: string; to: string }
+export interface Connector { kind: "connection" | "interface"; id: string | null; name: string; type: string; fromChain: string[]; toChain: string[]; fromPath: string; toPath: string; file: string; line: number | null }
 export interface Check { id: string; label: string; hint: string; manual: boolean; pass: boolean; detail: string; missing: { id: string; name: string }[] }
 export interface Gate { id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean; checks: Check[]; done: number; total: number }
 export interface Signoff { gate: string; subsystem: string | null; decision: "APPROVE" | "DENY"; by: string; role: string; comment: string; at: string; commit: string }

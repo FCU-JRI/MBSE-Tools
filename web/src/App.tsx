@@ -363,7 +363,9 @@ interface TreeProps {
 
 /** 圖的清單分成幾組，各自可以收合（F-76）。 */
 const DIAGRAM_GROUPS: [id: string, zh: string, kinds: DiagramDef["kind"][]][] = [
-  ["pkg", "套件內容", ["pkg"]], ["decomp", "分解", ["decomp"]], ["other", "需求、行為與互連", ["req", "uc", "ibd", "act", "stm"]], ["custom", "自訂圖", ["custom"]],
+  ["pkg", "套件內容", ["pkg"]], ["decomp", "分解", ["decomp"]], ["fdecomp", "功能分解", ["fdecomp"]],
+  ["req", "需求與使用案例", ["req", "uc"]], ["behavior", "動作與狀態機", ["act", "stm"]], ["ibd", "互連", ["ibd"]], ["occ", "個體與時間切片", ["occ"]], ["calc", "計算與分析", ["calc"]],
+  ["custom", "自訂圖", ["custom"]],
 ];
 
 /** 左側欄：圖、模型樹（依套件，F-74）、節點進度。 */
