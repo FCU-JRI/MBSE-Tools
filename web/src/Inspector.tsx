@@ -10,8 +10,9 @@ export type Selection =
   | { type: "new"; category: string; parentId: string | null }
   | { type: "edge"; edge: GEdge };
 
-const METHODS: Record<string, string> = { byTest: "測試", byAnalysis: "分析", byInspection: "檢查", byDemonstration: "展示" };
-export const methodZh = (v: string | undefined) => METHODS[(v ?? "").replace("Method::", "")] ?? "";
+// 值是 SysML v2 標準庫 VerificationMethodKind 的列舉值
+const METHODS: Record<string, string> = { test: "測試", analyze: "分析", inspect: "檢查", demo: "展示" };
+export const methodZh = (v: string | undefined) => METHODS[(v ?? "").split("::").pop() ?? ""] ?? "";
 
 interface Props { readOnly?: boolean; view: View; meta: Meta; sel: Selection; setSel: (s: Selection) => void; onChanged: (v: View) => void }
 
@@ -96,7 +97,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
   const [attrs, setAttrs] = useState<Record<string, string>>({});
   const [src, setSrc] = useState({ doc: "", ref: "" });
   const [verifies, setVerifies] = useState("");
-  const [method, setMethod] = useState("byTest");
+  const [method, setMethod] = useState("test");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const isVer = cat.keyword === "verification";

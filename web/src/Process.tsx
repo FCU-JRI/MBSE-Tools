@@ -4,7 +4,8 @@ import { api } from "./api.ts";
 import type { Element, Me, Meta, Step, View } from "./api.ts";
 import { label, listOf } from "./model.ts";
 
-const METHODS: [string, string][] = [["byTest", "測試"], ["byAnalysis", "分析"], ["byInspection", "檢查"], ["byDemonstration", "展示"]];
+// 值是 SysML v2 標準庫 VerificationMethodKind 的列舉值
+const METHODS: [string, string][] = [["test", "測試"], ["analyze", "分析"], ["inspect", "檢查"], ["demo", "展示"]];
 const REL_ZH: Record<string, string> = { trace: "追溯到", derive: "衍生自", refine: "細化", allocate: "分配給", compose: "屬於", verify: "驗證" };
 
 interface Props { view: View; meta: Meta; user: Me; onChanged: (v: View) => void; onOpen: (elementId: string, category: string | null) => void }
@@ -53,7 +54,7 @@ function StepPanel({ step, index, steps, guided, view, meta, user, onChanged, on
   const [attrs, setAttrs] = useState<Record<string, string>>({});
   const [linkTo, setLinkTo] = useState("");
   const [parentId, setParentId] = useState("");
-  const [method, setMethod] = useState("byTest");
+  const [method, setMethod] = useState("test");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [aiText, setAiText] = useState("");
@@ -77,7 +78,7 @@ function StepPanel({ step, index, steps, guided, view, meta, user, onChanged, on
     const before = new Set(v.analysis.elements.map((e) => e.id));
     let nv = await api<View>(`/projects/${pid}/elements`, "POST", {
       category: input.category, name: input.name, doc: input.doc, attrs: input.attrs ?? {}, parentId: input.parentId || undefined,
-      ...(isVerify ? { verifies: target?.qualifiedName, method: input.method ?? "byTest" } : {}),
+      ...(isVerify ? { verifies: target?.qualifiedName, method: input.method ?? "test" } : {}),
     });
     const made = nv.analysis.elements.find((e) => !before.has(e.id) && e.name === input.name.trim());
     if (made && target && step.link && !isVerify) {

@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { analyze } from "./engine.ts";
 import type { Analysis, Source } from "./engine.ts";
 import type { Element } from "./extract.ts";
-import { analyzeProject, commit, dirOf, git, listShared, lock, onPushRejected, parseRef, pushLater, readProject, readShared, refOf, refOfDir, repoConfig, UserError } from "./projects.ts";
+import os from "node:os";
+import { upgradeText } from "./upgrade.ts";
+import { analyzeProject, commit, dirOf, git, gitRaw, listShared, lock, onPushRejected, parseRef, pushLater, readProject, readShared, refOf, refOfDir, repoConfig, sources, UserError } from "./projects.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
@@ -20,10 +22,11 @@ async function resolve(dir: string, ref: string): Promise<string> {
 async function analyzeAt(dir: string, sha: string): Promise<Analysis> {
   const names = (await git(dir, "ls-tree", "--name-only", sha, "model/")).split("\n").map((n) => n.trim()).filter((n) => n.endsWith(".sysml"));
   const shared = await listShared();
-  const sources: Source[] = [["JRI.sysml", await fs.readFile(LIBRARY, "utf8")]];
-  for (const f of shared) sources.push([f, await readShared(f)]);
-  for (const n of names) sources.push([path.posix.basename(n), await git(dir, "show", `${sha}:${n}`) + "\n"]);
-  return analyze(sources, shared);
+  const list: Source[] = [["JRI.sysml", await fs.readFile(LIBRARY, "utf8")]];
+  for (const f of shared) list.push([f, await readShared(f)]);
+  // 舊版本可能還是舊寫法，先在記憶體裡轉換才解析得了（不動到版本紀錄）
+  for (const n of names) list.push([path.posix.basename(n), upgradeText(await git(dir, "show", `${sha}:${n}`) + "\n")]);
+  return analyze(list, shared);
 }
 
 export interface BranchInfo { name: string; remote: boolean; ahead: number; behind: number; author: string; date: string; subject: string; ok: boolean; errors: number; firstError: string }
@@ -181,9 +184,51 @@ export function resolveConflicts(text: string): { text: string; resolved: number
  * 模型檔的衝突只自動解決 resolveHunk 認得的那一種，其餘不猜，取消並回報 conflict 的說明；
  * prefer 是資料檔兩邊改到同一欄位時採用的那一邊。
  */
+/** 三方合併一個檔案的文字。合得起來回傳結果；有衝突時回傳帶 diff3 樣式衝突標記的文字。 */
+async function mergeFile(ours: string, base: string, theirs: string): Promise<string> {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "jri-merge-"));
+  try {
+    const files = await Promise.all([["ours", ours], ["base", base], ["theirs", theirs]].map(async ([n, text]) => { const f = path.join(tmp, n); await fs.writeFile(f, text, "utf8"); return f; }));
+    // 有衝突時 git merge-file 的結束碼是衝突的段數，內容照樣印在標準輸出
+    return await gitRaw(tmp, ["merge-file", "-p", "--diff3", "-L", "HEAD", "-L", "base", "-L", "incoming", ...files])
+      .catch((e: { stdout?: string; code?: number }) => { if (typeof e.stdout === "string" && typeof e.code === "number" && e.code > 0 && e.code < 127) return e.stdout; throw e; });
+  } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
+}
+
+/**
+ * 要合併進來的版本如果還是舊寫法，先替它接一筆「轉成標準庫寫法」的提交，再合併那一筆。
+ * 這邊已經轉換過、對方還沒，直接合併的話兩邊改到同一批關係，幾乎一定衝突；兩邊都轉換過，相同的修改就會自動合在一起。
+ * 只在物件庫裡多一筆提交，不動對方的分支，也不動任何工作目錄。
+ */
+async function upgradedCommit(dir: string, sha: string): Promise<string> {
+  const names = (await git(dir, "-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", sha, "model/")).split("\n").filter((n) => /^model\/[^/]+\.sysml$/.test(n));
+  const changed: [string, string][] = [];
+  for (const n of names) {
+    const text = await gitRaw(dir, ["show", `${sha}:${n}`]);
+    const next = upgradeText(text);
+    if (next !== text) changed.push([n, next]);
+  }
+  if (changed.length === 0) return sha;
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "jri-upgrade-"));
+  try {
+    const env = { GIT_INDEX_FILE: path.join(tmp, "index") };
+    await gitRaw(dir, ["read-tree", sha], env);
+    for (const [n, text] of changed) {
+      const file = path.join(tmp, "blob");
+      await fs.writeFile(file, text, "utf8");
+      const blob = (await gitRaw(dir, ["hash-object", "-w", "--no-filters", file])).trim();
+      await gitRaw(dir, ["update-index", "--cacheinfo", `100644,${blob},${n}`], env);
+    }
+    const tree = (await gitRaw(dir, ["write-tree"], env)).trim();
+    return (await gitRaw(dir, [...who("JRI MBSE"), "commit-tree", tree, "-p", sha, "-m", "衍生、細化、驗證方法改用 SysML v2 標準庫的寫法"])).trim();
+  } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
+}
+
 async function mergeInto(ref: string, sha: string, author: string, message: string, prefer: "ours" | "theirs", conflict: string): Promise<void> {
   const dir = dirOf(ref);
   await repoConfig(dir);
+  await sources(ref).catch(() => []); // 這一邊若還有舊寫法，先轉換（寫回檔案），下面會一起提交
+  sha = await upgradedCommit(dir, sha);
   if (await git(dir, "status", "--porcelain")) await commit(dir, author, "合併前儲存未提交的變更");
   const abort = () => git(dir, "merge", "--abort").catch(() => "");
   const auto: string[] = [];
@@ -195,10 +240,14 @@ async function mergeInto(ref: string, sha: string, author: string, message: stri
     if (files.length === 0) await stop();
     for (const f of files) {
       if (MODEL_FILE.test(f)) {
-        const r = resolveConflicts(await fs.readFile(path.join(dir, f), "utf8").catch(() => ""));
+        // 三邊都先轉成標準庫的寫法再合併一次：共同的上一版若還是舊寫法，兩邊做的相同轉換會被當成各自的修改而互相衝突（F-36）
+        const side = (n: number) => gitRaw(dir, ["show", `:${n}:${f}`]).then(upgradeText, () => null);
+        const [base, ours, theirs] = [await side(1), await side(2), await side(3)];
+        const merged = base === null || ours === null || theirs === null ? null : await mergeFile(ours, base, theirs);
+        const r = merged === null ? null : /^<{7} /m.test(merged) ? resolveConflicts(merged) : { text: merged, resolved: 0 };
         if (!r) { await stop(f); continue; }
         await fs.writeFile(path.join(dir, f), r.text, "utf8");
-        auto.push(`${path.posix.basename(f)} ${r.resolved} 段`);
+        if (r.resolved) auto.push(`${path.posix.basename(f)} ${r.resolved} 段`);
       } else if (!DATA_FILES.has(f) && !TOOL_COPY.test(f)) await stop(f);
       else if (DATA_FILES.has(f)) {
         const stage = async (n: number): Promise<unknown> => { try { return JSON.parse(await git(dir, "show", `:${n}:${f}`)); } catch { return undefined; } };

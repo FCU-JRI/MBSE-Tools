@@ -186,7 +186,7 @@ const store = (key: string, v: unknown) => { try { localStorage.setItem(key, JSO
 /** 觸控裝置：單指拖曳維持移動畫面，不做框選 */
 const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 const newId = (prefix: string) => `${prefix}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-const linkIconOf = (k: string): IconName => (k === "compose" ? "diamond" : ["derive", "refine", "trace"].includes(k) ? "dashed" : "line");
+const linkIconOf = (k: string): IconName => (k === "compose" ? "diamond" : ["refine", "trace"].includes(k) ? "dashed" : "line"); // 衍生是連結，畫實線
 type Moved = View & { moved: Record<string, string>; packageId: string | null; layout: Layout; diagrams: Diagrams };
 
 function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError }: DiagramProps) {

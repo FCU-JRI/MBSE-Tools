@@ -233,6 +233,8 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   if (from.id === to.id) throw new store.UserError("不能把元素連到自己。");
   if (before.relations.some((r) => r.kind === req.body.kind && r.from === from.id && r.to === to.id)) throw new store.UserError("這條關係已經存在。");
   const kind0 = String(req.body.kind);
+  // 標準庫的需求衍生連結兩端都必須是需求（F-36）
+  if (kind0 === "derive" && !(/RequirementUsage$/.test(from.kind) && /RequirementUsage$/.test(to.kind))) throw new store.UserError("衍生只能連接需求類的項目（需要、目標、目的、量度、各層需求）。其他項目之間請用「追溯」。");
   const owner0 = before.elements.find((x) => x.id === from.owner);
   // 寫進某個元素主體的關係用該元素的檔案，其餘寫在根套件
   const file = kind0 === "compose" || (kind0 === "satisfy" && /Definition$/.test(from.kind)) ? editable(from).file
