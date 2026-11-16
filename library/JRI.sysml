@@ -180,6 +180,39 @@ package JRI {
     // [P2 分析圖骨架與中文化]
     // [/P2]
     // [P3 任務剖面、功能分配、MOE／MOP／TPM]
+    /* 模式的種類（METHOD.md 2.2）：正常操作、失效、中止。標在模式（Mode）上：
+       state '降落傘未開' : Mode { @ModeKind { kind = "failure"; } } */
+    metadata def ModeKind {
+        /* operational（正常操作）、failure（失效）、abort（中止） */
+        attribute kind : String;
+    }
+    /* 三級成功判準（METHOD.md 2.1）：成功判準就是 MOE。標在 MOE 上，數字各一個：
+       達到 full 是完全成功、達到 partial 是部分成功、都沒達到是不成功。
+       better = "higher"（越大越好，預設）或 "lower"（越小越好）；actual 是飛行後的實際值。
+       requirement '遠地點' : MOE { @SuccessLevels { full = 3000.0; partial = 2500.0; unit = "m"; } } */
+    metadata def SuccessLevels {
+        attribute full : Real;
+        attribute partial : Real;
+        attribute unit : String[0..1];
+        attribute better : String[0..1];
+        attribute actual : Real[0..1];
+    }
+    /* TPM 的追蹤（METHOD-NASA 第二部分第 6 點）：TPM 從 MOP 中挑出，每個審查節點記錄目前估計值。
+       標在 MOP 上；節點名稱和工具的審查節點代號相同（proposal、mdr、pdr、cdr、trr、frr）。
+       expected 是預期值，lower／upper 是允許範圍（可只寫一邊）。
+       requirement '總衝量' : MOP { @TPMTrack { expected = 9000.0; lower = 8500.0; unit = "N*s"; mdr = 8800.0; pdr = 8950.0; } } */
+    metadata def TPMTrack {
+        attribute expected : Real[0..1];
+        attribute lower : Real[0..1];
+        attribute upper : Real[0..1];
+        attribute unit : String[0..1];
+        attribute proposal : Real[0..1];
+        attribute mdr : Real[0..1];
+        attribute pdr : Real[0..1];
+        attribute cdr : Real[0..1];
+        attribute trr : Real[0..1];
+        attribute frr : Real[0..1];
+    }
     // [/P3]
     // [P4 介面與 N² 矩陣]
     // [/P4]

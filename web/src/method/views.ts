@@ -4,6 +4,7 @@ import type { Analysis } from "../api.ts";
 // [P1 需求屬性與需求矩陣]
 import { verificationRows } from "../../../server/method/p1-req.ts";
 // [/P1]
+import { allocationGaps, MISSION_REQUIREMENT, profileGaps } from "./p3.ts";
 
 export interface AnalysisView {
   /** 唯一的代號，例如 "stakeholders" */
@@ -34,6 +35,12 @@ export const ANALYSIS_VIEWS: AnalysisView[] = [
   // [P2 分析圖骨架與中文化]
   // [/P2]
   // [P3 任務剖面、功能分配、MOE／MOP／TPM]
+  { id: "profile", order: 3, zh: "任務剖面", gate: "mdr",
+    question: "為了滿足任務需求，任務怎麼進行？依序經過哪些階段，有哪些正常操作、失效、中止的模式？",
+    pinned: [MISSION_REQUIREMENT, "MissionPhase", "Mode"], missing: profileGaps },
+  { id: "allocation", order: 4, zh: "功能與分配", gate: "mdr",
+    question: "要完成這個剖面需要哪些功能？每個功能分配到哪個系統（火箭、地面站⋯）？各系統因此有哪些系統需求？MOE 推出哪些 MOP，挑哪些當 TPM 追蹤？",
+    pinned: ["Function", "System", "SystemRequirement", "MOE", "MOP"], missing: allocationGaps },
   // [/P3]
   // [P4 介面與 N² 矩陣]
   // [/P4]
