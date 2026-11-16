@@ -2,6 +2,7 @@
 // 每個檢查回報是否通過，以及缺少的項目，讓成員知道還差什麼。
 import type { Analysis } from "./engine.ts";
 import type { Element } from "./extract.ts";
+import { cosmaOf, isCosmaProject, participantsOf, relationsTo } from "./cosma.ts";
 
 export interface CheckResult {
   id: string;
@@ -34,6 +35,7 @@ interface Check {
 
 interface Ctx {
   a: Analysis;
+  byId: Map<string, Element>;
   tasks: number; // 甘特圖上的任務數
   of: (...categories: string[]) => Element[];
   hasOut: (e: Element, ...kinds: string[]) => boolean; // e 是關係的起點
@@ -178,6 +180,65 @@ export const GATES: GateDef[] = [
   },
 ];
 
+// ───────── CoSMA 專案的節點檢查（第 D 期，F-91 到 F-93） ─────────
+// 節點、核可者、人工確認項目與附加庫的項目（風險、安全係數、驗證、SOP、名冊、QC、異常、確認事件）和上面相同；
+// 對象換成 CoSMA 元素的項目照 COSMA-ADOPTION 第 6 節，三個沒有對應的項目照第 10 節的代決改寫。
+// 只有 isCosmaProject 的專案用這一套；其餘專案（包括 rtc-2027）用上面的 GATES，結果完全不變。
+
+const K = "CoSMA.";
+/** 需求矩陣、滿足、驗證的對象：功能需求與技術需求（對應 JRI 的系統層、次系統層、元件層需求） */
+export const COSMA_REQS = [K + "FunctionalRequirement", K + "TechnicalRequirement"];
+
+/** e 細化（refine 的起點）到某個 cat 類別的元素 */
+const refinesTo = (c: Ctx, e: Element, ...cats: string[]) =>
+  c.a.relations.some((r) => r.kind === "refine" && r.from === e.id && cats.includes(c.byId.get(r.to)?.category ?? ""));
+/** 需求定義 d 是這個關係的終點（規格裡的 satisfy 指向型別是 d 的需求使用） */
+const targets = (c: Ctx, d: Element, kind: string) => relationsTo(c.a, d, kind, c.byId).length > 0;
+const hasParticipant = (c: Ctx, o: Element) => participantsOf(c.a.elements, o).length > 0;
+const counts = (c: Ctx, pairs: [string, string][]) => {
+  const n = pairs.map(([cat]) => c.of(K + cat).length);
+  return { pass: n.every((x) => x > 0), detail: pairs.map(([, zh], i) => `${zh} ${n[i]}`).join("、") };
+};
+
+const COSMA_CHECKS: Record<string, Check> = {
+  "proposal.stakeholders": { id: "stakeholders", label: "列出利害關係人", hint: "到 Purpose 層新增利害關係人（part … : Stakeholder）。", run: atLeastOne("利害關係人", K + "Stakeholder") },
+  "proposal.expectations": { id: "concerns", label: "寫下利害關係人的關注事項", hint: "在利害關係人裡新增關注事項（item … : Concern），取代期望。", run: atLeastOne("關注事項", K + "Concern") },
+  "proposal.expectation-trace": { id: "concern-owner", label: "每項關注事項都屬於一位利害關係人", hint: "關注事項要寫在利害關係人裡面。",
+    run: every([K + "Concern"], (c, e) => c.byId.get(e.owner ?? "")?.category === K + "Stakeholder", "所屬的利害關係人") },
+  "proposal.ngos": { id: "needs-capabilities", label: "定義需要、能力、目標、任務需求", hint: "四者各至少一項：需要 → 能力 → 任務需求，目標寫在任務裡。",
+    run: (c) => counts(c, [["StakeholderNeed", "需要"], ["Capability", "能力"], ["Goal", "目標"], ["MissionRequirement", "任務需求"]]) },
+  "mdr.ngo-derive": { id: "purpose-refine", label: "能力與任務需求都有上層來源", hint: "能力細化需要、任務需求細化能力（#refinement dependency）。",
+    run: every([K + "Capability", K + "MissionRequirement"], (c, e) => refinesTo(c, e, e.category === K + "Capability" ? K + "StakeholderNeed" : K + "Capability"), "細化的上層") },
+  "mdr.moe": { id: "moe", label: "每條任務需求至少有一個 #moe", hint: "新增標上 #moe 的需求定義，並用 #refinement dependency 細化到這條任務需求。",
+    run: every([K + "MissionRequirement"], (c, e) => c.a.relations.some((r) => r.kind === "refine" && r.to === e.id && c.byId.get(r.from)?.category === K + "MOE"), " #moe") },
+  "mdr.context": { id: "context", label: "定義系統與外部對象（系統脈絡）", hint: "到 Technical 層新增任務系統，到 Purpose 層的脈絡裡新增外部系統。",
+    run: (c) => counts(c, [["MissionSystem", "任務系統"], ["ExternalSystem", "外部系統"]]) },
+  "mdr.usecases": { id: "operations", label: "定義作業，每個作業有參與者", hint: "到 Operational 層新增作業（action def … :> Operation），參與者寫成作業裡的 ref part。",
+    run: (c) => {
+      const all = c.of(K + "Operation");
+      if (all.length === 0) return { pass: false, detail: "尚未建立作業" };
+      const missing = all.filter((o) => !hasParticipant(c, o));
+      return { pass: missing.length === 0, detail: missing.length === 0 ? `${all.length} 個作業都有參與者` : `${missing.length}／${all.length} 個作業沒有參與者`, missing };
+    } },
+  "mdr.phases": { id: "phases", label: "定義任務階段（執行概念）", hint: "到 Operational 層新增任務階段（state def … :> Phase），在任務裡排出轉換。", run: atLeastOne("任務階段", K + "Phase") },
+  "mdr.sys-req": { id: "func-req", label: "建立功能需求", hint: "到 Functional 層新增功能需求。", run: atLeastOne("功能需求", K + "FunctionalRequirement") },
+  "mdr.sys-req-derive": { id: "func-req-refine", label: "每條功能需求都有來源", hint: "功能需求用 #refinement dependency 細化到任務需求。",
+    run: every([K + "FunctionalRequirement"], (c, e) => refinesTo(c, e, K + "MissionRequirement"), "細化的任務需求") },
+  "pdr.subsystems": { id: "components", label: "完成邏輯元件與技術元件分解", hint: "到 Logical 層新增邏輯元件、到 Technical 層新增技術元件。",
+    run: (c) => counts(c, [["LogicalComponent", "邏輯元件"], ["TechnicalComponent", "技術元件"]]) },
+  "pdr.sub-req": { id: "tech-req", label: "建立技術需求", hint: "到 Technical 層新增技術需求。", run: atLeastOne("技術需求", K + "TechnicalRequirement") },
+  "pdr.sub-req-derive": { id: "tech-req-refine", label: "每條技術需求都細化功能需求", hint: "技術需求用 #refinement dependency 細化到功能需求。",
+    run: every([K + "TechnicalRequirement"], (c, e) => refinesTo(c, e, K + "FunctionalRequirement"), "細化的功能需求") },
+  "pdr.functions": { id: "functions", label: "功能分解", hint: "到 Functional 層新增功能（action def … :> Function）。", run: atLeastOne("功能", K + "Function") },
+  "pdr.tpm": { id: "tpm", label: "識別技術性能量度（TPM）", hint: "在技術元件的屬性前加上 #tpm 標記（附加庫）。",
+    run: (c) => { const n = c.a.elements.filter((e) => !e.shared && e.tags.includes("TPM")).length; return { pass: n > 0, detail: n ? `已標記 ${n} 項` : "尚未標記任何 TPM" }; } },
+  "cdr.satisfy": { id: "satisfy", label: "每條需求都有負責滿足的系統或元件", hint: "在系統規格或功能規格裡寫 satisfy … by …。",
+    run: every(COSMA_REQS, (c, e) => targets(c, e, "satisfy"), "滿足者") },
+  "cdr.verify": { id: "verify", label: "每條需求都有驗證事件", hint: "新增驗證事件（附加庫），在 objective 裡寫 verify requirement : 需求;。",
+    run: every(COSMA_REQS, (c, e) => targets(c, e, "verify"), "驗證事件") },
+};
+export const COSMA_GATES: GateDef[] = GATES.map((g) => ({ ...g, checks: g.checks.map((c) => COSMA_CHECKS[`${g.id}.${c.id}`] ?? c) }));
+
 export interface GateStatus {
   id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean;
   checks: CheckResult[];
@@ -185,11 +246,16 @@ export interface GateStatus {
   total: number;
 }
 
+/** 這個專案用哪一套節點：CoSMA 專案（由模型內容判斷，F-83）用 COSMA_GATES，其餘用 GATES。 */
+export const gatesFor = (a: Pick<Analysis, "elements">): GateDef[] => (isCosmaProject(a) ? COSMA_GATES : GATES);
+
 export function evaluateGates(a: Analysis, enabled: string[], manualDone: Record<string, boolean>, tasks = 0): GateStatus[] {
+  const cosma = a.ok && isCosmaProject(a);
   const out = new Set(a.relations.map((r) => `${r.from}|${r.kind}`));
   const inn = new Set(a.relations.map((r) => `${r.to}|${r.kind}`));
   const ctx: Ctx = {
     a,
+    byId: new Map(a.elements.map((e) => [e.id, e])),
     tasks,
     of: () => [],
     hasOut: (e, ...kinds) => kinds.some((k) => out.has(`${e.id}|${k}`)),
@@ -197,14 +263,16 @@ export function evaluateGates(a: Analysis, enabled: string[], manualDone: Record
   };
   // 結構類別同時有定義與使用（part def 與 part），計數時只算定義，避免重複。
   const structural = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
-  ctx.of = (...cats) =>
+  // CoSMA 專案：類別由 cosma.ts 的 classify 決定（cosmaOf 說明篩選規則）
+  if (cosma) ctx.of = cosmaOf(a.elements);
+  else ctx.of = (...cats) =>
     a.elements.filter((e) => {
       if (e.category === null || !cats.includes(e.category)) return false;
       if (e.kind === "ReferenceUsage") return false;
       return structural.has(e.category) ? e.kind === "PartDefinition" : /Usage$/.test(e.kind);
     });
 
-  return GATES.filter((g) => enabled.includes(g.id)).map((g) => {
+  return (cosma ? COSMA_GATES : GATES).filter((g) => enabled.includes(g.id)).map((g) => {
     const checks: CheckResult[] = g.checks.map((c) => {
       const key = `${g.id}.${c.id}`;
       if (c.manual || !c.run) {

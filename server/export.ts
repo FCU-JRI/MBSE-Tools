@@ -1,4 +1,6 @@
 // Excel 匯出：NASA-HDBK-1009A 第 8、9 章的表格，加上風險、安全、作業與品質的表格。
+// CoSMA 專案（F-94）：目的、需求、結構、行為的表改用 CoSMA 元素與五層；附加庫的表（驗證、風險、SOP……）與專案管理的表不變。
+// 其餘專案（包括 rtc-2027）的輸出完全不變。
 import ExcelJS from "exceljs";
 import type { Analysis } from "./engine.ts";
 import type { Element } from "./extract.ts";
@@ -7,6 +9,9 @@ import type { GateStatus } from "./gates.ts";
 import type { Project } from "./projects.ts";
 import type { Pm } from "./pm.ts";
 import { PRIORITY_ZH } from "./pm.ts";
+import { COSMA_CATEGORY, cosmaOf, cosmaZh, isCosmaProject, LAYERS, participantsOf, performersOf, relationsTo } from "./cosma.ts";
+import type { Layer } from "./cosma.ts";
+import { COSMA_REQS } from "./gates.ts";
 
 const METHOD: Record<string, string> = {
   "VerificationMethodKind::test": "測試 Test",
@@ -26,12 +31,17 @@ export async function exportWorkbook(project: Project, a: Analysis, gates: GateS
     return e ? (e.shortName ? `${e.shortName} ${e.name}` : e.name) : "";
   };
   const structural = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
-  const of = (...cats: string[]) =>
+  const cosma = a.ok && isCosmaProject(a);
+  const of = cosma ? cosmaOf(a.elements) : (...cats: string[]) =>
     a.elements.filter((e) => e.category !== null && cats.includes(e.category) && e.kind !== "ReferenceUsage" &&
       (structural.has(e.category) ? e.kind === "PartDefinition" : /Usage$/.test(e.kind)));
   const outs = (e: Element, ...kinds: string[]) => a.relations.filter((r) => r.from === e.id && kinds.includes(r.kind)).map((r) => label(r.to)).join("\n");
   const ins = (e: Element, ...kinds: string[]) => a.relations.filter((r) => r.to === e.id && kinds.includes(r.kind)).map((r) => label(r.from)).join("\n");
-  const catZh = (e: Element) => CATEGORY.get(e.category ?? "")?.zh ?? "";
+  const catZh = (e: Element) => (cosma ? cosmaZh(e.category, CATEGORY) : CATEGORY.get(e.category ?? "")?.zh ?? "");
+  const names = (xs: (Element | undefined)[]) => xs.filter((x): x is Element => !!x).map((x) => label(x.id)).join("\n");
+  /** CoSMA：指向需求定義（或型別是它的需求使用）的關係的起點 */
+  const insC = (e: Element, kind: string) => names(relationsTo(a, e, kind, byId).map((r) => byId.get(r.from)));
+  const C = "CoSMA.";
 
   const sheet = (name: string, columns: [string, number][], rows: (string | number)[][]) => {
     const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: 1 }] });
@@ -43,27 +53,38 @@ export async function exportWorkbook(project: Project, a: Analysis, gates: GateS
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
   };
 
+  if (cosma) {
+    sheet("利害關係人", [["名稱", 22], ["型別", 20], ["說明", 36], ["關注事項", 40], ["需要", 40]],
+      of(C + "Stakeholder").map((e) => [e.name, e.types.join(", "), e.doc,
+        names(a.elements.filter((x) => x.owner === e.id && x.category === C + "Concern")),
+        names(a.elements.filter((x) => x.owner === e.id && x.typeIds.some((t) => byId.get(t)?.category === C + "StakeholderNeed")).map((x) => byId.get(x.typeIds.find((t) => byId.get(t)?.category === C + "StakeholderNeed") as string)))]));
+    sheet("Purpose", [["編號", 12], ["類別", 14], ["名稱", 24], ["內容", 50], ["細化到", 32], ["被細化（含 MOE）", 32]],
+      of(C + "StakeholderNeed", C + "Capability", C + "Mission", C + "Goal", C + "MissionRequirement", C + "MOE").map((e) => [e.shortName ?? "", catZh(e), e.name, e.doc, outs(e, "refine"), ins(e, "refine")]));
+  } else {
   sheet("利害關係人", [["編號", 12], ["名稱", 22], ["角色與關注點", 40], ["相關期望", 40]],
     of("Stakeholder").map((e) => [e.shortName ?? "", e.name, e.attrs.role ?? "", ins(e, "trace")]));
 
   sheet("期望與NGO", [["編號", 12], ["類別", 12], ["名稱", 24], ["內容", 50], ["來源（衍生／追溯）", 32], ["效能量度", 28]],
     of("Expectation", "Need", "Goal", "Objective", "MOE").map((e) => [e.shortName ?? "", catZh(e), e.name, e.doc, outs(e, "derive", "refine", "trace"), ins(e, "refine")]));
+  }
 
   const sat = new Map(a.satisfaction.map((s) => [s.requirement, s.status]));
   const satZh = (e: Element) => ({ holds: "滿足", fails: "不滿足", undecided: "未判定" } as Record<string, string>)[sat.get(e.qualifiedName) ?? ""] ?? "";
-  const reqs = of("SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  const reqs = cosma ? of(...COSMA_REQS, C + "MOP") : of("SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  /** 驗證這條需求的事件。CoSMA 的 verify 可能指向型別是這條需求定義的使用 */
+  const eventsOf = (e: Element) => (cosma ? relationsTo(a, e, "verify", byId) : a.relations.filter((x) => x.kind === "verify" && x.to === e.id)).map((x) => byId.get(x.from)).filter(Boolean) as Element[];
 const src = (e: Element) => { const d = plan.docs.find((x) => x.id === e.attrs.sourceDoc); return e.attrs.sourceDoc ? `${e.attrs.sourceDoc}${d ? " " + d.title : ""}${e.attrs.sourceRef ? " §" + e.attrs.sourceRef : ""}` : ""; };
-  sheet("需求矩陣", [["編號", 14], ["層級", 14], ["名稱", 22], ["需求內容", 50], ["出處", 28], ["衍生自", 30], ["滿足者", 22], ["驗證方法", 12], ["驗證事件", 28], ["計算判定", 12]],
+  sheet("需求矩陣", [["編號", 14], ["層級", 14], ["名稱", 22], ["需求內容", 50], ["出處", 28], [cosma ? "細化到" : "衍生自", 30], ["滿足者", 22], ["驗證方法", 12], ["驗證事件", 28], ["計算判定", 12]],
     reqs.map((e) => {
-      const ev = a.relations.filter((x) => x.kind === "verify" && x.to === e.id).map((x) => byId.get(x.from)).filter(Boolean) as Element[];
-      return [e.shortName ?? "", catZh(e), e.name, e.doc, src(e), outs(e, "derive", "refine", "trace"), ins(e, "satisfy"), [...new Set(ev.map((v) => METHOD[v.attrs.kind ?? ""] ?? ""))].filter(Boolean).join("、"), ins(e, "verify"), satZh(e)];
+      const ev = eventsOf(e);
+      return [e.shortName ?? "", catZh(e), e.name, e.doc, src(e), outs(e, "derive", "refine", "trace"), cosma ? insC(e, "satisfy") : ins(e, "satisfy"), [...new Set(ev.map((v) => METHOD[v.attrs.kind ?? ""] ?? ""))].filter(Boolean).join("、"), cosma ? names(ev) : ins(e, "verify"), satZh(e)];
     }));
   sheet("文件", [["編號", 12], ["名稱", 36], ["類型", 12], ["版次", 12], ["連結", 60], ["備註", 30]], plan.docs.map((d) => [d.id, d.title, d.type, d.revision, d.url, d.note]));
 
   const vers = of("VerificationEvent", "ValidationEvent");
   const rvm: (string | number)[][] = [];
   for (const r of reqs) {
-    const events = a.relations.filter((x) => x.kind === "verify" && x.to === r.id).map((x) => byId.get(x.from)).filter(Boolean) as Element[];
+    const events = eventsOf(r);
     if (events.length === 0) rvm.push([r.shortName ?? "", r.name, r.doc, "", "", "", "未規劃"]);
     for (const v of events) rvm.push([r.shortName ?? "", r.name, r.doc, v.shortName ?? "", v.name, METHOD[v.attrs.kind ?? ""] ?? "", v.doc]);
   }
@@ -72,17 +93,36 @@ const src = (e: Element) => { const d = plan.docs.find((x) => x.id === e.attrs.s
   sheet("驗證與確認事件", [["編號", 12], ["類別", 12], ["名稱", 26], ["方法", 16], ["說明", 44], ["驗證的需求", 32]],
     vers.map((e) => [e.shortName ?? "", catZh(e), e.name, METHOD[e.attrs.kind ?? ""] ?? "", e.doc, outs(e, "verify")]));
 
+  if (cosma) {
+    const own = a.elements.filter((e) => !e.shared && e.layer && e.layer in LAYERS);
+    sheet("五層", [["層", 22], ["類別", 16], ["編號", 12], ["名稱", 26], ["元素種類", 22], ["說明", 40]],
+      (Object.keys(LAYERS) as Layer[]).flatMap((l) => own.filter((e) => e.layer === l && e.category !== null && COSMA_CATEGORY.has(e.category))
+        .map((e) => [LAYERS[l], catZh(e), e.shortName ?? "", e.name, e.kind, e.doc])));
+    sheet("邏輯與技術元件", [["類別", 14], ["編號", 12], ["名稱", 24], ["上層", 24], ["執行的功能", 28], ["屬性", 44]],
+      of(C + "MissionSystem", C + "LogicalComponent", C + "TechnicalComponent").map((e) => {
+        const attrs = a.elements.filter((x) => x.owner === e.id && x.kind === "AttributeUsage").map((x) => `${x.name}${x.tags.includes("TPM") ? "（TPM）" : ""}`).join("\n");
+        const parents = a.elements.filter((x) => x.kind === "PartUsage" && x.typeIds.includes(e.id) && x.owner).map((x) => byId.get(x.owner as string)?.name ?? "").filter(Boolean);
+        const perf = (a.links ?? []).filter((k) => k.kind === "perform" && k.from === e.id && k.to).map((k) => byId.get(byId.get(k.to as string)?.typeIds[0] ?? "") ?? byId.get(k.to as string));
+        return [catZh(e), e.shortName ?? "", e.name, [...new Set(parents)].join("\n"), names(perf), attrs];
+      }));
+  } else {
   sheet("結構分解", [["類別", 12], ["編號", 12], ["名稱", 24], ["上層", 24], ["屬性", 44]],
     of("System", "Subsystem", "Component", "ExternalEntity").map((e) => {
       const attrs = a.elements.filter((x) => x.owner === e.id && x.kind === "AttributeUsage").map((x) => `${x.name}${x.tags.includes("TPM") ? "（TPM）" : ""}`).join("\n");
       const parents = a.elements.filter((x) => x.kind === "PartUsage" && x.types.includes(e.name) && x.owner).map((x) => byId.get(x.owner as string)?.name ?? "").filter(Boolean);
       return [catZh(e), e.shortName ?? "", e.name, [...new Set(parents)].join("\n"), attrs];
     }));
+  }
 
   sheet("TPM", [["所屬", 24], ["名稱", 22], ["型別", 20]],
-    a.elements.filter((e) => e.tags.includes("TPM")).map((e) => [byId.get(e.owner ?? "")?.name ?? "", e.name, e.types.join(", ")]));
+    a.elements.filter((e) => e.tags.includes("TPM") && !(cosma && e.shared)).map((e) => [byId.get(e.owner ?? "")?.name ?? "", e.name, e.types.join(", ")]));
 
-  sheet("任務階段與功能", [["類別", 12], ["編號", 12], ["名稱", 24], ["上層", 20], ["下一步", 24], ["分配給", 24]],
+  if (cosma) sheet("任務階段作業與功能", [["類別", 12], ["編號", 12], ["名稱", 24], ["下一階段", 24], ["參與者", 26], ["細化到", 24], ["執行者", 24]],
+    of(C + "Phase", C + "Operation", C + "Function").map((e) => {
+      const next = a.relations.filter((r) => r.kind === "transition" && byId.get(r.from)?.typeIds.includes(e.id)).map((r) => byId.get(byId.get(r.to)?.typeIds[0] ?? ""));
+      return [catZh(e), e.shortName ?? "", e.name, names(next), names(participantsOf(a.elements, e)), outs(e, "refine"), names(performersOf(a, e, byId))];
+    }));
+  else sheet("任務階段與功能", [["類別", 12], ["編號", 12], ["名稱", 24], ["上層", 20], ["下一步", 24], ["分配給", 24]],
     of("MissionPhase", "Function").map((e) => [catZh(e), e.shortName ?? "", e.name, byId.get(e.owner ?? "")?.kind === "ActionUsage" ? byId.get(e.owner as string)?.name ?? "" : "", outs(e, "succession"), outs(e, "allocate")]));
 
   sheet("FMEA", [["編號", 12], ["名稱", 22], ["失效模式", 26], ["影響", 26], ["原因", 26], ["嚴重度 S", 9], ["可能性 O", 9], ["偵測度 D", 9], ["風險值 S×O", 10], ["RPN S×O×D", 11], ["緩解措施", 36], ["緩解後 S", 9], ["緩解後 O", 9], ["緩解後風險值", 12], ["負責人", 14], ["狀態", 10]],

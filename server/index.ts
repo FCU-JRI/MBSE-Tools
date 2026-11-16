@@ -80,7 +80,7 @@ async function view(id: string) {
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
   const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  // CoSMA 專案（F-83）：由模型內容判斷，不看 project.json。只換流程引導；節點檢查到第 D 期才換
+  // CoSMA 專案（F-83）：由模型內容判斷，不看 project.json。流程引導（F-89）與節點檢查（F-91，evaluateGates 內部同樣判斷）都換
   const cosma = analysis.ok && isCosmaProject(analysis);
   return { project, analysis, gates, cosma, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? (cosma ? evaluateCosmaProcess(analysis) : evaluateProcess(analysis)) : [], history: await store.historyState(id), branch: await versions.branchState(id), warning: versions.syncWarning(id) };
 }

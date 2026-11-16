@@ -319,3 +319,31 @@ export function evaluateCosmaProcess(a: { elements: Element[]; relations: Relati
     return { id: s.id, zh: s.zh, nasa: s.nasa, question: s.question, why: s.why, example: s.example, categories: s.categories, link: s.link ?? null, parent: s.parent ?? null, state, count: of(...s.categories).length, issues: issues.slice(0, 12) };
   });
 }
+
+// ───────── 節點檢查、匯出與報告共用（第 D 期，F-91 到 F-95） ─────────
+
+/** CoSMA 專案的元素篩選：自己的（不含基礎庫、附加庫本身）、不是 ref 使用。CoSMA 類別由 classify 決定、不會重複；
+ * 利害關係人只算使用（人或單位本身，不算 part def）；附加庫沿用的 JRI 類別（風險、驗證……）照 JRI 的規則只算使用。 */
+export const cosmaOf = (elements: Element[]) => (...cats: string[]): Element[] =>
+  elements.filter((e) => {
+    if (e.category === null || !cats.includes(e.category) || e.shared || e.kind === "ReferenceUsage") return false;
+    if (e.category === C + "Stakeholder") return e.kind === "PartUsage";
+    return e.category.startsWith(C) || /Usage$/.test(e.kind);
+  });
+
+/** 指向需求定義 d 的關係：直接指向 d，或指向型別是 d 的需求使用（規格裡的 satisfy、verify requirement : d）。 */
+export function relationsTo(a: { elements: Element[]; relations: Relation[] }, d: Element, kind: string, byId = new Map(a.elements.map((e) => [e.id, e]))): Relation[] {
+  return a.relations.filter((r) => r.kind === kind && (r.to === d.id || (byId.get(r.to)?.kind === "RequirementUsage" && (byId.get(r.to)?.typeIds ?? []).includes(d.id))));
+}
+
+/** 作業的參與者：作業裡的 ref part（第 10 節第 2 項） */
+export const participantsOf = (elements: Element[], o: Element): Element[] => elements.filter((p) => p.owner === o.id && (p.keyword ?? "").startsWith("ref"));
+
+/** 執行這個功能的邏輯元件：perform 的目標是型別為 f 的動作使用 */
+export function performersOf(a: { elements: Element[]; links?: Link[] }, f: Element, byId = new Map(a.elements.map((e) => [e.id, e]))): Element[] {
+  return (a.links ?? []).filter((k) => k.kind === "perform" && k.to && (k.to === f.id || (byId.get(k.to)?.typeIds ?? []).includes(f.id)))
+    .map((k) => byId.get(k.from)).filter((e): e is Element => !!e && e.category === C + "LogicalComponent");
+}
+
+/** 類別的中文名稱：CoSMA 類別或附加庫沿用的 JRI 類別 */
+export const cosmaZh = (cat: string | null, jri: Map<string, { zh: string }>): string => (cat ? COSMA_CATEGORY.get(cat)?.zh ?? jri.get(cat)?.zh ?? "" : "");

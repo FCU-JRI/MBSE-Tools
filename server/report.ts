@@ -1,4 +1,5 @@
 // 審查報告：依節點把模型內容組成一份文件，輸出成 Word（.docx）或可列印成 PDF 的網頁。
+// CoSMA 專案（F-95）：第 2～4 章改用 CoSMA 元素與五層；第 1、5、6 章（節點、附加庫、時程與成本）不變。其餘專案的報告完全不變。
 import dagre from "@dagrejs/dagre";
 import { AlignmentType, Document, HeadingLevel, Packer, PageBreak, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import type { Analysis } from "./engine.ts";
@@ -9,6 +10,9 @@ import type { Pm } from "./pm.ts";
 import { PRIORITY_ZH } from "./pm.ts";
 import type { Project } from "./projects.ts";
 import type { SimFile } from "./sim.ts";
+import { COSMA_CATEGORY, cosmaOf, cosmaZh, isCosmaProject, LAYERS, participantsOf, performersOf, relationsTo } from "./cosma.ts";
+import type { Layer } from "./cosma.ts";
+import { COSMA_REQS } from "./gates.ts";
 // 圖的資料與 SVG 繪製和前端共用同一份程式
 import { buildGraph, diagramsOf, frameLabel } from "../web/src/model.ts";
 import { toSvg } from "../web/src/exportSvg.ts";
@@ -46,10 +50,12 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
   const gate = gates.find((g) => g.id === gateId) ?? gates[0];
   const byId = new Map(a.elements.map((e) => [e.id, e]));
   const label = (id: string) => { const e = byId.get(id); return e ? (e.shortName ? `${e.shortName} ${e.name}` : e.name) : ""; };
-  const of = (...cats: string[]) => a.elements.filter((e) => e.category !== null && cats.includes(e.category) && e.kind !== "ReferenceUsage" && (STRUCTURAL.has(e.category) ? e.kind === "PartDefinition" : /Usage$/.test(e.kind)));
+  const cosma = a.ok && isCosmaProject(a);
+  const of = cosma ? cosmaOf(a.elements) : (...cats: string[]) => a.elements.filter((e) => e.category !== null && cats.includes(e.category) && e.kind !== "ReferenceUsage" && (STRUCTURAL.has(e.category) ? e.kind === "PartDefinition" : /Usage$/.test(e.kind)));
   const outs = (e: Element, ...k: string[]) => a.relations.filter((r) => r.from === e.id && k.includes(r.kind)).map((r) => label(r.to)).join("；");
   const ins = (e: Element, ...k: string[]) => a.relations.filter((r) => r.to === e.id && k.includes(r.kind)).map((r) => label(r.from)).join("；");
-  const zh = (e: Element) => CATEGORY.get(e.category ?? "")?.zh ?? "";
+  const zh = (e: Element) => (cosma ? cosmaZh(e.category, CATEGORY) : CATEGORY.get(e.category ?? "")?.zh ?? "");
+  const names = (xs: (Element | undefined)[]) => xs.filter((x): x is Element => !!x).map((x) => label(x.id)).join("；");
   const sat = new Map(a.satisfaction.map((s) => [s.requirement, s.status]));
   const verdict = (e: Element) => ({ holds: "滿足", fails: "不滿足", undecided: "未判定" } as Record<string, string>)[sat.get(e.qualifiedName) ?? ""] ?? "—";
   const S: Section[] = [];
@@ -61,6 +67,7 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
   const so = project.signoffs.filter((s) => !gate || s.gate === gate.id);
   add("1.2　簽核紀錄", [], { head: ["決議", "次系統", "簽核人", "職級", "意見", "時間", "模型版本"], rows: so.map((s) => [s.decision, s.subsystem ?? "—", s.by, s.role, s.comment, s.at.slice(0, 16).replace("T", " "), s.commit]) });
 
+  if (cosma) cosmaChapters(); else {
   chapter("2　利害關係人與任務目標");
   add("2.1　利害關係人", [], { head: ["編號", "名稱", "角色與關注點", "相關期望"], rows: of("Stakeholder").map((e) => [e.shortName ?? "", e.name, e.attrs.role ?? "", ins(e, "trace")]) });
   add("2.2　期望、需要、目標、目的與效能量度", [], { head: ["編號", "類別", "名稱", "內容", "來源"], rows: of("Expectation", "Need", "Goal", "Objective", "MOE").map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "derive", "refine", "trace")]) });
@@ -82,7 +89,34 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
     for (const v of ev) rvm.push([r.shortName ?? "", r.name, v.shortName ?? "", v.name, METHOD[v.attrs.kind ?? ""] ?? "", v.doc]);
   }
   add("4.2　需求驗證矩陣", [], { head: ["需求編號", "需求", "驗證編號", "驗證事件", "方法", "說明"], rows: rvm });
-  add("4.3　技術性能量度（TPM）", [], { head: ["所屬", "名稱", "型別"], rows: a.elements.filter((e) => e.tags.includes("TPM")).map((e) => [byId.get(e.owner ?? "")?.name ?? "", e.name, e.types.join("、")]) });
+  }
+  function cosmaChapters() {
+    const C = "CoSMA.";
+    chapter("2　Purpose：利害關係人與任務目標");
+    add("2.1　利害關係人", [], { head: ["名稱", "型別", "說明", "關注事項"], rows: of(C + "Stakeholder").map((e) => [e.name, e.types.join("、"), e.doc, names(a.elements.filter((x) => x.owner === e.id && x.category === C + "Concern"))]) });
+    add("2.2　需要、能力、目標、任務需求與效能量度", [], { head: ["編號", "類別", "名稱", "內容", "細化到"], rows: of(C + "StakeholderNeed", C + "Capability", C + "Mission", C + "Goal", C + "MissionRequirement", C + "MOE").map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "refine")]) });
+    add("2.3　作業", [], { head: ["編號", "名稱", "說明", "參與者"], rows: of(C + "Operation").map((e) => [e.shortName ?? "", e.name, e.doc, names(participantsOf(a.elements, e))]) });
+
+    chapter("3　五層架構");
+    const own = a.elements.filter((e) => !e.shared && e.category !== null && COSMA_CATEGORY.has(e.category));
+    add("3.1　五層元素數量", [], { head: ["層", "元素數", "類別"], rows: (Object.keys(LAYERS) as Layer[]).map((l) => { const xs = own.filter((e) => e.layer === l); return [LAYERS[l], String(xs.length), [...new Set(xs.map(zh))].join("、")]; }) });
+    add("3.2　邏輯元件與技術元件", [], { head: ["類別", "編號", "名稱", "說明", "屬性"], rows: of(C + "MissionSystem", C + "LogicalComponent", C + "TechnicalComponent").map((e) => [zh(e), e.shortName ?? "", e.name, e.doc, a.elements.filter((x) => x.owner === e.id && x.kind === "AttributeUsage").map((x) => x.name + (x.tags.includes("TPM") ? "（TPM）" : "")).join("、")]) }, { svg: diagramSvg(project.name, a, "structure") ?? undefined });
+    add("3.3　任務階段、作業與功能", [], { head: ["類別", "編號", "名稱", "細化到", "執行者"], rows: of(C + "Phase", C + "Operation", C + "Function").map((e) => [zh(e), e.shortName ?? "", e.name, outs(e, "refine"), names(performersOf(a, e, byId))]) }, { svg: diagramSvg(project.name, a, "act") ?? undefined });
+    const stm = diagramSvg(project.name, a, "stm");
+    if (stm) S.push({ heading: "3.4　任務階段的狀態機", level: 2, paragraphs: [], svg: stm });
+
+    chapter("4　需求與驗證");
+    const reqs = of(...COSMA_REQS, C + "MOP");
+    add("4.1　需求表", [], { head: ["編號", "層級", "名稱", "需求內容", "細化到", "滿足者", "計算判定"], rows: reqs.map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "refine"), names(relationsTo(a, e, "satisfy", byId).map((r) => byId.get(r.from))), verdict(e)]) }, { svg: diagramSvg(project.name, a, "req") ?? undefined });
+    const rvm: string[][] = [];
+    for (const r of reqs) {
+      const ev = relationsTo(a, r, "verify", byId).map((x) => byId.get(x.from)).filter((x): x is Element => !!x);
+      if (ev.length === 0) rvm.push([r.shortName ?? "", r.name, "—", "未規劃", "", ""]);
+      for (const v of ev) rvm.push([r.shortName ?? "", r.name, v.shortName ?? "", v.name, METHOD[v.attrs.kind ?? ""] ?? "", v.doc]);
+    }
+    add("4.2　需求驗證矩陣", [], { head: ["需求編號", "需求", "驗證編號", "驗證事件", "方法", "說明"], rows: rvm });
+  }
+  add("4.3　技術性能量度（TPM）", [], { head: ["所屬", "名稱", "型別"], rows: a.elements.filter((e) => e.tags.includes("TPM") && !(cosma && e.shared)).map((e) => [byId.get(e.owner ?? "")?.name ?? "", e.name, e.types.join("、")]) });
   if (sim.result) add("4.4　飛行模擬結果", [`${sim.result.engine}，執行於 ${sim.result.at.slice(0, 16).replace("T", " ")}，模型版本 ${sim.result.commit}，參數 ${sim.result.inputsHash}。標準大氣、無風。`, ...sim.result.warnings], { head: ["項目", "數值", "單位"], rows: sim.result.outputs.map((o) => [o.zh, String(o.value), o.unit]) });
 
   chapter("5　風險與安全");

@@ -1,5 +1,6 @@
 // 把 SysML v2 API JSON（解析器輸出）整理成工具使用的元素與關係。
 // 歸類規則：元素的型別或一般化鏈上出現 JRI::X，就歸為類別 X。
+// 附加庫（JRIAddonPackage，只有 CoSMA 專案載入）裡和 JRI 同名的定義（驗證、風險、SOP……）也歸為同一個類別 X（F-90）。
 
 /** 原始碼位置。欄位以 UTF-8 位元組計、從 1 起算，結尾不含。 */
 export interface Loc { line: number; col: number; endLine: number; endCol: number }
@@ -93,6 +94,9 @@ export interface Extracted {
 type Raw = Record<string, any>;
 
 const LIB_PREFIX = "JRI::";
+const ADDON_PREFIX = "JRIAddonPackage::";
+/** 附加庫裡沿用 JRI 類別的定義（F-90）。其餘附加庫的元素（#moe、#mop、#tpm、@Source）是標記，不是類別。 */
+const ADDON_CATEGORIES = new Set(["VerificationEvent", "ValidationEvent", "Risk", "SafetyFactor", "SOP", "RosterEntry", "Anomaly", "QCRecord"]);
 // 相依（dependency）上的標記 → 關係種類。Refinement 是標準庫 ModelingMetadata 的；TraceLink 是 JRI 自訂的。
 const LINK_KINDS: Record<string, Relation["kind"]> = {
   TraceLink: "trace",
@@ -206,6 +210,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       seen.add(g);
       const q = qn(g);
       if (q.startsWith(LIB_PREFIX) && !q.slice(LIB_PREFIX.length).includes("::")) return q.slice(LIB_PREFIX.length);
+      if (q.startsWith(ADDON_PREFIX) && ADDON_CATEGORIES.has(q.slice(ADDON_PREFIX.length))) return q.slice(ADDON_PREFIX.length);
       queue.push(...(generals.get(g) ?? []));
     }
     return null;
