@@ -1,6 +1,9 @@
 // METHOD.md 實作：各期新增的頁面登記在這裡，App.tsx 自動加上分頁（docs/IMPL-PLAN.md）。各期只改自己的區塊。
 import type { ComponentType } from "react";
 import type { Me, Meta, View } from "../api.ts";
+// [P1 需求屬性與需求矩陣]
+import { VerificationMatrix } from "./P1Requirements.tsx";
+// [/P1]
 
 export interface MethodPageProps {
   view: View;
@@ -21,6 +24,7 @@ export interface MethodPage {
 
 export const METHOD_PAGES: MethodPage[] = [
   // [P1 需求屬性與需求矩陣]
+  { id: "verification", zh: "驗證矩陣", Component: VerificationMatrix },
   // [/P1]
   // [P2 分析圖骨架與中文化]
   // [/P2]

@@ -1,6 +1,9 @@
 // METHOD.md 第 3 節的分析圖：每張圖代表一個階段，在圖的清單裡由上而下排（docs/IMPL-PLAN.md）。
 // 圖的框架（排列、釘選亮色與其他暗色的元素清單、手動連線）由 P2 實作；各期在自己的區塊登記自己負責的圖。
 import type { Analysis } from "../api.ts";
+// [P1 需求屬性與需求矩陣]
+import { verificationRows } from "../../../server/method/p1-req.ts";
+// [/P1]
 
 export interface AnalysisView {
   /** 唯一的代號，例如 "stakeholders" */
@@ -21,6 +24,12 @@ export interface AnalysisView {
 
 export const ANALYSIS_VIEWS: AnalysisView[] = [
   // [P1 需求屬性與需求矩陣]
+  {
+    id: "verification", order: 8, zh: "驗證矩陣", gate: "mdr",
+    question: "每一條需求要怎麼證明有做到？用什麼驗證事件？結果如何？",
+    pinned: ["MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOE", "MOP", "VerificationEvent"],
+    missing: (a) => verificationRows(a).filter((r) => r.gaps.length).map((r) => ({ id: r.element.id, text: `${r.element.shortName ?? r.element.name} 缺${r.gaps.join("、")}` })),
+  },
   // [/P1]
   // [P2 分析圖骨架與中文化]
   // [/P2]

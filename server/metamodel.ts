@@ -103,6 +103,9 @@ export const CATEGORIES: Category[] = [
       { name: "status", zh: "狀態", type: "text" } ] },
   // METHOD.md 實作：各期只改自己的區塊（docs/IMPL-PLAN.md）
   // [P1 需求屬性與需求矩陣]
+  { id: "MissionRequirement", zh: "任務需求", en: "Mission Requirement", pillar: "requirements", prefix: "REQ-MIS", pkg: "Requirements", keyword: "requirement",
+    help: "整個任務（不只火箭，也包括地面站等）要達成什麼、有哪些不能違反的條件。用「應」字，有數字，可以驗證。不寫階段、順序與轉換條件，那些屬於任務剖面。比賽或外部規定的條件可以寫成任務需求，要註明出處。",
+    example: "任務應於落地後 2 小時內尋回箭體。" },
   // [/P1]
   // [P2 分析圖骨架與中文化]
   // [/P2]

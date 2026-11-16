@@ -152,6 +152,30 @@ package JRI {
 
     // ───────── METHOD.md 實作：各期只改自己的區塊（docs/IMPL-PLAN.md）─────────
     // [P1 需求屬性與需求矩陣]
+    /* 任務需求 Mission Requirement：整個任務要達成什麼、不能違反什麼（METHOD.md 2.1）。不寫階段、順序、轉換條件 */
+    requirement def MissionRequirement;
+
+    // 所有需求類別的共同屬性（METHOD.md 2.1、第 8 節）。同一個概念只留一種寫法：
+    //   驗證方法：標準庫的 @VerificationMethod { kind = VerificationMethodKind::test; }（建立需求時就要填）
+    //   理由：標準庫的 @Rationale { text = "…"; }
+    //   其餘：@RequirementInfo { verificationLead = "…"; verificationLevel = VerificationLevelKind::system;
+    //          responsible = "…"; reqStatus = RequirementStatusKind::checked; reqType = RequirementTypeKind::functional; }
+    public import ModelingMetadata::Rationale;
+    /* 驗證層級：這條需求在哪一層驗證 */
+    enum def VerificationLevelKind { system; subsystem; component; }
+    /* 需求狀態：pass＝略過、checked＝已檢查、tbc＝待確認 */
+    enum def RequirementStatusKind { pass; checked; tbc; }
+    /* 需求類型：功能、性能、環境、安全、型態、品質、介面、操作 */
+    enum def RequirementTypeKind { functional; performance; environmental; safety; configuration; quality; interfacing; operational; }
+    metadata def RequirementInfo {
+        /* 驗證負責人 */
+        attribute verificationLead : String[0..1];
+        attribute verificationLevel : VerificationLevelKind[0..1];
+        /* 負責人 */
+        attribute responsible : String[0..1];
+        attribute reqStatus : RequirementStatusKind[0..1];
+        attribute reqType : RequirementTypeKind[0..1];
+    }
     // [/P1]
     // [P2 分析圖骨架與中文化]
     // [/P2]
