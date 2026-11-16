@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, baseOf, getAuthor, setAuthor } from "./api.ts";
-import type { Diagrams, Me, Meta, MeResponse, Project, View } from "./api.ts";
+import type { Diagrams, Element, Me, Meta, MeResponse, Project, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
-import { diagramsOf, label, listOf } from "./model.ts";
+import { diagramsOf, isPackage, packageOf, treeOf } from "./model.ts";
 import type { DiagramDef } from "./model.ts";
 import { Diagram } from "./Diagram.tsx";
 import { Inspector } from "./Inspector.tsx";
 import type { Selection } from "./Inspector.tsx";
-import { GatesView, TableView } from "./Views.tsx";
+import { ElementTable, GatesView } from "./Views.tsx";
+import { PackageTree } from "./PackageTree.tsx";
 import { Dashboard } from "./Dashboard.tsx";
 import { ProcessView } from "./Process.tsx";
 import { Deliverables } from "./Deliverables.tsx";
@@ -204,7 +205,9 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
   const [mode, setMode] = useState<Mode>("home");
   const [deliverTab, setDeliverTab] = useState<DeliverTab>("req");
   const [diagramId, setDiagramId] = useState("bdd");
-  const [catId, setCatId] = useState("SystemRequirement");
+  // 表列的是哪個套件（含底下各層）；null 是整個模型
+  const [scopeId, setScopeId] = useState<string | null>(null);
+  const [sourceAt, setSourceAt] = useState<{ file: string; line: number } | null>(null);
   const [gateId, setGateId] = useState<string | null>(null);
   const [sel, setSel] = useState<Selection>({ type: "new", category: "SystemRequirement", parentId: null });
   const [panes, setPanes] = useState(loadPanes);
@@ -235,13 +238,31 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
     setDiagramId(did); setMode("diagram");
   };
   const diagrams = useMemo(() => (view ? diagramsOf(view.analysis, extra) : []), [view, extra]);
+  const tree = useMemo(() => (view ? treeOf(view.analysis) : null), [view]);
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><div className="tbtn-row">{id !== baseOf(id) && <button className="tbtn primary" onClick={() => onOpen(baseOf(id))}>回到 main</button>}<button className={`tbtn ${id === baseOf(id) ? "primary" : ""}`} onClick={onHome}>回專案列表</button></div></div>;
   if (!view) return <div className="page"><p className="label">載入模型中</p></div>;
 
   const def: DiagramDef = diagrams.find((d) => d.id === diagramId) ?? diagrams[0];
   const errors = view.analysis.diagnostics.filter((d) => d.severity === "error");
   const selectedId = sel.type === "element" ? sel.id : null;
-  const selectElement = (eid: string | null) => setSel(eid ? { type: "element", id: eid } : { type: "new", category: catId, parentId: null });
+  // 新增元素時預設的類別：正在看的套件若是某個類別的套件（例如 Requirements），就用那個類別
+  const scopeName = scopeId ? tree?.byId.get(scopeId)?.name : undefined;
+  const newCategory = meta.categories.find((c) => c.pkg === scopeName)?.id ?? "SystemRequirement";
+  const selectElement = (eid: string | null) => setSel(eid ? { type: "element", id: eid } : { type: "new", category: newCategory, parentId: null });
+  /** 從樹上點選：點套件，表就列出它底下的元素；點其他元素，選到它，表列出它所在的套件。 */
+  const pick = (e: Element) => {
+    if (isPackage(e)) {
+      setScopeId(e.id);
+      setSel({ type: "new", category: meta.categories.find((c) => c.pkg === e.name)?.id ?? "SystemRequirement", parentId: null });
+      setMode("table");
+      return;
+    }
+    if (tree) setScopeId(packageOf(tree, e.id));
+    setSel({ type: "element", id: e.id });
+    if (mode !== "diagram" && mode !== "table") setMode("table");
+  };
+  /** 從流程、節點等別的分頁開啟某個元素：切到表，並讓表列出它所在的套件。 */
+  const openElement = (eid: string) => { const e = tree?.byId.get(eid); if (e) { if (tree) setScopeId(packageOf(tree, eid)); setSel({ type: "element", id: eid }); setMode("table"); } };
   const showSide = mode === "diagram" || mode === "table" || mode === "deliver" || mode === "gates";
   const showTree = mode !== "home" && mode !== "process";
   // 首頁各區塊點了之後前往對應的頁面
@@ -264,10 +285,9 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
       </header>
       <div className="work">
         {showTree && <aside className="side left" style={{ width: panes.leftOpen ? panes.left : 0 }} hidden={!panes.leftOpen}>
-          <Tree view={view} meta={meta} diagrams={diagrams} onAddDiagram={readOnly ? undefined : addDiagram} mode={mode} diagramId={def.id} catId={catId} gateId={gateId} selectedId={selectedId}
+          <Tree view={view} diagrams={diagrams} onAddDiagram={readOnly ? undefined : addDiagram} mode={mode} diagramId={def.id} scopeId={mode === "table" ? scopeId : null} gateId={gateId} selectedId={selectedId}
             onDiagram={(d) => { setDiagramId(d); setMode("diagram"); }}
-            onCategory={(c) => { setCatId(c); setMode("table"); setSel({ type: "new", category: c, parentId: null }); }}
-            onElement={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); if (mode !== "diagram" && mode !== "table") setMode("table"); }}
+            onPick={pick}
             onGate={(g) => { setGateId(g); setMode("gates"); }} />
         </aside>}
         {showTree && <Resizer side="left" open={panes.leftOpen} width={panes.left} onWidth={(w) => setPane({ left: w })} onToggle={() => setPane({ leftOpen: !panes.leftOpen })} />}
@@ -282,18 +302,18 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
           {mode === "diagram" && <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
             onSelectEdge={(e) => e && setSel({ type: "edge", edge: e })} onNew={(c, parentId) => setSel({ type: "new", category: c, parentId })}
             onChanged={(v) => { setView(v); setNotice(""); }} onError={setNotice} />}
-          {mode === "table" && <div className="center-scroll"><TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={selectElement} /></div>}
+          {mode === "table" && <div className="center-scroll"><ElementTable view={view} meta={meta} scopeId={scopeId} selectedId={selectedId} onSelect={selectElement} onScope={(sid) => { setScopeId(sid); setSel({ type: "new", category: newCategory, parentId: null }); }} /></div>}
           {mode === "home" && <div className="center-scroll enter"><Dashboard view={view} go={go} /></div>}
-          {mode === "process" && <div className="center-scroll"><ProcessView view={view} meta={meta} user={user} onChanged={setView} onOpen={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); setMode("table"); }} /></div>}
+          {mode === "process" && <div className="center-scroll"><ProcessView view={view} meta={meta} user={user} onChanged={setView} onOpen={(eid) => openElement(eid)} /></div>}
           {mode === "deliver" && <Deliverables view={view} meta={meta} user={user} tab={deliverTab} setTab={setDeliverTab} selectedId={selectedId} onSelect={(eid) => setSel({ type: "element", id: eid })} onChanged={setView} />}
           {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
           {mode === "plan" && <div className="center-scroll"><PlanView view={view} meta={meta} user={user} /></div>}
           {mode === "sim" && <div className="center-scroll"><SimView view={view} user={user} onChanged={setView} /></div>}
-          {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} /></div>}
+          {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} at={sourceAt} /></div>}
           {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} branch={view.branch ?? null} onOpen={onOpen} onChanged={(v) => { setView(v); api<Diagrams>(`/projects/${id}/diagrams`).then(setExtra).catch(() => {}); }} /></div>}
         </section>
         {showSide && <Resizer side="right" open={panes.rightOpen} width={panes.right} onWidth={(w) => setPane({ right: w })} onToggle={() => setPane({ rightOpen: !panes.rightOpen })} />}
-        {showSide && <aside className="side right" style={{ width: panes.rightOpen ? panes.right : 0 }} hidden={!panes.rightOpen}><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}
+        {showSide && <aside className="side right" style={{ width: panes.rightOpen ? panes.right : 0 }} hidden={!panes.rightOpen}><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} onSource={(file, line) => { setSourceAt({ file, line }); setMode("source"); }} /></aside>}
       </div>
     </div>
   );
@@ -335,15 +355,13 @@ function Resizer({ side, open, width, onWidth, onToggle }: { side: "left" | "rig
 }
 
 interface TreeProps {
-  view: View; meta: Meta; diagrams: DiagramDef[]; mode: Mode; diagramId: string; catId: string; gateId: string | null; selectedId: string | null;
-  onDiagram: (id: string) => void; onAddDiagram?: (title: string) => void; onCategory: (id: string) => void; onElement: (id: string, category: string | null) => void; onGate: (id: string) => void;
+  view: View; diagrams: DiagramDef[]; mode: Mode; diagramId: string; scopeId: string | null; gateId: string | null; selectedId: string | null;
+  onDiagram: (id: string) => void; onAddDiagram?: (title: string) => void; onPick: (e: Element) => void; onGate: (id: string) => void;
 }
 
-/** 左側欄：圖、模型樹、節點進度。 */
-function Tree({ view, meta, diagrams, onAddDiagram, mode, diagramId, catId, gateId, selectedId, onDiagram, onCategory, onElement, onGate }: TreeProps) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ requirements: true, structure: true });
+/** 左側欄：圖、模型樹（依套件，F-74）、節點進度。 */
+function Tree({ view, diagrams, onAddDiagram, mode, diagramId, scopeId, gateId, selectedId, onDiagram, onPick, onGate }: TreeProps) {
   const els = view.analysis.elements;
-  const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   const [naming, setNaming] = useState(false);
   const finish = (v: string) => { setNaming(false); if (v.trim()) onAddDiagram?.(v); };
   return (
@@ -361,29 +379,8 @@ function Tree({ view, meta, diagrams, onAddDiagram, mode, diagramId, catId, gate
           : <button className="tbtn" onClick={() => setNaming(true)} title="自己決定放哪些項目的圖，任何類別都能放在一起">＋ 新增自訂圖</button>)}
       </div>
       <div className="section">
-        <div className="section-head"><h2 className="section-title">模型</h2><span className="label">{els.filter((e) => e.category).length}</span></div>
-        <ul className="tree">{Object.entries(meta.pillars).map(([pid, pzh]) => (
-          <li key={pid}>
-            <button className="tree-row" aria-expanded={!!open[pid]} onClick={() => toggle(pid)}><span className="tw">{open[pid] ? "−" : "+"}</span><span className="tn" style={{ fontWeight: 500 }}>{pzh}</span></button>
-            {open[pid] && <ul>{meta.categories.filter((c) => c.pillar === pid).map((c) => {
-              const items = listOf(els, c.id);
-              const k = `c:${c.id}`;
-              return (
-                <li key={c.id}>
-                  <div style={{ display: "flex" }}>
-                    <button className="tree-row" style={{ width: 18 }} aria-label={open[k] ? "收合" : "展開"} aria-expanded={!!open[k]} onClick={() => toggle(k)} disabled={items.length === 0}><span className="tw">{items.length ? (open[k] ? "−" : "+") : ""}</span></button>
-                    <button className="tree-row" aria-current={mode === "table" && c.id === catId && !selectedId} onClick={() => onCategory(c.id)}><span className="tn">{c.zh}</span><span className="tc">{items.length}</span></button>
-                  </div>
-                  {open[k] && <ul>{items.map((e) => (
-                    <li key={e.id}><button className="tree-row" aria-current={e.id === selectedId} onClick={() => onElement(e.id, c.id)} title={label(e)}>
-                      <span className="tn">{e.name}</span>{e.shared && <span className="tid">共用</span>}{e.shortName && <span className="tid">{e.shortName}</span>}
-                    </button></li>
-                  ))}</ul>}
-                </li>
-              );
-            })}</ul>}
-          </li>
-        ))}</ul>
+        <div className="section-head"><h2 className="section-title">模型</h2><span className="label">{els.length}</span></div>
+        <PackageTree analysis={view.analysis} selectedId={selectedId} scopeId={scopeId} onPick={onPick} />
       </div>
       <div className="section">
         <div className="section-head"><h2 className="section-title">節點</h2></div>
