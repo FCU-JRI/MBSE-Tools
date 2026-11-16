@@ -28,6 +28,25 @@ export interface Element {
   endLine: number | null;
   /** 主體裡有沒有寫 subject。stakeholder 與 actor 前面一定要先有 subject */
   hasSubject?: boolean;
+  /** SysML v2 的關鍵字，例如 part def、perform action、snapshot（F-71） */
+  keyword?: string;
+  /** 樹上的上層：最近的、有列出來的擁有者；最上層是 null（F-71） */
+  parent?: string | null;
+  /** 沒有自己名字的使用（F-71）。name 取自被重定義的特徵，取不到就用原始碼的第一行 */
+  unnamed?: true;
+}
+
+/**
+ * 通用的關係（F-71）：特化、由誰定義、子集、重定義、參照、執行。和 Relation 分開，現有的畫面與檢查不讀這裡。
+ * to：對象有列出來就是它的 id；對象在標準庫或沒有列出來時是 null，名稱在 toName。
+ */
+export interface Link {
+  kind: "specialize" | "type" | "subset" | "redefine" | "reference" | "perform";
+  from: string;
+  to: string | null;
+  toName: string;
+  file: string;
+  line: number | null;
 }
 
 export interface Relation {
@@ -46,6 +65,9 @@ export interface Relation {
 export interface Extracted {
   elements: Element[];
   relations: Relation[];
+  /** 沒有名字、但有意義的使用（重定義的零件與屬性、perform、require constraint 等）。不在 elements 裡 */
+  unnamed: Element[];
+  links: Link[];
 }
 
 type Raw = Record<string, any>;
@@ -64,6 +86,43 @@ const NAME = "(?:[A-Za-z_]\\w*|'(?:[^'\\\\]|\\\\.)*')";
 const TAG_TEXT = new RegExp(`^[#@]\\s*(${NAME}(?:::${NAME})*)`);
 const FEATURE_TEXT = new RegExp(`^(?::>>\\s*)?(${NAME})`);
 
+// ───────── 通用的資訊（F-71）─────────
+// 元類別 → 關鍵字。沒列在這裡的由名稱推出：PartDefinition → part def、UseCaseUsage → use case
+const KEYWORDS: Record<string, string> = {
+  Package: "package", LibraryPackage: "library package", Comment: "comment",
+  CalculationDefinition: "calc def", CalculationUsage: "calc", AnalysisCaseDefinition: "analysis def", AnalysisCaseUsage: "analysis",
+  VerificationCaseDefinition: "verification def", VerificationCaseUsage: "verification", EnumerationDefinition: "enum def", EnumerationUsage: "enum",
+  ConjugatedPortDefinition: "port def", PerformActionUsage: "perform action", ExhibitStateUsage: "exhibit state", AssertConstraintUsage: "assert constraint",
+  AcceptActionUsage: "accept", SendActionUsage: "send", IncludeUseCaseUsage: "include use case", EventOccurrenceUsage: "event occurrence", ReferenceUsage: "ref",
+};
+/** 沒有名字也不列出來的使用：參數與標記是內部構造；滿足、先後、轉換已經是關係。 */
+const NOT_LISTED = new Set(["ReferenceUsage", "MetadataUsage", "SatisfyRequirementUsage", "SuccessionAsUsage", "TransitionUsage"]);
+const LINK_TYPES: Record<string, Link["kind"]> = { Subclassification: "specialize", FeatureTyping: "type", ConjugatedPortTyping: "type", Subsetting: "subset", Redefinition: "redefine", ReferenceSubsetting: "reference" };
+// 宣告上寫的對象：`:>> a`、`::> a`、`:> a, b`、`: A`，以及對應的關鍵字寫法。標準庫的元素不在輸出裡，名稱只能從這裡讀
+const WRITTEN = new RegExp(`(?<!:)(:>>|::>|:>|:(?![:>])|\\b(?:specializes|subsets|redefines|references|defined\\s+by|typed\\s+by)\\b)\\s*(~?${NAME}(?:::${NAME})*(?:\\s*,\\s*~?${NAME}(?:::${NAME})*)*)`, "g");
+const WRITTEN_KIND: Record<string, Link["kind"][]> = { ":>>": ["redefine"], redefines: ["redefine"], "::>": ["reference"], references: ["reference"], ":>": ["specialize", "subset"], specializes: ["specialize"], subsets: ["subset"], ":": ["type"], "defined by": ["type"], "typed by": ["type"] };
+const lastName = (q: string) => q.split("::").pop() ?? "";
+
+function keywordOf(e: Raw, text: string): string {
+  const t: string = e["@type"];
+  let k = KEYWORDS[t] ?? t.replace(/(Usage|Definition)$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() + (t.endsWith("Definition") ? " def" : "");
+  if (t === "OccurrenceUsage" && e.portionKind) k = String(e.portionKind);
+  else if (t === "ConstraintUsage") k = /^\s*assume\b/.test(text) ? "assume constraint" : /^\s*require\b/.test(text) ? "require constraint" : k;
+  else if (t === "PerformActionUsage" && !/^\s*perform\s+action\b/.test(text) && text.trim()) k = "perform";
+  else if (t === "ReferenceUsage" && e.direction) return String(e.direction);
+  // 前綴照文法的順序：方向、abstract、end、ref、individual
+  if (e.isIndividual && !e.portionKind) k = `individual ${k}`;
+  // ref 與 abstract 以原始碼上有沒有寫為準：列舉定義等在語意上是抽象的，但那不是使用者寫的
+  const prefix = (word: string) => new RegExp(`^\\s*(?:(?:in|out|inout|private|protected|public|abstract|readonly|derived|end|variation)\\s+)*${word}\\b`).test(text);
+  if (t.endsWith("Usage") && t !== "ReferenceUsage") {
+    if (prefix("ref") || (!text.trim() && e.isReference)) k = `ref ${k}`;
+    if (e.isEnd) k = `end ${k}`;
+  }
+  if (prefix("abstract")) k = `abstract ${k}`;
+  if (t.endsWith("Usage") && t !== "ReferenceUsage" && e.direction) k = `${e.direction} ${k}`;
+  return k;
+}
+
 const locOf = (e: Raw | undefined): Loc | null =>
   e && e["sysx:sourceLine"] && e["sysx:sourceEndLine"]
     ? { line: e["sysx:sourceLine"], col: e["sysx:sourceColumn"] ?? 1, endLine: e["sysx:sourceEndLine"], endCol: e["sysx:sourceEndColumn"] ?? 1 }
@@ -76,8 +135,9 @@ const refs = (v: any): string[] =>
 /**
  * files：專案自己的模型檔；shared：共用元件庫的檔案。其餘（元模型庫、標準庫）不列入。
  * textOf：某個位置開始的那一行原始碼，用來讀標準庫標記的名稱。
+ * only：整份輸出只來自一個檔案時的檔名。解析器只在有兩個以上的檔案時才標示每個套件來自哪個檔。
  */
-export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, textOf: (file: string, loc: Loc) => string = () => ""): Extracted {
+export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, textOf: (file: string, loc: Loc) => string = () => "", only = ""): Extracted {
   const byId = new Map<string, Raw>();
   for (const e of raw) byId.set(e["@id"], e);
 
@@ -98,6 +158,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       if (cur["sysx:sourceDocument"]) { found = String(cur["sysx:sourceDocument"]); break; }
       cur = byId.get(ref(cur.owner) ?? ref(cur.owningRelatedElement) ?? "");
     }
+    found ||= only;
     for (const id of chain) fileCache.set(id, found);
     return found;
   };
@@ -179,9 +240,26 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
 
   const withSubject = new Set(raw.filter((e) => e["@type"] === "SubjectMembership").map((e) => ref(e.owner) ?? ref(e.owningRelatedElement) ?? ""));
   const NAMED = /(Definition|Usage|Package|^Comment)$/;
-  const elements: Element[] = [];
-  for (const e of raw) {
-    if (!e.declaredName || !NAMED.test(e["@type"]) || !inProject(e)) continue;
+  // 元素的原始碼：解析器只對一部分元素附上全文，其餘的從位置讀它開頭的那一行
+  const textAt = (e: Raw | undefined): string => {
+    if (!e) return "";
+    if (e["sysx:sourceText"]) return String(e["sysx:sourceText"]);
+    const l = locOf(e);
+    return l ? textOf(fileOf(e), l) : "";
+  };
+  // 有列出來的元素：具名的，加上沒有名字但有意義的使用（F-71）
+  const namedRaw = raw.filter((e) => e.declaredName && NAMED.test(e["@type"]) && inProject(e));
+  const unnamedRaw = raw.filter((e) => !e.declaredName && /Usage$/.test(e["@type"]) && !NOT_LISTED.has(e["@type"]) && inProject(e));
+  const listed = new Set([...namedRaw, ...unnamedRaw].map((e) => e["@id"] as string));
+  const parentOf = (e: Raw): string | null => {
+    let cur = byId.get(ref(e.owner) ?? ref(e.owningRelatedElement) ?? "");
+    for (let i = 0; cur && i < 40; i++) {
+      if (listed.has(cur["@id"])) return cur["@id"];
+      cur = byId.get(ref(cur.owner) ?? ref(cur.owningRelatedElement) ?? "");
+    }
+    return null;
+  };
+  const build = (e: Raw, name: string): Element => {
     const id = e["@id"];
     const attrs: Record<string, string> = {};
     const attrLoc: Record<string, Loc> = {};
@@ -212,13 +290,13 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
         if (name && values.has(f)) attrs[name] = values.get(f) as string;
       }
     }
-    elements.push({
+    return {
       id,
       kind: e["@type"],
       category: categoryOf(id),
-      name: e.declaredName,
+      name,
       shortName: e.declaredShortName ?? null,
-      qualifiedName: e["sysx:mappingQualifiedName"] ?? e.qualifiedName ?? e.declaredName,
+      qualifiedName: e["sysx:mappingQualifiedName"] ?? e.qualifiedName ?? name,
       owner: ref(e.owner),
       doc: e["@type"] === "Comment" ? String(e.body ?? "").trim() : docs.get(id) ?? "",
       types: (generals.get(id) ?? []).map((g) => qn(g).split("::").pop() ?? "").filter(Boolean),
@@ -235,7 +313,52 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       line: e["sysx:sourceLine"] ?? null,
       endLine: e["sysx:sourceEndLine"] ?? null,
       ...(withSubject.has(id) ? { hasSubject: true } : {}),
-    });
+    };
+  };
+  const general = (el: Element): Element => { const r = byId.get(el.id) as Raw; return { ...el, keyword: keywordOf(r, textAt(r)), parent: parentOf(r) }; };
+  const elements: Element[] = namedRaw.map((e) => general(build(e, e.declaredName)));
+  const unnamed: Element[] = unnamedRaw.map((e) => {
+    // 名稱：被重定義的特徵（解析器已經推出來）→ 原始碼的第一行 → 關鍵字
+    const first = textAt(e).trim().split("\n")[0].replace(/\s*[{;]\s*$/, "").slice(0, 80);
+    return { ...general(build(e, String(e.name ?? (first || keywordOf(e, textAt(e)))))), unnamed: true as const };
+  });
+
+  // 通用的關係（F-71）
+  const links: Link[] = [];
+  const nameOf = (id: string): string => { const x = byId.get(id); return lastName(qn(id)) || String(x?.declaredName ?? x?.name ?? ""); };
+  const writtenCache = new Map<string, Partial<Record<Link["kind"], string[]>>>();
+  const written = (id: string): Partial<Record<Link["kind"], string[]>> => {
+    let w = writtenCache.get(id);
+    if (!w) {
+      w = {};
+      const head = textAt(byId.get(id)).split(/[{;=]/)[0];
+      for (const m of head.matchAll(WRITTEN)) {
+        const names = m[2].split(",").map((x) => lastName(x.trim().replace(/^~/, ""))).filter(Boolean);
+        for (const k of WRITTEN_KIND[m[1].replace(/\s+/g, " ")] ?? []) w[k] = [...(w[k] ?? []), ...names];
+      }
+      writtenCache.set(id, w);
+    }
+    return w;
+  };
+  const nth = new Map<string, number>();
+  for (const e of raw) {
+    const kind = LINK_TYPES[e["@type"]];
+    const from = ref(e.specific);
+    if (!kind || e.isImplied || !from || !listed.has(from)) continue;
+    const key = `${from} ${kind}`, i = nth.get(key) ?? 0;
+    nth.set(key, i + 1);
+    const g = ref(e.general);
+    const src = byId.get(from);
+    links.push({ kind, from, to: g && listed.has(g) ? g : null, toName: (g && byId.has(g) ? nameOf(g) : "") || written(from)[kind]?.[i] || "", file: fileOf(src), line: src?.["sysx:sourceLine"] ?? null });
+  }
+  // 執行：零件（或它的定義）執行某個動作。`perform a.b;` 指向別處的動作；`perform action x : X;` 執行的就是它自己
+  for (const e of raw) {
+    if (e["@type"] !== "PerformActionUsage" || !listed.has(e["@id"])) continue;
+    const from = parentOf(e);
+    if (!from) continue;
+    const sub = byId.get(ref(e.ownedReferenceSubsetting) ?? "");
+    const target = ref(sub?.referencedFeature) ?? ref(sub?.general) ?? e["@id"];
+    links.push({ kind: "perform", from, to: listed.has(target) ? target : null, toName: nameOf(target), file: fileOf(e), line: e["sysx:sourceLine"] ?? null });
   }
 
   const known = new Set(elements.map((e) => e.id));
@@ -307,5 +430,5 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       push("succession", ref(e.sourceFeature), refs(e.targetFeature)[0] ?? null, e);
     }
   }
-  return { elements, relations };
+  return { elements, relations, unnamed, links };
 }

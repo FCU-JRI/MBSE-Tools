@@ -38,12 +38,51 @@ export interface Project {
   highPower?: boolean; // 高功率（H 級以上）：TRR／FRR 只有指導老師能核可
   manual: Record<string, boolean>;
   signoffs: Signoff[];
+  /** 唯讀（F-72）：任何身分都不能改這個專案的內容 */
+  readOnly?: boolean;
+  /** 原封不動（F-72）：載入只讀檔，不加入 JRI.sysml 與共用元件庫，不轉換舊寫法，不寫入任何檔案 */
+  pristine?: boolean;
+  /** 參考專案的來源（F-73） */
+  reference?: { name: string; source: string; commit: string; license: string };
 }
 
 export class UserError extends Error {}
 
 const ID = /^[a-z0-9][a-z0-9-]{1,40}$/;
 const FILE = /^[A-Za-z0-9_\-一-鿿]+\.sysml$/;
+const FOLDER = /^[A-Za-z0-9_\-一-鿿]+$/;
+const MAX_DEPTH = 8;
+
+/**
+ * 模型檔的相對路徑（F-70）：`model/` 底下，可以有子資料夾，一律用正斜線。
+ * 每一段只收英數、底線、連字號與中文字，所以 `..`、絕對路徑、反斜線、以點開頭的名稱都過不了。
+ */
+export function isModelPath(file: string): boolean {
+  const parts = file.split("/");
+  return parts.length <= MAX_DEPTH && FILE.test(parts[parts.length - 1]) && parts.slice(0, -1).every((p) => FOLDER.test(p));
+}
+
+/** 模型檔在磁碟上的位置。路徑上有符號連結、因而指到 `model/` 外面的一律拒絕。 */
+async function modelFile(id: string, file: string): Promise<string> {
+  if (!isModelPath(file)) throw new UserError("檔名不合法。");
+  const model = path.join(dirOf(id), "model");
+  const full = path.join(model, ...file.split("/"));
+  // 檔案還不存在（新檔）時，檢查已經存在的那一段上層
+  let probe = full;
+  for (;;) {
+    const real = await fs.realpath(probe).catch(() => null);
+    if (real !== null) {
+      const base = await fs.realpath(model).catch(() => null);
+      const rest = path.relative(probe, full);
+      const target = rest ? path.join(real, rest) : real;
+      if (base === null || target !== path.join(base, ...file.split("/"))) throw new UserError("檔名不合法。");
+      return full;
+    }
+    const up = path.dirname(probe);
+    if (up === probe) throw new UserError("檔名不合法。");
+    probe = up;
+  }
+}
 
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,120}$/;
 const BRANCH_DIR = path.join(HOME_DIR, "branches");
@@ -264,14 +303,26 @@ export async function createProject(input: { id: string; name: string; kind: "an
   return project;
 }
 
+/** 專案的模型檔，含子資料夾裡的（F-70），以相對於 `model/` 的路徑表示。符號連結與以點開頭的資料夾不列。 */
 export async function listFiles(id: string): Promise<string[]> {
-  const names = await fs.readdir(path.join(dirOf(id), "model"));
-  return names.filter((n) => n.endsWith(".sysml") && !SHARED_FILE.test(n) && n !== "JRI.sysml").sort();
+  const out: string[] = [];
+  const walk = async (dir: string, prefix: string, depth: number): Promise<void> => {
+    for (const d of await fs.readdir(dir, { withFileTypes: true })) {
+      const rel = prefix + d.name;
+      if (d.isDirectory()) { if (depth < MAX_DEPTH && !d.name.startsWith(".")) await walk(path.join(dir, d.name), `${rel}/`, depth + 1); }
+      else if (d.isFile() && d.name.endsWith(".sysml")) out.push(rel);
+    }
+  };
+  await walk(path.join(dirOf(id), "model"), "", 1);
+  // 元模型庫與共用元件庫的檔名保留給工具自己用
+  return out.filter((n) => !SHARED_FILE.test(n) && n !== "JRI.sysml").sort();
 }
 
 export async function readFile(id: string, file: string): Promise<string> {
-  if (!FILE.test(file)) throw new UserError("檔名不合法。");
-  return fs.readFile(path.join(dirOf(id), "model", file), "utf8");
+  return fs.readFile(await modelFile(id, file), "utf8").catch((e: NodeJS.ErrnoException) => {
+    if (e.code === "ENOENT" || e.code === "EISDIR") throw new UserError(`找不到檔案 ${file}。`);
+    throw e;
+  });
 }
 
 const SHARED_DIR = path.join(HOME_DIR, "shared");
@@ -299,7 +350,13 @@ export async function saveShared(file: string, content: string): Promise<{ saved
 
 export async function sources(id: string, override?: { file: string; content: string }): Promise<Source[]> {
   const dir = dirOf(id);
-  await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
+  const project = await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
+  if (project.pristine) {
+    // 原封不動的專案（F-72）：只讀模型檔，其餘什麼都不做
+    const own = await listFiles(id);
+    if (override && !own.includes(override.file)) own.push(override.file);
+    return Promise.all(own.map(async (f): Promise<Source> => [f, override?.file === f ? override.content : await fs.readFile(path.join(dir, "model", f), "utf8")]));
+  }
 // 元模型庫以工具內的版本為準；專案內的副本（給 Claude 與離線閱讀用）不同時就更新，隨下一次儲存提交
   const lib = await fs.readFile(LIBRARY, "utf8");
   const copy = path.join(dir, "lib", "JRI.sysml");
@@ -326,17 +383,19 @@ export async function sources(id: string, override?: { file: string; content: st
 }
 
 export async function analyzeProject(id: string, override?: { file: string; content: string }): Promise<Analysis> {
-  return analyze(await sources(id, override), await listShared());
+  return analyze(await sources(id, override), (await readProject(id)).pristine ? [] : await listShared());
 }
 
 /** 儲存前先解析；有錯誤就不寫入，回傳診斷讓使用者修正。 */
 export async function saveFile(id: string, file: string, content: string, author: string, message: string): Promise<{ saved: boolean; analysis: Analysis; commit?: string }> {
-  if (!FILE.test(file) || SHARED_FILE.test(file) || file === "JRI.sysml") throw new UserError("檔名不合法。");
+  if (SHARED_FILE.test(file) || file === "JRI.sysml") throw new UserError("檔名不合法。");
+  const target = await modelFile(id, file);
   content = upgradeText(content); // 手寫的舊寫法照樣收，存成標準庫的寫法
   const analysis = await analyzeProject(id, { file, content });
   if (!analysis.ok) return { saved: false, analysis };
   const dir = dirOf(id);
-  await fs.writeFile(path.join(dir, "model", file), content, "utf8");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, content, "utf8");
   const sha = await commit(dir, author, message || `更新 ${file}`);
   return { saved: true, analysis, commit: sha };
 }

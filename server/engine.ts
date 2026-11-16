@@ -66,7 +66,7 @@ export async function analyze(sources: readonly Source[], shared: readonly strin
   }));
   const ok = !diagnostics.some((d) => d.severity === "error");
 
-  let extracted: Extracted = { elements: [], relations: [] };
+  let extracted: Extracted = { elements: [], relations: [], unnamed: [], links: [] };
   let satisfaction: Satisfaction[] = [];
   if (ok) {
     const json = await model.toApiJson();
@@ -75,7 +75,8 @@ export async function analyze(sources: readonly Source[], shared: readonly strin
     const lines = new Map(sources.map(([n, s]) => [n, s.split("\n")]));
     extracted = extract(raw, new Set(sources.map(([n]) => n).filter((n) => n !== LIBRARY_FILE && !sharedSet.has(n))), sharedSet,
       // 解析器回報的欄位是 UTF-8 位元組位置，中文字一個字佔三個位元組，不能直接當字串索引
-      (file, loc) => Buffer.from(lines.get(file)?.[loc.line - 1] ?? "", "utf8").subarray(Math.max(0, loc.col - 1)).toString("utf8"));
+      (file, loc) => Buffer.from(lines.get(file)?.[loc.line - 1] ?? "", "utf8").subarray(Math.max(0, loc.col - 1)).toString("utf8"),
+      sources.length === 1 ? sources[0][0] : "");
     try {
       const verdicts = await model.verifySatisfaction();
       satisfaction = verdicts.map((v: any) => ({

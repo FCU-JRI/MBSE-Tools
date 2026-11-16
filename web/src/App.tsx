@@ -142,8 +142,8 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <button className="proj" onClick={() => onOpen(p.id)}>
               <span className="heading" style={{ flex: 1 }}>{p.name}</span>
-              <span className="label">{p.kind === "annual" ? "年度計畫" : "小型專案"}</span>
-              <span className="label">{p.gates.length} 節點</span>
+              {p.reference ? <span className="tag">參考・唯讀</span> : <span className="label">{p.kind === "annual" ? "年度計畫" : "小型專案"}</span>}
+              {!p.reference && <span className="label">{p.gates.length} 節點</span>}
               <span className="label">{p.id}</span>
             </button>
             {user.caps.admin && <button className="tbtn" onClick={() => { setRemoving(p); setConfirmText(""); setError(""); }}>刪除</button>}
@@ -194,9 +194,11 @@ type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "pl
 const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
 
 /** id 是專案參照：main 或某個分支。分支和 main 用同一個畫面，所有分頁都能看、能改（F-33）。 */
-function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
-  const readOnly = !user.caps.edit;
+function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
   const [view, setView] = useState<View | null>(null);
+  // 唯讀的專案（F-72）對任何身分都是唯讀：畫面上的編輯功能一律收起來，伺服器也會擋
+  const user = useMemo<Me>(() => (view?.project.readOnly ? { ...me, caps: { ...me.caps, edit: false, confirm: false, merge: false } } : me), [me, view?.project.readOnly]);
+  const readOnly = !user.caps.edit;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [mode, setMode] = useState<Mode>("home");
@@ -271,6 +273,7 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
         {showTree && <Resizer side="left" open={panes.leftOpen} width={panes.left} onWidth={(w) => setPane({ left: w })} onToggle={() => setPane({ leftOpen: !panes.leftOpen })} />}
         <section className="center">
           {view.branch && <div className="banner"><span className="tag warn">分支</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>正在{readOnly ? "瀏覽" : "編輯"}分支 <b>{view.branch.name}</b>。{readOnly ? "這裡的內容還沒有合併進 main。" : "這裡的修改只存在這個分支，合併後才會進入 main。"}</span><button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main</button></div>}
+          {view.project.reference && <div className="banner"><span className="tag">參考</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>第三方的參考模型，唯讀、內容未經修改。{view.project.reference.name}，提交 <span className="data">{view.project.reference.commit.slice(0, 7)}</span>，授權 {view.project.reference.license}。</span><a className="tbtn" href={view.project.reference.source} target="_blank" rel="noreferrer">來源</a></div>}
           {view.warning && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ maxWidth: "none" }}>{view.warning}</span></div>}
           {errors.length > 0 && mode !== "source" && (
             <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>

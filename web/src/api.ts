@@ -11,7 +11,9 @@ export interface Analysis { ok: boolean; diagnostics: Diagnostic[]; elements: El
 export interface Check { id: string; label: string; hint: string; manual: boolean; pass: boolean; detail: string; missing: { id: string; name: string }[] }
 export interface Gate { id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean; checks: Check[]; done: number; total: number }
 export interface Signoff { gate: string; subsystem: string | null; decision: "APPROVE" | "DENY"; by: string; role: string; comment: string; at: string; commit: string }
-export interface Project { id: string; name: string; kind: "annual" | "small"; template?: "blank" | "sample" | "guided"; createdAt: string; gates: string[]; manual: Record<string, boolean>; signoffs: Signoff[] }
+export interface Project { id: string; name: string; kind: "annual" | "small"; template?: "blank" | "sample" | "guided"; createdAt: string; gates: string[]; manual: Record<string, boolean>; signoffs: Signoff[];
+  /** 唯讀、原封不動、參考專案的來源（F-72、F-73） */
+  readOnly?: boolean; pristine?: boolean; reference?: { name: string; source: string; commit: string; license: string } }
 export interface Doc { id: string; title: string; type: string; revision: string; url: string; note: string }
 export interface Step {
   id: string; zh: string; nasa: string; question: string; why: string; example: string; categories: string[];
