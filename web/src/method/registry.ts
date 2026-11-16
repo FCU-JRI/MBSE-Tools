@@ -1,6 +1,9 @@
 // METHOD.md 實作：各期新增的頁面登記在這裡，App.tsx 自動加上分頁（docs/IMPL-PLAN.md）。各期只改自己的區塊。
 import type { ComponentType } from "react";
 import type { Me, Meta, View } from "../api.ts";
+// [P7 火箭外形與模擬圖]
+import { RocketPage } from "./P7Rocket.tsx";
+// [/P7]
 
 export interface MethodPageProps {
   view: View;
@@ -33,5 +36,6 @@ export const METHOD_PAGES: MethodPage[] = [
   // [P6 方案比較與模型內公式]
   // [/P6]
   // [P7 火箭外形與模擬圖]
+  { id: "rocket", zh: "火箭外形", Component: RocketPage },
   // [/P7]
 ];
