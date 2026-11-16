@@ -2,7 +2,8 @@
 // 圖的記法依 OMG SysML v2（8.2.3 Graphical Notation）：
 //   定義（part def 等）為方角矩形、使用（part、requirement、action、state、use case…）為圓角矩形，
 //   名稱隔間第一行是 «關鍵字»，第二行是「<編號> 名稱 : 型別」；套件為帶標籤頁的資料夾；註解為折角便箋。
-//   相依（dependency）為虛線開放箭頭；satisfy、verify、allocate 為實線開放箭頭加 «關鍵字»；
+//   相依（dependency，含 #trace、#refinement）為虛線開放箭頭；satisfy、verify、allocate 為實線開放箭頭加 «關鍵字»；
+//   需求衍生是連結（#derivation connection，8.2.3.13），畫成實線開放箭頭，從子需求指向母需求，標 «#derivation»；
 //   組成（composite feature membership）在擁有者一端畫實心菱形、另一端是零件（使用）；
 //   「零件由哪個定義所定義」為實線、定義端空心三角形加兩點；起始為實心圓、完成為牛眼。
 import type { Analysis, Diagrams, Element } from "./api.ts";
@@ -67,7 +68,7 @@ export const stereotype = (e: Element) => {
   const k = KEYWORD[e.kind] ?? e.kind.replace(/(Usage|Definition)$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() + (e.kind.endsWith("Definition") ? " def" : "");
   return `«${k}»`;
 };
-const EDGE_LABEL: Record<string, string> = { derive: "«derive»", refine: "«refine»", trace: "«trace»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»" };
+const EDGE_LABEL: Record<string, string> = { derive: "«#derivation»", refine: "«#refinement»", trace: "«#trace»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»" };
 
 /** 依寬度折行：中日韓字算 2、其餘算 1。 */
 export function wrap(text: string, units: number, maxLines: number): string[] {
@@ -109,7 +110,7 @@ function commentNode(el: Element): GNode {
 
 const edge = (id: string, source: string, target: string, kind: string, text: string, remove: GEdge["remove"]): GEdge => ({
   id, source, target, kind, label: text, remove,
-  dashed: ["derive", "refine", "trace", "annotate"].includes(kind),
+  dashed: ["refine", "trace", "annotate"].includes(kind),
   head: kind === "define" ? "typing" : ["compose", "connect", "annotate"].includes(kind) ? "none" : "open",
   tail: kind === "compose" ? "diamond" : "none",
 });
@@ -249,8 +250,8 @@ export interface LinkTool { kind: string; zh: string; en: string; hint: string }
 /** 所有連線種類。 */
 export const ALL_LINKS: LinkTool[] = [
   { kind: "trace", zh: "追溯", en: "#trace dependency", hint: "從項目拉到它的來源（例如期望拉到利害關係人）" },
-  { kind: "derive", zh: "衍生", en: "#derive dependency", hint: "從衍生出的需求拉到來源需求或目的" },
-  { kind: "refine", zh: "細化", en: "#refine dependency", hint: "從細化者（例如量度）拉到被細化的項目" },
+  { kind: "derive", zh: "衍生", en: "#derivation connection", hint: "從衍生出的需求拉到來源需求或目的" },
+  { kind: "refine", zh: "細化", en: "#refinement dependency", hint: "從細化者（例如量度）拉到被細化的項目" },
   { kind: "satisfy", zh: "滿足", en: "satisfy", hint: "從負責的系統或元件拉到需求" },
   { kind: "allocate", zh: "分配", en: "allocate", hint: "從功能拉到負責執行的次系統" },
   { kind: "compose", zh: "組成", en: "part", hint: "從整體拉到部分（兩端都是系統、次系統或元件的定義）；會在整體裡建立一個零件" },

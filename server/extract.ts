@@ -34,6 +34,8 @@ export interface Relation {
   to: string;
   line: number | null;
   loc: Loc | null;
+  /** 這條關係所在的整句原始碼；只有和其他關係共用一句時（一條衍生連結掛多個子需求）才和 loc 不同 */
+  outer?: Loc | null;
   file: string;
 }
 
@@ -45,11 +47,18 @@ export interface Extracted {
 type Raw = Record<string, any>;
 
 const LIB_PREFIX = "JRI::";
+// 相依（dependency）上的標記 → 關係種類。Refinement 是標準庫 ModelingMetadata 的；TraceLink 是 JRI 自訂的。
 const LINK_KINDS: Record<string, Relation["kind"]> = {
-  DeriveLink: "derive",
   TraceLink: "trace",
-  RefineLink: "refine",
+  Refinement: "refine",
 };
+// 衍生用標準庫 RequirementDerivation 的連結：連結本身標 #derivation，兩端分別標 #original（母）與 #derive（子）
+const DERIVATION = "DerivationMetadata", ORIGINAL = "OriginalRequirementMetadata", DERIVED = "DerivedRequirementMetadata";
+// 標準庫標記的短名稱 → 定義名稱。標準庫的定義不在解析器的輸出裡，只能從原始碼上寫的名稱辨認
+const STANDARD: Record<string, string> = { derivation: DERIVATION, original: ORIGINAL, derive: DERIVED, refinement: "Refinement" };
+const NAME = "(?:[A-Za-z_]\\w*|'(?:[^'\\\\]|\\\\.)*')";
+const TAG_TEXT = new RegExp(`^[#@]\\s*(${NAME}(?:::${NAME})*)`);
+const FEATURE_TEXT = new RegExp(`^(?::>>\\s*)?(${NAME})`);
 
 const locOf = (e: Raw | undefined): Loc | null =>
   e && e["sysx:sourceLine"] && e["sysx:sourceEndLine"]
@@ -60,8 +69,11 @@ const ref = (v: any): string | null => (v && typeof v === "object" && "@id" in v
 const refs = (v: any): string[] =>
   Array.isArray(v) ? (v.map(ref).filter(Boolean) as string[]) : ref(v) ? [ref(v) as string] : [];
 
-/** files：專案自己的模型檔；shared：共用元件庫的檔案。其餘（元模型庫、標準庫）不列入。 */
-export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Extracted {
+/**
+ * files：專案自己的模型檔；shared：共用元件庫的檔案。其餘（元模型庫、標準庫）不列入。
+ * textOf：某個位置開始的那一行原始碼，用來讀標準庫標記的名稱。
+ */
+export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, textOf: (file: string, loc: Loc) => string = () => ""): Extracted {
   const byId = new Map<string, Raw>();
   for (const e of raw) byId.set(e["@id"], e);
 
@@ -136,13 +148,18 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
 
   // 標記：Annotation 把 MetadataUsage 連到被標記的元素；直接寫在主體內的 @X 則以 owner 為對象
   const tagsOf = new Map<string, string[]>();
+  /** 標記的定義名稱。專案或 JRI 庫定義的直接取名稱；標準庫的從原始碼讀（#derivation、@VerificationMethod）。 */
+  const typeNames = (m: Raw): string[] => {
+    const named = refs(m.type).map((t) => qn(t).split("::").pop() ?? "").filter(Boolean);
+    if (named.length) return named;
+    const l = locOf(m);
+    const last = (l ? TAG_TEXT.exec(textOf(fileOf(m), l))?.[1] : undefined)?.split("::").pop() ?? "";
+    return last ? [STANDARD[last] ?? last] : [];
+  };
   const addTag = (target: string, metaId: string) => {
     const m = byId.get(metaId);
     if (m?.["@type"] !== "MetadataUsage") return;
-    for (const t of refs(m.type)) {
-      const name = qn(t).split("::").pop() ?? "";
-      if (name) tagsOf.set(target, [...(tagsOf.get(target) ?? []), name]);
-    }
+    for (const name of typeNames(m)) tagsOf.set(target, [...(tagsOf.get(target) ?? []), name]);
   };
   for (const e of raw) {
     if (e["@type"] === "Annotation") {
@@ -175,15 +192,18 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
         if (l) attrLoc[name] = l;
       }
     }
-    // 內嵌的標記也可能帶值（例如 @VVMethod { kind = ... }）
+    // 內嵌的標記也可能帶值（例如 @VerificationMethod { kind = ... }）
     const metaLoc: Record<string, Loc> = {};
     for (const m of refs(e.ownedMember)) {
       const meta = byId.get(m);
       if (meta?.["@type"] !== "MetadataUsage") continue;
       const ml = locOf(meta);
-      for (const t of refs(meta.type)) { const tn = qn(t).split("::").pop() ?? ""; if (tn && ml) metaLoc[tn] = ml; }
+      for (const tn of typeNames(meta)) if (ml) metaLoc[tn] = ml;
       for (const f of refs(meta.ownedFeature)) {
-        const name = byId.get(f)?.declaredName ?? (generals.get(f) ?? []).map((g) => byId.get(g)?.declaredName).find(Boolean);
+        // 標準庫標記的欄位（例如 VerificationMethod 的 kind）在輸出裡沒有名稱，從原始碼讀
+        const fl = locOf(byId.get(f));
+        const name = byId.get(f)?.declaredName ?? (generals.get(f) ?? []).map((g) => byId.get(g)?.declaredName).find(Boolean)
+          ?? (fl ? FEATURE_TEXT.exec(textOf(fileOf(byId.get(f)), fl))?.[1] : undefined);
         if (name && values.has(f)) attrs[name] = values.get(f) as string;
       }
     }
@@ -214,8 +234,8 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
 
   const known = new Set(elements.map((e) => e.id));
   const relations: Relation[] = [];
-  const push = (kind: Relation["kind"], from: string | null, to: string | null, src: Raw | undefined) => {
-    if (from && to && known.has(from) && known.has(to)) relations.push({ kind, from, to, line: src?.["sysx:sourceLine"] ?? null, loc: locOf(src), file: fileOf(src) });
+  const push = (kind: Relation["kind"], from: string | null, to: string | null, src: Raw | undefined, whole?: Raw) => {
+    if (from && to && known.has(from) && known.has(to)) relations.push({ kind, from, to, line: src?.["sysx:sourceLine"] ?? null, loc: locOf(src), outer: whole ? locOf(whole) : null, file: fileOf(src) });
   };
   // 往上找到第一個已知的具名元素
   const namedOwner = (id: string | null): string | null => {
@@ -251,6 +271,17 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>): Ex
         return chain.length ? chain[chain.length - 1] : g;
       });
       push("allocate", ends[0] ?? null, ends[1] ?? null, e);
+    } else if (t === "ConnectionUsage" && (tagsOf.get(e["@id"]) ?? []).includes(DERIVATION)) {
+      if (!inProject(e)) continue;
+      const ends = refs(e.ownedFeature).map((f) => {
+        const end = byId.get(f);
+        const sub = byId.get(ref(end?.ownedReferenceSubsetting) ?? "");
+        return { end, tags: tagsOf.get(f) ?? [], target: ref(sub?.referencedFeature) ?? ref(sub?.general) ?? null };
+      });
+      const original = ends.find((x) => x.tags.includes(ORIGINAL))?.target ?? null;
+      const derived = ends.filter((x) => x.tags.includes(DERIVED));
+      // 一條連結可以有多個子需求；刪除其中一條時只拿掉那一端，所以位置記在端點上
+      for (const d of derived) push("derive", d.target, original, derived.length > 1 ? d.end : e, e);
     } else if (t === "ConnectionUsage" || t === "InterfaceUsage") {
       const ce = refs(e.relatedFeature);
       if (inProject(e)) push("connect", ce[0] ?? null, ce[1] ?? null, e);

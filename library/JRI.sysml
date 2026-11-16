@@ -33,11 +33,16 @@ package JRI {
     /* 確認需求 Validation Requirement */
     requirement def ValidationRequirement;
 
-    // 追溯關係：以 dependency 加上標記表示，例如
-    //   #derive dependency from 子需求 to 母需求;
+    // 追溯關係。衍生與細化用 SysML v2 標準庫的寫法，別的工具才認得；在這裡轉出，專案模型匯入 JRI 就能直接使用：
+    //   #derivation connection { end #derive ::> 子需求; end #original ::> 母需求; }
+    //   #refinement dependency from 較具體的 to 較概略的;
+    public import RequirementDerivation::derivation;
+    public import RequirementDerivation::original;
+    public import RequirementDerivation::derive;
+    public import ModelingMetadata::refinement;
+    // 一般追溯在標準庫沒有對應的標記，沿用自訂的：
+    //   #trace dependency from 下層 to 上層;
     metadata def <trace> TraceLink;
-    metadata def <derive> DeriveLink;
-    metadata def <refine> RefineLink;
 
     /* 出處：這個項目來自哪一份文件的哪一節。文件清單在專案的 pm.json（docs）。
        用法：@Source { sourceDoc = "DOC-001"; sourceRef = "3.2"; } */
@@ -80,15 +85,10 @@ package JRI {
     /* 確認事件 */
     verification def ValidationEvent;
 
-    enum def Method {
-        enum byTest;
-        enum byAnalysis;
-        enum byInspection;
-        enum byDemonstration;
-    }
-    metadata def <method> VVMethod {
-        attribute kind : Method;
-    }
+    // 驗證方法用標準庫的 VerificationMethod，值是 test、analyze、inspect、demo：
+    //   @VerificationMethod { kind = VerificationMethodKind::test; }
+    public import VerificationCases::VerificationMethod;
+    public import VerificationCases::VerificationMethodKind;
 
     // ───────── 風險與安全、作業與品質 ─────────
 

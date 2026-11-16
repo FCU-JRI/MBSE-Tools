@@ -404,7 +404,7 @@ test("合併時的模型衝突：一邊的修改已包含另一邊會自動解�
   const dir = path.join(home, "projects", "tc"), model = path.join(dir, "model", "model.sysml");
   const base = await fs.readFile(model, "utf8");
   const lineOf = (part: string) => { const l = base.split("\n").find((x) => x.includes(part)); assert.ok(l, `範本裡找不到 ${part}`); return l + "\n"; };
-  const L1 = lineOf("#derive dependency from '完成年度飛行任務' to '到達目標高度';"), L2 = lineOf("#derive dependency from '遠地點達 3000 m' to '完成年度飛行任務';");
+  const L1 = lineOf("#derivation connection { end #derive ::> '完成年度飛行任務'; end #original ::> '到達目標高度'; }"), L2 = lineOf("#derivation connection { end #derive ::> '遠地點達 3000 m'; end #original ::> '完成年度飛行任務'; }");
   assert.ok(base.includes(L1 + L2), "兩條關係要相鄰，才會讓 git 判定衝突");
   const commitOn = async (branch: string, content: string, message: string) => {
     if (branch !== "main") gitIn(dir, "checkout", "-q", "-b", branch);
@@ -413,7 +413,7 @@ test("合併時的模型衝突：一邊的修改已包含另一邊會自動解�
     gitIn(dir, "checkout", "-q", "main");
   };
   await commitOn("feature/superset", base.replace(L1 + L2, ""), "分支：刪掉兩條關係");
-  await commitOn("feature/rewrite", base.replace(L1, L1.replace("#derive", "#trace")), "分支：改寫第一條關係");
+  await commitOn("feature/rewrite", base.replace(L1, L1.replace("#derivation connection", "#derivation connection d1")), "分支：改寫第一條關係");
   await commitOn("main", base.replace(L1, ""), "main：刪掉第一條關係");
 
   // main 刪掉的那一行，分支把它改寫了：真的意見不同，不自動處理，main 不變
@@ -478,6 +478,103 @@ test("main 也會接上 GitHub 上的新提交：有人在 GitHub 合併後，�
   assert.match(r.data.warning, /無法解析/);
   assert.equal(r.data.analysis.ok, true);
   assert.notEqual(tips()[0], tips()[1]);
+});
+
+test("衍生、細化、驗證方法用 SysML v2 標準庫的寫法；舊寫法的專案與分支自動轉換（F-36）", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "tu", name: "轉換測試", kind: "annual" });
+  const dir = path.join(home, "projects", "tu"), file = path.join(dir, "model", "model.sysml");
+  const M = `${I}/api/projects/tu`;
+  const count = (view: any, kind: string) => view.analysis.relations.filter((r: any) => r.kind === kind).length;
+  const el = (view: any, name: string) => view.analysis.elements.find((e: any) => e.name === name);
+  const fresh = (await call(M)).data;
+  assert.deepEqual([count(fresh, "derive"), count(fresh, "refine"), count(fresh, "trace")], [4, 1, 2]);
+  assert.equal(el(fresh, "飛行測試遠地點量測").attrs.kind, "VerificationMethodKind::test");
+
+  // 把模型改回舊寫法並提交，模擬升級前就存在的專案
+  const standard = await fs.readFile(file, "utf8");
+  const legacy = standard
+    .replace(/#derivation connection \{ end #derive ::> (.+?); end #original ::> (.+?); \}/g, "#derive dependency from $1 to $2;")
+    .replace(/#refinement dependency/g, "#refine dependency")
+    .replace("@VerificationMethod { kind = VerificationMethodKind::test; }", "@VVMethod { kind = Method::byTest; }");
+  assert.equal((legacy.match(/#derive dependency/g) ?? []).length, 4);
+  await fs.writeFile(file, legacy, "utf8");
+  gitIn(dir, "commit", "-qam", "升級前的專案（舊寫法）");
+  const legacySha = gitIn(dir, "rev-parse", "HEAD").trim();
+
+  // 開啟就能解析，關係一條不少；檔案已經是標準寫法
+  let r = await call(M);
+  assert.equal(r.data.analysis.ok, true, JSON.stringify(r.data.analysis.diagnostics).slice(0, 300));
+  assert.deepEqual([count(r.data, "derive"), count(r.data, "refine"), count(r.data, "trace")], [4, 1, 2]);
+  assert.equal(el(r.data, "飛行測試遠地點量測").attrs.kind, "VerificationMethodKind::test");
+  assert.equal(await fs.readFile(file, "utf8"), standard, "轉換結果和新專案的範本完全相同");
+  // 轉換單獨提交成一筆，不和使用者的修改混在一起
+  assert.equal(gitIn(dir, "log", "-1", "--format=%an｜%s").trim(), "JRI MBSE｜衍生、細化、驗證方法改用 SysML v2 標準庫的寫法");
+  assert.equal(gitIn(dir, "status", "--porcelain", "--", "model"), "");
+  assert.equal(gitIn(dir, "show", "--stat", "--format=", "HEAD").trim().split("\n").length, 2, "這一筆只動到模型檔");
+
+  // 新增的關係與驗證方法用標準寫法；衍生的兩端必須是需求
+  const [need, sub] = [el(r.data, "到達目標高度"), el(r.data, "總衝量")];
+  r = await call(`${M}/relations`, "POST", { kind: "derive", from: sub.id, to: need.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(count(r.data, "derive"), 5);
+  assert.match(await fs.readFile(file, "utf8"), /#derivation connection \{ end #derive ::> .*'總衝量'; end #original ::> .*'到達目標高度'; \}/);
+  r = await call(`${M}/relations`, "POST", { kind: "derive", from: el(r.data, "指導老師").id, to: need.id });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /衍生只能連接需求類/);
+  r = await call(`${M}/relations/delete`, "POST", { kind: "derive", from: sub.id, to: need.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(count(r.data, "derive"), 4);
+  r = await call(`${M}/elements`, "POST", { category: "VerificationEvent", name: "分析驗證", doc: "以分析驗證。", verifies: el(r.data, "遠地點高度").qualifiedName, method: "analyze" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(el(r.data, "分析驗證").attrs.kind, "VerificationMethodKind::analyze");
+  r = await call(`${M}/elements`, "POST", { category: "VerificationEvent", name: "檢查驗證", doc: "舊的方法代號也收。", verifies: el(r.data, "遠地點高度").qualifiedName, method: "byInspection" });
+  assert.equal(el(r.data, "檢查驗證").attrs.kind, "VerificationMethodKind::inspect");
+
+  // 一條連結掛兩個子需求（手寫）：各算一條關係，刪掉其中一條時另一條還在
+  const two = (await fs.readFile(file, "utf8")).replace("#derivation connection { end #derive ::> '總衝量'; end #original ::> '遠地點高度'; }",
+    "#derivation connection { end #original ::> '遠地點高度'; end #derive ::> '總衝量'; end #derive ::> NGOs::'遠地點誤差'; }");
+  r = await call(`${M}/files/model.sysml`, "PUT", { content: two, message: "手寫：一條連結兩個子需求" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  let v2 = (await call(M)).data;
+  assert.equal(count(v2, "derive"), 5);
+  r = await call(`${M}/relations/delete`, "POST", { kind: "derive", from: el(v2, "遠地點誤差").id, to: el(v2, "遠地點高度").id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(count(r.data, "derive"), 4);
+  assert.ok(r.data.analysis.relations.some((x: any) => x.kind === "derive" && x.from === el(r.data, "總衝量").id && x.to === el(r.data, "遠地點高度").id));
+
+  // 原始碼分頁貼上舊寫法：照樣收，存成標準寫法
+  const pasted = (await fs.readFile(file, "utf8")).replace("package Risks {", "#refine dependency from Requirements::'總衝量' to NGOs::'遠地點誤差';\n    package Risks {");
+  r = await call(`${M}/files/model.sysml`, "PUT", { content: pasted, message: "貼上舊寫法" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.match(await fs.readFile(file, "utf8"), /#refinement dependency from Requirements::'總衝量' to NGOs::'遠地點誤差';/);
+
+  // 從升級前的版本開出來的分支（還是舊寫法，而且在既有的衍生關係旁邊加了新的）：列得出來、合併不衝突
+  gitIn(dir, "checkout", "-q", "-b", "feature/legacy", legacySha);
+  await fs.writeFile(file, legacy
+    .replace("package Requirements {", "package Requirements {\n        requirement <'REQ-SYS-960'> '舊寫法分支的需求' : SystemRequirement { doc /* 由舊寫法的分支加入。 */ }")
+    .replace("#derive dependency from '遠地點高度' to NGOs::'遠地點達 3000 m';", "#derive dependency from '遠地點高度' to NGOs::'遠地點達 3000 m';\n        #derive dependency from '舊寫法分支的需求' to NGOs::'遠地點達 3000 m';"), "utf8");
+  gitIn(dir, "commit", "-qam", "分支：用舊寫法新增需求與衍生關係");
+  gitIn(dir, "checkout", "-q", "main");
+  const row = (await call(`${M}/branches`)).data.find((b: any) => b.name === "feature/legacy");
+  assert.equal(row?.ok, true, row?.firstError);
+  const d = (await call(`${M}/branches/diff?name=feature/legacy`)).data;
+  assert.ok(d.changes.some((c: any) => c.type === "added" && c.key === "REQ-SYS-960"));
+  r = await call(`${M}/branches/merge`, "POST", { name: "feature/legacy" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.ok, true);
+  assert.ok(r.data.analysis.relations.some((x: any) => x.kind === "derive" && x.from === el(r.data, "舊寫法分支的需求").id && x.to === el(r.data, "遠地點達 3000 m").id));
+  assert.ok(el(r.data, "分析驗證"), "main 這邊的修改還在");
+  assert.ok(!/#derive\s+dependency|#refine\s+dependency|@VVMethod/.test(await fs.readFile(file, "utf8")), "合併後沒有殘留舊寫法");
+
+  // 升級前的版本仍然可以拿來比較
+  r = await call(`${M}/compare?from=${legacySha}&to=HEAD`);
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.ok(r.data.changes.some((c: any) => c.type === "added" && c.key === "REQ-SYS-960"));
+
+  // 復原會把模型換回舊版本的文字，也要能解析
+  r = await call(`${M}/undo`, "POST", {});
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.ok, true);
 });
 
 test("GitHub 儲存庫網址只接受 github.com", async () => {
@@ -662,9 +759,10 @@ test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字�
   assert.ok(uc.nodes.some((n: any) => n.keyword === "«use case»" && n.shape === "usage"), "使用案例是圓角的 «use case»");
   assert.ok(uc.nodes.filter((n: any) => n.keyword === "«part»" && / : Stakeholder$/.test(n.title.join(""))).length >= 2, "利害關係人是 «part»");
   const tr = uc.edges.find((e: any) => name(e.source) === "執行發射");
-  assert.deepEqual([tr?.kind, tr?.dashed, tr?.head, tr?.label], ["trace", true, "open", "«trace»"]);
+  assert.deepEqual([tr?.kind, tr?.dashed, tr?.head, tr?.label], ["trace", true, "open", "«#trace»"]);
   const req = g("req");
-  assert.ok(req.edges.some((e: any) => e.label === "«derive»" && e.dashed && e.head === "open"), "相依為虛線開放箭頭");
+  assert.ok(req.edges.some((e: any) => e.label === "«#refinement»" && e.dashed && e.head === "open"), "相依為虛線開放箭頭");
+  assert.ok(req.edges.some((e: any) => e.label === "«#derivation»" && !e.dashed && e.head === "open"), "需求衍生是連結，實線開放箭頭（8.2.3.13）");
   assert.ok(req.edges.some((e: any) => e.label === "«satisfy»" && !e.dashed) && req.edges.some((e: any) => e.label === "«verify»" && !e.dashed), "satisfy、verify 為實線");
   const r1 = req.nodes.find((n: any) => n.keyword === "«requirement»" && n.title.join("").startsWith("<REQ-"));
   assert.ok(r1 && r1.shape === "usage" && r1.compartments[0]?.[0] === "doc", "需求顯示編號與 doc 隔間");

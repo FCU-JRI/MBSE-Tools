@@ -65,7 +65,7 @@ requirement <'REQ-SYS-001'> '遠地點高度' : SystemRequirement {
     doc /* 火箭應到達 3000 m ± 150 m 的遠地點高度。 */
     @Source { sourceDoc = "DOC-001"; sourceRef = "3.2"; }
 }
-#derive dependency from '遠地點高度' to NGOs::'遠地點達 3000 m';
+#derivation connection { end #derive ::> '遠地點高度'; end #original ::> NGOs::'遠地點達 3000 m'; }
 ```
 
 關係的寫法：
@@ -73,11 +73,11 @@ requirement <'REQ-SYS-001'> '遠地點高度' : SystemRequirement {
 | 關係 | 寫法 |
 |---|---|
 | 追溯 | `#trace dependency from 下層 to 上層;` |
-| 衍生 | `#derive dependency from 下層 to 上層;` |
-| 細化 | `#refine dependency from 量度 to 目的;` |
+| 衍生 | `#derivation connection { end #derive ::> 下層; end #original ::> 上層; }` |
+| 細化 | `#refinement dependency from 量度 to 目的;` |
 | 滿足 | `satisfy 需求 by 元件;`，或寫在定義的主體內 `satisfy 需求;` |
 | 分配 | `allocate 功能 to 次系統;` |
-| 驗證 | 在驗證事件內 `objective { verify 需求; }`，並加 `@VVMethod { kind = Method::byTest; }` |
+| 驗證 | 在驗證事件內 `objective { verify 需求; }`，並加 `@VerificationMethod { kind = VerificationMethodKind::test; }`（值是 test、analyze、inspect、demo） |
 | 出處 | 在項目主體內 `@Source { sourceDoc = "DOC-001"; sourceRef = "章節"; }`，文件清單在 `pm.json` 的 `docs` |
 
 ## 送出
