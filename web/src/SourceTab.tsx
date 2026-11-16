@@ -6,7 +6,7 @@ import type { Diagnostic } from "./api.ts";
 const filePath = (file: string) => file.split("/").map(encodeURIComponent).join("/");
 
 /** 專家模式：直接編輯 SysML v2 原始碼，輸入時即時檢查，有錯誤不能儲存。 */
-export function SourceTab({ id, onSaved, readOnly }: { id: string; onSaved: () => void; readOnly?: boolean }) {
+export function SourceTab({ id, onSaved, readOnly, at }: { id: string; onSaved: () => void; readOnly?: boolean; at?: { file: string; line: number } | null }) {
   const [files, setFiles] = useState<string[]>([]);
   const [file, setFile] = useState("model.sysml");
   const [content, setContent] = useState("");
@@ -25,9 +25,13 @@ export function SourceTab({ id, onSaved, readOnly }: { id: string; onSaved: () =
   useEffect(() => {
     if (!listed) return;
     api<{ content: string }>(`/projects/${id}/files/${filePath(file)}`)
-      .then((r) => { setContent(r.content); setSaved(r.content); setDiags([]); })
+      .then((r) => { setContent(r.content); setSaved(r.content); setDiags([]); setLoaded(file); })
       .catch((e) => setStatus({ ok: false, text: e.message }));
   }, [id, file, listed]);
+  // 從別的分頁指定要看的位置（F-75）：切到那個檔，內容載入後捲到那一行並選起來
+  const [loaded, setLoaded] = useState("");
+  useEffect(() => { if (at && listed) setFile(at.file); }, [at, listed]);
+  useEffect(() => { if (at && loaded === at.file && content === saved) goto(at.line); }, [at, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 停止輸入 0.6 秒後檢查
   useEffect(() => {

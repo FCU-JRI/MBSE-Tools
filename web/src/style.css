@@ -133,6 +133,7 @@ textarea.input { height: auto; min-height: 64px; padding: var(--space-2) 0; font
 .tree-row .tn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-sans); font-size: 13px; }
 .tree-row .tc { font-size: 11px; color: var(--ink-faint); }
 .tree-row .tid { font-size: 10px; letter-spacing: 0.06em; color: var(--ink-faint); white-space: nowrap; }
+.tree-row.unnamed .tn { color: var(--ink-faint); font-style: italic; }
 .gate-row { display: grid; grid-template-columns: 1fr 64px auto; align-items: center; gap: var(--space-3); }
 
 /* 表格：只有列與列之間的髮絲線 */
@@ -140,6 +141,8 @@ table { border-collapse: collapse; width: 100%; }
 th { text-align: left; padding: var(--space-2) var(--space-3) var(--space-2) 0; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); white-space: nowrap; border-bottom: var(--stroke-hair) solid var(--line); }
 td { text-align: left; vertical-align: top; padding: var(--space-3) var(--space-3) var(--space-3) 0; border-bottom: var(--stroke-hair) solid var(--line); font-family: var(--font-sans); font-size: 14px; line-height: 22px; }
 td.id { font-family: var(--font-grotesk); font-size: 12px; letter-spacing: 0.06em; color: var(--ink-muted); white-space: nowrap; }
+/* 通用的表（F-75）：欄寬固定，長的名稱與路徑折行，不蓋到隔壁欄 */
+table.etable { table-layout: fixed; } table.etable td { overflow-wrap: anywhere; } table.etable td.id { white-space: normal; }
 tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1); } tr.rowbtn[aria-selected="true"] td { background: var(--surface-2); }
 
 /* 檢查清單 */

@@ -95,15 +95,18 @@ const KEYWORDS: Record<string, string> = {
   ConjugatedPortDefinition: "port def", PerformActionUsage: "perform action", ExhibitStateUsage: "exhibit state", AssertConstraintUsage: "assert constraint",
   AcceptActionUsage: "accept", SendActionUsage: "send", IncludeUseCaseUsage: "include use case", EventOccurrenceUsage: "event occurrence", ReferenceUsage: "ref",
 };
-/** 沒有名字也不列出來的使用：參數與標記是內部構造；滿足、先後、轉換已經是關係。 */
-const NOT_LISTED = new Set(["ReferenceUsage", "MetadataUsage", "SatisfyRequirementUsage", "SuccessionAsUsage", "TransitionUsage"]);
+/** 沒有名字也不列出來的使用：參數與標記是內部構造；滿足、先後、轉換、分配、包含已經是關係。 */
+const NOT_LISTED = new Set(["ReferenceUsage", "MetadataUsage", "SatisfyRequirementUsage", "SuccessionAsUsage", "TransitionUsage", "AllocationUsage", "IncludeUseCaseUsage"]);
 const LINK_TYPES: Record<string, Link["kind"]> = { Subclassification: "specialize", FeatureTyping: "type", ConjugatedPortTyping: "type", Subsetting: "subset", Redefinition: "redefine", ReferenceSubsetting: "reference" };
 // 宣告上寫的對象：`:>> a`、`::> a`、`:> a, b`、`: A`，以及對應的關鍵字寫法。標準庫的元素不在輸出裡，名稱只能從這裡讀
 const WRITTEN = new RegExp(`(?<!:)(:>>|::>|:>|:(?![:>])|\\b(?:specializes|subsets|redefines|references|defined\\s+by|typed\\s+by)\\b)\\s*(~?${NAME}(?:::${NAME})*(?:\\s*,\\s*~?${NAME}(?:::${NAME})*)*)`, "g");
 const WRITTEN_KIND: Record<string, Link["kind"][]> = { ":>>": ["redefine"], redefines: ["redefine"], "::>": ["reference"], references: ["reference"], ":>": ["specialize", "subset"], specializes: ["specialize"], subsets: ["subset"], ":": ["type"], "defined by": ["type"], "typed by": ["type"] };
 const lastName = (q: string) => q.split("::").pop() ?? "";
 
-function keywordOf(e: Raw, text: string): string {
+// 需求與案例的參數，關鍵字是它的角色（規範 8.2.2.21、8.2.2.22）
+const ROLE_KEYWORD: Record<string, string> = { SubjectMembership: "subject", ActorMembership: "actor", StakeholderMembership: "stakeholder", ObjectiveMembership: "objective" };
+function keywordOf(e: Raw, text: string, membership = ""): string {
+  if (ROLE_KEYWORD[membership]) return ROLE_KEYWORD[membership];
   const t: string = e["@type"];
   let k = KEYWORDS[t] ?? t.replace(/(Usage|Definition)$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() + (t.endsWith("Definition") ? " def" : "");
   if (t === "OccurrenceUsage" && e.portionKind) k = String(e.portionKind);
@@ -249,7 +252,10 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
   };
   // 有列出來的元素：具名的，加上沒有名字但有意義的使用（F-71）
   const namedRaw = raw.filter((e) => e.declaredName && NAMED.test(e["@type"]) && inProject(e));
-  const unnamedRaw = raw.filter((e) => !e.declaredName && /Usage$/.test(e["@type"]) && !NOT_LISTED.has(e["@type"]) && inProject(e));
+  // 需求衍生的連結、沒有名字的 stakeholder／actor／subject 參數也已經是關係，不重複列
+  const unnamedRaw = raw.filter((e) => !e.declaredName && /Usage$/.test(e["@type"]) && !NOT_LISTED.has(e["@type"]) && inProject(e)
+    && !(e["@type"] === "ConnectionUsage" && (tagsOf.get(e["@id"]) ?? []).includes(DERIVATION))
+    && !ROLE_KEYWORD[byId.get(ref(e.owningMembership) ?? "")?.["@type"] ?? ""]);
   const listed = new Set([...namedRaw, ...unnamedRaw].map((e) => e["@id"] as string));
   const parentOf = (e: Raw): string | null => {
     let cur = byId.get(ref(e.owner) ?? ref(e.owningRelatedElement) ?? "");
@@ -315,7 +321,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       ...(withSubject.has(id) ? { hasSubject: true } : {}),
     };
   };
-  const general = (el: Element): Element => { const r = byId.get(el.id) as Raw; return { ...el, keyword: keywordOf(r, textAt(r)), parent: parentOf(r) }; };
+  const general = (el: Element): Element => { const r = byId.get(el.id) as Raw; return { ...el, keyword: keywordOf(r, textAt(r), byId.get(ref(r.owningMembership) ?? "")?.["@type"]), parent: parentOf(r) }; };
   const elements: Element[] = namedRaw.map((e) => general(build(e, e.declaredName)));
   const unnamed: Element[] = unnamedRaw.map((e) => {
     // 名稱：被重定義的特徵（解析器已經推出來）→ 原始碼的第一行 → 關鍵字
