@@ -8,6 +8,9 @@ import { P3Page } from "./P3Page.tsx";
 // [P4 介面與 N² 矩陣]
 import { Interfaces } from "./Interfaces.tsx";
 // [/P4]
+// [P5 FMEA、風險與圖表]
+import { RiskFmeaPage } from "./p5/Page.tsx";
+// [/P5]
 
 export interface MethodPageProps {
   view: View;
@@ -39,6 +42,7 @@ export const METHOD_PAGES: MethodPage[] = [
   { id: "interfaces", zh: "介面", Component: Interfaces },
   // [/P4]
   // [P5 FMEA、風險與圖表]
+  { id: "fmea", zh: "風險與 FMEA", Component: RiskFmeaPage },
   // [/P5]
   // [P6 方案比較與模型內公式]
   // [/P6]

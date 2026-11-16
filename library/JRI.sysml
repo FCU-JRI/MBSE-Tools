@@ -92,7 +92,9 @@ package JRI {
 
     // ───────── 風險與安全、作業與品質 ─────────
 
-    /* 風險（FMEA）：嚴重度與可能性皆為 1–5 */
+    /* 風險：可能性（likelihood）與後果（severity）皆為 1–5（NASA 5 × 5 矩陣，METHOD.md 7.2）。
+       可以掛在任何層級，威脅的需求、來源與緩解都用 #trace 相依表示（方向見 P5 區塊的說明）。
+       舊模型把失效模式、影響、原因與偵測度寫在風險上，照樣保留可讀；新的失效模式改用 FailureMode。 */
     item def Risk {
         attribute failureMode : String;
         attribute effect : String;
@@ -107,6 +109,8 @@ package JRI {
         attribute residualSeverity : Integer;
         attribute residualLikelihood : Integer;
         attribute status : String;
+        /* 來源：FMEA、方案比較、任務剖面或其他（METHOD.md 7.2） */
+        attribute source : String;
     }
 
     /* 安全係數 Factor of Safety */
@@ -247,6 +251,28 @@ package JRI {
     }
     // [/P4]
     // [P5 FMEA、風險與圖表]
+    /* FMEA 的失效模式（METHOD.md 7.1）：一列是「次系統 × 功能」的一種潛在失效，名稱就是失效模式。
+       格式照台灣盃火箭競賽附件 12：O、S、D 為 1–10，RPN = O × S × D；矯正後的 O、S、D 另記。
+       S、D 沒填時工具給建議值（見 web/src/method/p5/core.ts），填了以人填的為準。
+       連結（都用 #trace dependency）：
+         失效模式 → 功能、失效模式 → 次系統（或元件）：這一列屬於哪個分配
+         風險 → 需求：風險威脅的需求；風險 → 其他元素：風險掛在哪個層級；風險 → 失效模式：風險的來源
+         需求 → 風險：因緩解這個風險而產生的需求；驗證事件 → 風險或失效模式：追加的驗證 */
+    item def FailureMode {
+        attribute effect : String;
+        attribute cause : String;
+        attribute control : String;
+        attribute occurrenceRating : Integer;
+        attribute severity : Integer;
+        attribute detection : Integer;
+        attribute correctiveAction : String;
+        attribute owner : String;
+        attribute due : String;
+        attribute done : String;
+        attribute occurrenceAfter : Integer;
+        attribute severityAfter : Integer;
+        attribute detectionAfter : Integer;
+    }
     // [/P5]
     // [P6 方案比較與模型內公式]
     // [/P6]

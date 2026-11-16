@@ -8,6 +8,9 @@ import { allocationGaps, MISSION_REQUIREMENT, profileGaps } from "./p3.ts";
 // [P4 介面與 N² 矩陣]
 import { interfaceMissing } from "./interfaceMissing.ts";
 // [/P4]
+// [P5 FMEA、風險與圖表]
+import { p5Issues } from "./p5/core.ts";
+// [/P5]
 
 export interface AnalysisView {
   /** 唯一的代號，例如 "stakeholders" */
@@ -51,6 +54,12 @@ export const ANALYSIS_VIEWS: AnalysisView[] = [
     pinned: ["InterfacePort", "Interface", "Subsystem", "Component", "ExternalEntity", "System"], missing: interfaceMissing },
   // [/P4]
   // [P5 FMEA、風險與圖表]
+  {
+    id: "risk-fmea", order: 10, zh: "風險與 FMEA", gate: "mdr",
+    question: "哪些地方可能出錯？會威脅哪些需求？緩解措施產生了哪些新的需求、設計或驗證？",
+    pinned: ["Risk", "FailureMode", "Function", "Subsystem", "Component", "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "VerificationEvent"],
+    missing: (a) => (a.ok ? p5Issues(a) : []),
+  },
   // [/P5]
   // [P6 方案比較與模型內公式]
   // [/P6]

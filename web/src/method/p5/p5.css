@@ -1,0 +1,16 @@
+/* P5：風險與 FMEA 頁面（只用網站既有的色彩變數） */
+.p5 .faint { color: var(--ink-faint); }
+.p5-scroll { overflow-x: auto; }
+.p5-sheet { min-width: 1500px; }
+.p5-sheet th { text-align: center; vertical-align: middle; }
+.p5-sheet td { vertical-align: top; }
+.p5-num { width: 3.2em; text-align: center; font-family: var(--font-grotesk); }
+.p5-text { width: 11em; min-height: 2.4em; resize: vertical; font: inherit; font-size: 12px; }
+.p5-text.wide { width: 16em; }
+.p5-sd { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.p5-alert > td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--danger) 10%, transparent); }
+.p5-why td { background: var(--bg); }
+.p5-new { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.p5-new input, .p5-new select { min-width: 8em; }
+.p5-figure { margin: 0; display: flex; flex-direction: column; gap: 8px; max-width: 46rem; }
+.linkish { background: none; border: 0; padding: 0; color: var(--ink); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font: inherit; text-align: left; }
