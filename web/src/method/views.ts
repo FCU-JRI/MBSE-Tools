@@ -11,6 +11,9 @@ import { interfaceMissing } from "./interfaceMissing.ts";
 // [P5 FMEA、風險與圖表]
 import { p5Issues } from "./p5/core.ts";
 // [/P5]
+// [P6 方案比較與模型內公式]
+import { evaluateTrades } from "./trade.ts";
+// [/P6]
 
 export interface AnalysisView {
   /** 唯一的代號，例如 "stakeholders" */
@@ -118,6 +121,13 @@ export const ANALYSIS_VIEWS: AnalysisView[] = [
   },
   // [/P5]
   // [P6 方案比較與模型內公式]
+  { id: "trade", order: 9, zh: "方案比較", question: "這次設計有哪些候選方案？用專案統一的準則與權重比下來選哪一個、為什麼不用其他的？",
+    gate: "mdr", pinned: ["DecisionMatrix", "Criterion", "Alternative", "SystemRequirement", "MOE", "MOP", "Risk", "Subsystem"],
+    missing: (a) => {
+      const ms = evaluateTrades(a);
+      if (!ms.length) return [{ id: null, text: "還沒有方案比較。每次要設計的地方（系統層、各次系統）都要跑一次。" }];
+      return ms.flatMap((m) => m.missing);
+    } },
   // [/P6]
   // [P7 火箭外形與模擬圖]
   // [/P7]

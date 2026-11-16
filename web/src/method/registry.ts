@@ -11,6 +11,10 @@ import { Interfaces } from "./Interfaces.tsx";
 // [P5 FMEA、風險與圖表]
 import { RiskFmeaPage } from "./p5/Page.tsx";
 // [/P5]
+// [P6 方案比較與模型內公式]
+import { TradeStudiesPage } from "./TradeStudies.tsx";
+import { FormulasPage } from "./Formulas.tsx";
+// [/P6]
 
 export interface MethodPageProps {
   view: View;
@@ -45,6 +49,8 @@ export const METHOD_PAGES: MethodPage[] = [
   { id: "fmea", zh: "風險與 FMEA", Component: RiskFmeaPage },
   // [/P5]
   // [P6 方案比較與模型內公式]
+  { id: "trades", zh: "方案比較", Component: TradeStudiesPage },
+  { id: "formulas", zh: "公式", Component: FormulasPage },
   // [/P6]
   // [P7 火箭外形與模擬圖]
   // [/P7]

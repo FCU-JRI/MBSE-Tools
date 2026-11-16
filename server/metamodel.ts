@@ -130,6 +130,17 @@ export const CATEGORIES: Category[] = [
       { name: "detectionAfter", zh: "矯正後 D", type: "int" } ] },
   // [/P5]
   // [P6 方案比較與模型內公式]
+  { id: "DecisionMatrix", zh: "方案比較", en: "Decision Matrix (Trade Study)", pillar: "parametrics", prefix: "TRD", pkg: "TradeStudies", keyword: "item",
+    help: "每次要設計的地方跑一次：列出候選方案，用專案統一的準則與權重逐項打分，選定一個、否決的留下理由。", example: "推進方案比較、回收方式比較",
+    fields: [{ name: "question", zh: "要決定什麼", type: "text" }, { name: "decision", zh: "結論與理由", type: "text" }] },
+  { id: "Criterion", zh: "評比準則", en: "Criterion", pillar: "parametrics", prefix: "CRIT", pkg: "TradeStudies", keyword: "item",
+    help: "專案統一的評比準則，客觀、可量測，並追溯到需求、MOE 或 MOP。必須（must）不通過就剔除；加分（want）依權重計分。風險也是一項準則。", example: "推重比（必須 ≥ 5）、成本、技術風險",
+    fields: [
+      { name: "kind", zh: "種類（must 必須／want 加分）", type: "text" }, { name: "weight", zh: "權重（加分準則）", type: "real" },
+      { name: "aspect", zh: "面向（performance／cost／schedule／safety／risk）", type: "text" }, { name: "measure", zh: "怎麼量、單位或門檻", type: "text" } ] },
+  { id: "Alternative", zh: "候選方案", en: "Alternative", pillar: "parametrics", prefix: "ALT", pkg: "TradeStudies", keyword: "item",
+    help: "方案比較裡的一個選項，建在方案比較裡面。選定的方案成為設計；否決的方案要寫理由，之後查得到為什麼不用它。", example: "固態馬達、混合式馬達",
+    fields: [{ name: "status", zh: "狀態（candidate／selected／rejected）", type: "text" }, { name: "rationale", zh: "選定或否決的理由", type: "text" }] },
   // [/P6]
   // [P7 火箭外形與模擬圖]
   // [/P7]
@@ -157,6 +168,7 @@ export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
   // [P5 FMEA、風險與圖表]
   // [/P5]
   // [P6 方案比較與模型內公式]
+  // 方案比較沿用 trace：準則 → 需求／MOE／MOP、決策矩陣 → 準則（只用部分準則時）、選定方案 ↔ 設計元素
   // [/P6]
   // [P7 火箭外形與模擬圖]
   // [/P7]

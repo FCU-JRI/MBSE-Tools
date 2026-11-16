@@ -131,3 +131,14 @@ export async function evaluate(sources: readonly Source[], exprs: readonly { exp
   }
   return out;
 }
+
+/**
+ * P6：用解析好的模型做求值（eval、instantiate、verifyConstraint）。共用同一條連線。
+ * 模型有錯誤時不呼叫 fn，回傳 null。
+ */
+export async function withModel<T>(sources: readonly Source[], fn: (model: any) => Promise<T>): Promise<T | null> {
+  const c = await conn();
+  const model = await c.parseSources(sources.map(([n, s]) => [n, s] as const));
+  if (model.diagnostics.some((d: any) => String(d.severity ?? "error") === "error")) return null;
+  return fn(model);
+}

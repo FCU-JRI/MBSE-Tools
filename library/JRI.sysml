@@ -275,6 +275,36 @@ package JRI {
     }
     // [/P5]
     // [P6 方案比較與模型內公式]
+    // 方案比較（METHOD.md 第 6 節、NASA SE Handbook 6.8）。名稱避開標準庫的 TradeStudies::TradeStudy。
+    /* 決策矩陣 Decision Matrix：一次方案比較。候選方案寫在它的主體裡 */
+    item def DecisionMatrix {
+        /* 這次要決定什麼 */
+        attribute question : String;
+        /* 結論與理由 */
+        attribute decision : String;
+    }
+    /* 評比準則 Criterion：專案統一定義，權重在這裡設一次。
+       kind = "must"（必須：不通過就剔除，不計分）或 "want"（加分：分數 1 到 5 乘以權重）；
+       aspect 是面向，例如 performance、cost、schedule、safety、risk（風險是評比準則之一）。
+       每項準則要以 #trace 追溯到需求、MOE 或 MOP */
+    item def Criterion {
+        attribute kind : String;
+        attribute weight : Real;
+        attribute aspect : String;
+        /* 怎麼量、單位或門檻（客觀可量測） */
+        attribute measure : String;
+    }
+    /* 候選方案 Alternative：status = "candidate"（評估中）、"selected"（選定）、"rejected"（否決，要寫理由） */
+    item def Alternative {
+        attribute status : String;
+        attribute rationale : String;
+    }
+    /* 候選方案在一項準則上的分數，寫在候選方案的主體裡，名稱用準則的編號。
+       必須準則：1 = 通過、0 = 不通過；加分準則：1 到 5 */
+    item def CriterionScore {
+        attribute score : Real;
+        attribute basis : String;
+    }
     // [/P6]
     // [P7 火箭外形與模擬圖]
     // [/P7]
