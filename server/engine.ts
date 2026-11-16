@@ -93,3 +93,41 @@ export async function analyze(sources: readonly Source[], shared: readonly strin
   cache.set(key, result);
   return result;
 }
+
+/** 求值的結果（P4）：數字（帶單位時 unit 是單位符號）、布林、列舉的名稱或文字；求不出來時 value 是 null，reason 說明原因。 */
+export interface Evaluated { value: number | boolean | string | null; unit: string; reason: string }
+
+const numberOf = (r: any): number | null => {
+  const k = String(r?.kind ?? "");
+  if (k === "real" || k === "int" || k === "integer") return Number(r.value);
+  if (k === "rational") return Number(r.numerator) / Number(r.denominator);
+  return null;
+};
+
+/**
+ * 在模型上求一組運算式的值（P4：介面兩端的數字與 assert constraint）。subject 是運算式所在的使用或定義的完整名稱，
+ * 空字串代表運算式本身用完整名稱。模型有錯誤時一律求不出來，不丟例外。
+ */
+export async function evaluate(sources: readonly Source[], exprs: readonly { expr: string; subject: string }[]): Promise<Evaluated[]> {
+  if (!exprs.length) return [];
+  const c = await conn();
+  const model = await c.parseSources(sources.map(([n, s]) => [n, s] as const));
+  if (model.diagnostics.some((d: any) => String(d.severity ?? "error") === "error")) return exprs.map(() => ({ value: null, unit: "", reason: "模型有錯誤" }));
+  const out: Evaluated[] = [];
+  for (const x of exprs) {
+    try {
+      const r: any = await model.eval(x.expr, x.subject ? { subject: x.subject } : {});
+      const k = String(r?.kind ?? "");
+      const n = numberOf(r);
+      if (n !== null) out.push({ value: n, unit: "", reason: "" });
+      else if (k === "quantity") out.push({ value: numberOf(r.magnitude), unit: String(r.unit ?? ""), reason: "" });
+      else if (k === "boolean") out.push({ value: Boolean(r.value), unit: "", reason: "" });
+      else if (k === "enum") out.push({ value: String(r.value?.name ?? ""), unit: "", reason: "" });
+      else if (k === "string") out.push({ value: String(r.value), unit: "", reason: "" });
+      else out.push({ value: null, unit: "", reason: k === "unset" || k === "sequence" ? "沒有值" : String(r?.reason ?? k) });
+    } catch (e) {
+      out.push({ value: null, unit: "", reason: String((e as Error).message ?? e).slice(0, 200) });
+    }
+  }
+  return out;
+}

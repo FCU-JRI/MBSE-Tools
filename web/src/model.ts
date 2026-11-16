@@ -804,10 +804,11 @@ function interconnectionGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge): Gra
   if (a.connectors) {
     for (const { c, i, from, to } of conns) {
       const label = `${c.name}${c.type ? ` : ${c.type}` : ""}`.trim();
-      // 直接連兩個零件的連結可以照原本的方式刪除；接在連接埠上的不提供（要改原始碼）
+      // 直接連兩個零件的連結可以照原本的方式刪除；JRI 的介面（P4，型別特化 JRI::Interface）當元素刪除；其餘要改原始碼
       const direct = c.fromChain.length === 1 && c.toChain.length === 1;
+      const named = c.kind === "interface" && c.id && s.t.byId.get(c.id)?.category === "Interface" ? { type: "element" as const, id: c.id } : null;
       edges.push({
-        ...edge(`connect:${from.node}:${to.node}:${i}`, from.node, to.node, "connect", label, direct ? { type: "relation", kind: "connect", from: from.node, to: to.node } : null),
+        ...edge(`connect:${from.node}:${to.node}:${i}`, from.node, to.node, "connect", label, direct ? { type: "relation", kind: "connect", from: from.node, to: to.node } : named),
         ...(from.port ? { sourcePort: from.port.split("|")[0] } : {}), ...(to.port ? { targetPort: to.port.split("|")[0] } : {}),
       });
     }
@@ -893,11 +894,13 @@ const link = (...kinds: string[]) => kinds.map((k) => ALL_LINKS.find((t) => t.ki
 export const CUSTOM_DEFAULT = { els: ["Stakeholder", "Expectation", "SystemRequirement", "Subsystem"], links: ["trace", "derive", "satisfy"] };
 /** 每種圖可以用的連線工具（選了工具再從起點拉到終點）。 */
 export const LINK_TOOLS: Record<DiagramKind, LinkTool[]> = {
-  pkg: link("compose"), decomp: link("compose"), ibd: link("connect"), req: link("derive", "refine", "satisfy", "trace"),
+  pkg: link("compose"), decomp: link("compose"), req: link("derive", "refine", "satisfy", "trace"),
   uc: [{ kind: "trace", zh: "參與者", en: "actor", hint: "從使用案例拉到參與的利害關係人" }, ...link("include")],
   act: link("succession"), stm: link("transition"), custom: ALL_LINKS,
   // 階段 4 新增的圖只顯示模型，不提供連線工具
   fdecomp: [], occ: [], calc: [],
+  // P4：互連圖可以編輯，介面工具從一個零件拉到另一個零件，自動找兩邊對得上的連接埠與介面定義
+  ibd: [...link("connect"), { kind: "interface", zh: "介面", en: "interface", hint: "從一個零件拉到另一個零件（同一個系統內）；自動找兩邊對得上的連接埠與介面定義。先到「介面」頁建連接埠與介面定義" }],
 };
 export const PALETTE: Record<DiagramKind, string[]> = {
   pkg: [], // 依套件而定，見 paletteOf

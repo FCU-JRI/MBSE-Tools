@@ -1,6 +1,9 @@
 // METHOD.md 實作：各期新增的頁面登記在這裡，App.tsx 自動加上分頁（docs/IMPL-PLAN.md）。各期只改自己的區塊。
 import type { ComponentType } from "react";
 import type { Me, Meta, View } from "../api.ts";
+// [P4 介面與 N² 矩陣]
+import { Interfaces } from "./Interfaces.tsx";
+// [/P4]
 
 export interface MethodPageProps {
   view: View;
@@ -27,6 +30,7 @@ export const METHOD_PAGES: MethodPage[] = [
   // [P3 任務剖面、功能分配、MOE／MOP／TPM]
   // [/P3]
   // [P4 介面與 N² 矩陣]
+  { id: "interfaces", zh: "介面", Component: Interfaces },
   // [/P4]
   // [P5 FMEA、風險與圖表]
   // [/P5]
