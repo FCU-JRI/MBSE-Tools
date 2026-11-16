@@ -72,7 +72,10 @@ export async function analyze(sources: readonly Source[], shared: readonly strin
     const json = await model.toApiJson();
     const raw = (JSON.parse(json.content) as any[]).map((e) => e.payload ?? e);
     const sharedSet = new Set(shared);
-    extracted = extract(raw, new Set(sources.map(([n]) => n).filter((n) => n !== LIBRARY_FILE && !sharedSet.has(n))), sharedSet);
+    const lines = new Map(sources.map(([n, s]) => [n, s.split("\n")]));
+    extracted = extract(raw, new Set(sources.map(([n]) => n).filter((n) => n !== LIBRARY_FILE && !sharedSet.has(n))), sharedSet,
+      // 解析器回報的欄位是 UTF-8 位元組位置，中文字一個字佔三個位元組，不能直接當字串索引
+      (file, loc) => Buffer.from(lines.get(file)?.[loc.line - 1] ?? "", "utf8").subarray(Math.max(0, loc.col - 1)).toString("utf8"));
     try {
       const verdicts = await model.verifySatisfaction();
       satisfaction = verdicts.map((v: any) => ({

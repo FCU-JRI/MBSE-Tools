@@ -9,10 +9,10 @@ import type { Pm } from "./pm.ts";
 import { PRIORITY_ZH } from "./pm.ts";
 
 const METHOD: Record<string, string> = {
-  "Method::byTest": "測試 Test",
-  "Method::byAnalysis": "分析 Analysis",
-  "Method::byInspection": "檢查 Inspection",
-  "Method::byDemonstration": "展示 Demonstration",
+  "VerificationMethodKind::test": "測試 Test",
+  "VerificationMethodKind::analyze": "分析 Analysis",
+  "VerificationMethodKind::inspect": "檢查 Inspection",
+  "VerificationMethodKind::demo": "展示 Demonstration",
 };
 
 export async function exportWorkbook(project: Project, a: Analysis, gates: GateStatus[], plan: Pm = { tasks: [], costs: [], people: [], docs: [], milestones: {} }): Promise<Buffer> {

@@ -16,7 +16,7 @@ import { toSvg } from "../web/src/exportSvg.ts";
 interface Section { heading: string; level: 1 | 2; paragraphs: string[]; table?: { head: string[]; rows: string[][] }; svg?: string; breakBefore?: boolean }
 export interface Report { title: string; subtitle: string; meta: [string, string][]; sections: Section[] }
 
-const METHOD: Record<string, string> = { "Method::byTest": "測試", "Method::byAnalysis": "分析", "Method::byInspection": "檢查", "Method::byDemonstration": "展示" };
+const METHOD: Record<string, string> = { "VerificationMethodKind::test": "測試", "VerificationMethodKind::analyze": "分析", "VerificationMethodKind::inspect": "檢查", "VerificationMethodKind::demo": "展示" };
 const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
 
 function diagramSvg(_title: string, a: Analysis, id: string): string | null {

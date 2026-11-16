@@ -3,6 +3,7 @@
 import type { Element } from "./extract.ts";
 import { CATEGORY } from "./metamodel.ts";
 import { UserError } from "./projects.ts";
+import { methodKind } from "./upgrade.ts";
 
 /** 名稱若不是基本識別字就加單引號。 */
 export function quote(name: string): string {
@@ -20,7 +21,7 @@ export interface NewElement {
   attrs?: Record<string, string>;
   source?: { doc?: string; ref?: string }; // 出處
   verifies?: string; // 驗證事件：被驗證需求的完整名稱
-  method?: string; // byTest | byAnalysis | byInspection | byDemonstration
+  method?: string; // 標準庫 VerificationMethodKind 的值：test | analyze | inspect | demo（也接受舊代號 byTest 等）
   parent?: string; // 結構元素：上層定義的完整名稱
 }
 
@@ -52,8 +53,9 @@ export function snippetFor(n: NewElement, elements: Element[], indent: string): 
   if (cat.keyword === "verification") {
     if (n.verifies) body.push(`objective { verify ${qname(n.verifies)}; }`);
     if (n.method) {
-      if (!/^by(Test|Analysis|Inspection|Demonstration)$/.test(n.method)) throw new UserError("驗證方法不合法。");
-      body.push(`@VVMethod { kind = Method::${n.method}; }`);
+      const kind = methodKind(n.method);
+      if (!kind) throw new UserError("驗證方法不合法。");
+      body.push(`@VerificationMethod { kind = VerificationMethodKind::${kind}; }`);
     }
   }
   const head =
@@ -75,9 +77,12 @@ export function relationSnippet(r: NewRelation, indent: string): string {
   const b = qname(r.to);
   switch (r.kind) {
     case "derive":
+      // 標準庫的需求衍生連結（F-36）。from = 衍生出來的子需求，to = 來源的母需求
+      return `${indent}#derivation connection { end #derive ::> ${a}; end #original ::> ${b}; }\n`;
     case "refine":
+      return `${indent}#refinement dependency from ${a} to ${b};\n`;
     case "trace":
-      return `${indent}#${r.kind} dependency from ${a} to ${b};\n`;
+      return `${indent}#trace dependency from ${a} to ${b};\n`;
     case "satisfy":
       // from = 負責滿足的系統或元件，to = 需求
       return `${indent}satisfy ${b} by ${a};\n`;
@@ -171,7 +176,8 @@ export function deleteElementText(content: string, el: Element, elements: Elemen
   const removed = [el, ...instances];
   const ids = new Set(removed.map((x) => x.id));
   for (const x of elements) if (removed.some((r) => r.id !== x.id && inside(x, r))) ids.add(x.id);
-  const rel = relations.filter((r) => (ids.has(r.from) || ids.has(r.to)) && r.loc).map((r) => r.loc as Loc);
+  // 被刪的是衍生連結的母需求時，整條連結都要拿掉（連結上可能還掛著其他子需求）
+  const rel = relations.filter((r) => (ids.has(r.from) || ids.has(r.to)) && r.loc).map((r) => ((ids.has(r.to) ? r.outer : null) ?? r.loc) as Loc);
   return removeLocs(content, [...removed.map((x) => x.loc as Loc), ...rel]);
 }
 
@@ -206,7 +212,7 @@ export function renameText(content: string, el: Element, newName: string, elemen
   const newTok = quote(name);
   const lineSet = new Set<number>();
   if (el.line) lineSet.add(el.line);
-  for (const r of relations) if ((r.from === el.id || r.to === el.id) && r.loc) for (let l = r.loc.line; l <= r.loc.endLine; l++) lineSet.add(l);
+  for (const r of relations) { const w = r.outer ?? r.loc; if ((r.from === el.id || r.to === el.id) && w) for (let l = w.line; l <= w.endLine; l++) lineSet.add(l); }
   for (const x of elements) if (x.typeIds.includes(el.id) && x.line) lineSet.add(x.line);
   // 套件改名時，上層為它加的 public import 也要跟著改
   if (el.kind === "Package") content.split("\n").forEach((l, i) => { if (importLine(el.name).test(l) || l.includes(`${quote(el.name)}::`)) lineSet.add(i + 1); });

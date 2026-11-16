@@ -29,13 +29,13 @@ package Project {
         requirement <'OBJ-001'> '遠地點達 3000 m' : Objective {
             doc /* 火箭遠地點高度達到 3000 m。 */
         }
-        #derive dependency from '完成年度飛行任務' to '到達目標高度';
-        #derive dependency from '遠地點達 3000 m' to '完成年度飛行任務';
+        #derivation connection { end #derive ::> '完成年度飛行任務'; end #original ::> '到達目標高度'; }
+        #derivation connection { end #derive ::> '遠地點達 3000 m'; end #original ::> '完成年度飛行任務'; }
 
         requirement <'MOE-001'> '遠地點誤差' : MOE {
             doc /* 實際遠地點與目標高度的偏差百分比。 */
         }
-        #refine dependency from '遠地點誤差' to '遠地點達 3000 m';
+        #refinement dependency from '遠地點誤差' to '遠地點達 3000 m';
     }
 
     // ───────── 結構 ─────────
@@ -101,13 +101,13 @@ package Project {
             subject r : '火箭';
             require constraint { r.apogee >= 2850 [m] and r.apogee <= 3150 [m] }
         }
-        #derive dependency from '遠地點高度' to NGOs::'遠地點達 3000 m';
+        #derivation connection { end #derive ::> '遠地點高度'; end #original ::> NGOs::'遠地點達 3000 m'; }
         satisfy '遠地點高度' by rocket;
 
         requirement <'REQ-PROP-001'> '總衝量' : SubsystemRequirement {
             doc /* 推進次系統應提供不低於 9000 N·s 的總衝量。 */
         }
-        #derive dependency from '總衝量' to '遠地點高度';
+        #derivation connection { end #derive ::> '總衝量'; end #original ::> '遠地點高度'; }
     }
 
     // ───────── 驗證 ─────────
@@ -115,7 +115,7 @@ package Project {
         verification <'VER-001'> '飛行測試遠地點量測' : VerificationEvent {
             doc /* 以飛行電腦氣壓計紀錄遠地點高度。 */
             objective { verify Requirements::'遠地點高度'; }
-            @VVMethod { kind = Method::byTest; }
+            @VerificationMethod { kind = VerificationMethodKind::test; }
         }
     }
 
