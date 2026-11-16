@@ -329,6 +329,26 @@ onPushRejected((dir) => {
 });
 
 /**
+ * 模型檔若還是舊寫法，轉成標準庫的寫法並單獨提交一筆（F-36）。
+ * 不和使用者的下一次儲存混在一起，版本紀錄才看得出這一筆是工具做的轉換。
+ */
+async function commitUpgrade(ref: string): Promise<void> {
+  const dir = dirOf(ref), model = path.join(dir, "model");
+  const names = (await fs.readdir(model).catch(() => [] as string[])).filter((n) => n.endsWith(".sysml"));
+  const legacy = async (n: string) => { const t = await fs.readFile(path.join(model, n), "utf8").catch(() => ""); return upgradeText(t) !== t; };
+  if (!(await Promise.all(names.map(legacy))).some(Boolean)) return;
+  const release = await lock(ref);
+  try {
+    await sources(ref); // 轉換並寫回檔案
+    await git(dir, "add", "--", "model");
+    if (await git(dir, "diff", "--cached", "--name-only", "--", "model")) {
+      await git(dir, ...who("JRI MBSE"), "commit", "-m", "衍生、細化、驗證方法改用 SysML v2 標準庫的寫法", "--", "model");
+      pushLater(dir);
+    }
+  } finally { release(); }
+}
+
+/**
  * 開啟專案或分支。分支第一次開啟時建立它的工作目錄；sync 為真（載入整個專案）時，main 和分支都順便跟上 GitHub 上的新提交。
  */
 export async function openBranch(ref: string, sync: boolean): Promise<void> {
@@ -352,6 +372,7 @@ export async function openBranch(ref: string, sync: boolean): Promise<void> {
       }
     } finally { release(); }
   }
+  await commitUpgrade(ref).catch(() => undefined); // 轉換失敗不擋開啟，模型若因此無法解析，畫面上會顯示錯誤
   warnings.set(dir, await syncBranch(id, branch));
 }
 

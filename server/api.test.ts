@@ -507,6 +507,10 @@ test("衍生、細化、驗證方法用 SysML v2 標準庫的寫法；舊寫法�
   assert.deepEqual([count(r.data, "derive"), count(r.data, "refine"), count(r.data, "trace")], [4, 1, 2]);
   assert.equal(el(r.data, "飛行測試遠地點量測").attrs.kind, "VerificationMethodKind::test");
   assert.equal(await fs.readFile(file, "utf8"), standard, "轉換結果和新專案的範本完全相同");
+  // 轉換單獨提交成一筆，不和使用者的修改混在一起
+  assert.equal(gitIn(dir, "log", "-1", "--format=%an｜%s").trim(), "JRI MBSE｜衍生、細化、驗證方法改用 SysML v2 標準庫的寫法");
+  assert.equal(gitIn(dir, "status", "--porcelain", "--", "model"), "");
+  assert.equal(gitIn(dir, "show", "--stat", "--format=", "HEAD").trim().split("\n").length, 2, "這一筆只動到模型檔");
 
   // 新增的關係與驗證方法用標準寫法；衍生的兩端必須是需求
   const [need, sub] = [el(r.data, "到達目標高度"), el(r.data, "總衝量")];
