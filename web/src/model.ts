@@ -10,6 +10,8 @@
 //   非組成的零件（ref part）在擁有者一端畫空心菱形，節點外框為虛線（8.2.3.11）；
 //   套件不畫成員時名稱寫在資料夾本體中央（8.2.3.5）。
 import type { Analysis, Diagrams, Element, Layout } from "./api.ts";
+import { ANALYSIS_VIEWS } from "./method/views.ts";
+import type { AnalysisView } from "./method/views.ts";
 
 const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
 
@@ -85,18 +87,19 @@ export const LINK_ZH: Record<string, string> = { specialize: "特化", type: "�
 
 /**
  * pkg 套件內容、decomp 零件分解（F-76）；req 需求、uc 使用案例（F-77）；stm 狀態機（F-78）；act 動作流程、fdecomp 功能分解（F-79）；
- * ibd 互連（F-80）；occ 個體、時間切片與快照、calc 計算與分析（F-81）；custom 自訂圖。
+ * ibd 互連（F-80）；occ 個體、時間切片與快照、calc 計算與分析（F-81）；custom 自訂圖；
+ * analysis 分析圖（METHOD.md 第 3 節，P2）：一個階段一張，跨套件放任何元素。
  */
-export type DiagramKind = "pkg" | "decomp" | "fdecomp" | "req" | "act" | "ibd" | "uc" | "stm" | "occ" | "calc" | "custom";
+export type DiagramKind = "pkg" | "decomp" | "fdecomp" | "req" | "act" | "ibd" | "uc" | "stm" | "occ" | "calc" | "custom" | "analysis";
 /** 內容完全由模型的擁有關係決定的圖：不畫使用者套件的框，也不提供「新增套件」。 */
 export const STRUCTURAL_KINDS = new Set<DiagramKind>(["pkg", "decomp", "fdecomp", "occ", "calc"]);
 /**
  * code／viewDef：SysML v2 標準檢視定義的短名稱與名稱（StandardViewDefinitions）。
- * members 只有自訂圖使用：這張圖放了哪些模型項目。
+ * members 只有自訂圖與分析圖使用：這張圖放了哪些模型項目。view：分析圖在 method/views.ts 的登記。
  */
-export interface DiagramDef { id: string; kind: DiagramKind; code: string; viewDef: string; title: string; context: string | null; members?: string[] }
+export interface DiagramDef { id: string; kind: DiagramKind; code: string; viewDef: string; title: string; context: string | null; members?: string[]; view?: AnalysisView }
 const VIEW: Record<DiagramKind, [code: string, viewDef: string]> = {
-  pkg: ["GV", "GeneralView"], decomp: ["GV", "GeneralView"], fdecomp: ["GV", "GeneralView"], req: ["GV", "GeneralView"], uc: ["GV", "GeneralView"], custom: ["GV", "GeneralView"],
+  pkg: ["GV", "GeneralView"], decomp: ["GV", "GeneralView"], fdecomp: ["GV", "GeneralView"], req: ["GV", "GeneralView"], uc: ["GV", "GeneralView"], custom: ["GV", "GeneralView"], analysis: ["GV", "GeneralView"],
   occ: ["GV", "GeneralView"], calc: ["GV", "GeneralView"],
   ibd: ["IV", "InterconnectionView"], act: ["AFV", "ActionFlowView"], stm: ["STV", "StateTransitionView"],
 };
@@ -131,6 +134,9 @@ export interface GNode {
   band?: number;
   /** 貼在圖框邊上的節點（這張圖的動作自己的參數、這個定義自己的連接埠）：位置由圖框決定，不能拖曳 */
   boundary?: "left" | "right";
+  /** P2 系統簡圖：包住零件的外框（大小由版面決定，可以拉大小）；inside 是這個節點所在的外框 */
+  container?: boolean;
+  inside?: string;
 }
 export interface NodePort { key: string; label: string; side: "left" | "right"; y: number }
 export interface GEdge {
@@ -143,11 +149,15 @@ export interface GEdge {
   remove: { type: "relation"; kind: string; from: string; to: string } | { type: "element"; id: string } | null;
   /** 接在端點節點的哪一個小方塊（NodePort 的 key）上；沒有就接在節點的外框 */
   sourcePort?: string; targetPort?: string;
+  /** 存轉折點用的識別碼（P2）：關係的連線不含流水號，模型增減別的關係時不會跑掉；沒有就用 id */
+  key?: string;
 }
 /** reverse：排版時要反向看待的連線種類（例如追溯是由下層指向上層，上層應排在上方）。 */
 export interface Graph { nodes: GNode[]; edges: GEdge[]; direction: "TB" | "BT" | "LR" | "RL"; reverse?: string[];
   /** 節點超過上限時，有幾個元素改列在隔間裡 */
-  folded?: number }
+  folded?: number;
+  /** P2：rocket 是系統簡圖，外框裡的零件照實際位置由上而下疊起來 */
+  arrange?: "tb" | "rocket" }
 
 /** SysML v2 的關鍵字：由元類別名稱得出，例如 PartDefinition → «part def»、UseCaseUsage → «use case»。 */
 const KEYWORD: Record<string, string> = { VerificationCaseUsage: "verification", VerificationCaseDefinition: "verification def", Comment: "comment" };
@@ -310,7 +320,7 @@ export function buildGraph(d: DiagramDef, a: Analysis, opts?: { packages: Set<st
 function baseGraph(d: DiagramDef, a: Analysis): Graph {
   const byId = new Map(a.elements.map((e) => [e.id, e]));
   const relEdge = (r: Analysis["relations"][number], i: number): GEdge => {
-    const e = edge(`${r.kind}:${r.from}:${r.to}:${i}`, r.from, r.to, r.kind, EDGE_LABEL[r.kind] ?? "", { type: "relation", kind: r.kind, from: r.from, to: r.to });
+    const e = { ...edge(`${r.kind}:${r.from}:${r.to}:${i}`, r.from, r.to, r.kind, EDGE_LABEL[r.kind] ?? "", { type: "relation", kind: r.kind, from: r.from, to: r.to }), key: `${r.kind}:${r.from}:${r.to}` };
     // 內建的 stakeholder、actor 是需求或使用案例的參數，規範 8.2.3.21 畫成一條沒有箭頭、沒有標籤的實線
     return r.form ? { ...e, dashed: false, head: "none", label: "" } : e;
   };
@@ -345,6 +355,28 @@ function baseGraph(d: DiagramDef, a: Analysis): Graph {
     return { nodes, edges, direction: "TB", reverse: ["derive", "refine", "trace", "satisfy", "verify"] };
   }
 
+  if (d.kind === "analysis") {
+    // 分析圖（P2）：使用者放進來的任何元素，以及它們之間已存在的所有關係。系統簡圖另外把零件定義畫成外框、零件疊在裡面
+    const ids = new Set((d.members ?? []).filter((id) => byId.has(id)));
+    const rocket = d.view?.arrange === "rocket";
+    const nodes: GNode[] = [];
+    const edges: GEdge[] = [];
+    const inside = new Set<string>();
+    for (const id of ids) {
+      const e = byId.get(id)!;
+      const parts = rocket && e.kind === "PartDefinition" ? stationOrder(a.elements.filter((u) => u.owner === e.id && u.kind === "PartUsage")) : [];
+      if (parts.length === 0) { nodes.push(node(e, a)); continue; }
+      const box = containerNode(e, parts.map((u) => makeNode(u)));
+      nodes.push(box.node);
+      for (const n of box.parts) if (!ids.has(n.id)) { nodes.push(n); inside.add(n.id); }
+    }
+    const all = new Set([...ids, ...inside]);
+    const rels = a.relations.filter((r) => all.has(r.from) && all.has(r.to));
+    edges.push(...rels.map((r, i) => relEdge(r, i)));
+    if (!rocket) composition(ids, nodes, edges);
+    linkEdges(a, all, edges);
+    return { nodes: roles(nodes, rels), edges, direction: "TB", reverse: ["derive", "refine", "trace", "satisfy", "verify"], arrange: rocket ? "rocket" : "tb" };
+  }
   if (d.kind === "pkg") return packageGraph(d, a);
   if (d.kind === "decomp" || d.kind === "fdecomp") return decompositionGraph(d, a);
   if (d.kind === "req") return requirementGraph(d, a, relEdge, roles);
@@ -896,7 +928,7 @@ export const CUSTOM_DEFAULT = { els: ["Stakeholder", "Expectation", "SystemRequi
 export const LINK_TOOLS: Record<DiagramKind, LinkTool[]> = {
   pkg: link("compose"), decomp: link("compose"), req: link("derive", "refine", "satisfy", "trace"),
   uc: [{ kind: "trace", zh: "參與者", en: "actor", hint: "從使用案例拉到參與的利害關係人" }, ...link("include")],
-  act: link("succession"), stm: link("transition"), custom: ALL_LINKS,
+  act: link("succession"), stm: link("transition"), custom: ALL_LINKS, analysis: ALL_LINKS,
   // 階段 4 新增的圖只顯示模型，不提供連線工具
   fdecomp: [], occ: [], calc: [],
   // P4：互連圖可以編輯，介面工具從一個零件拉到另一個零件，自動找兩邊對得上的連接埠與介面定義
@@ -910,8 +942,108 @@ export const PALETTE: Record<DiagramKind, string[]> = {
   ibd: [],
   uc: ["Stakeholder", "UseCase"],
   stm: ["Mode"],
-  custom: [],
+  custom: [], analysis: [],
   fdecomp: [], occ: [], calc: [],
 };
 /** 工具列上每個類別畫成哪種圖形：結構類別是定義（方角），其餘是使用（圓角）。 */
 export const CATEGORY_SHAPE: Record<string, Shape> = { System: "def", Subsystem: "def", Component: "def", ExternalEntity: "def" };
+
+// ───────── 分析圖（METHOD.md 第 3 節，P2）─────────
+/** 分析圖的識別碼前綴：版面紀錄與自訂圖資料都用 view:<登記的 id> */
+export const ANALYSIS_PREFIX = "view:";
+/** 分析圖的連線工具列預設顯示的種類 */
+export const ANALYSIS_LINKS = ["trace", "derive", "refine", "satisfy", "allocate"];
+/** 一張分析圖的中文標題：圖號加名稱 */
+export const analysisTitle = (v: Pick<AnalysisView, "order" | "zh">) => `圖 ${v.order} ${v.zh}`;
+/**
+ * 登記在 method/views.ts 的分析圖，依圖號由上而下排；圖號相同時依登記的先後。每個專案（包括新專案）都有，空的也列出來。
+ * members 存在 diagrams.json 的 views（P2）。和 diagramsOf 分開，審查報告與既有的圖清單不受影響。
+ */
+export function analysisDiagrams(extra?: Pick<Diagrams, "views">, views: AnalysisView[] = ANALYSIS_VIEWS): DiagramDef[] {
+  return views.map((v, i) => ({ v, i })).sort((x, y) => x.v.order - y.v.order || x.i - y.i).map(({ v }) => ({
+    id: `${ANALYSIS_PREFIX}${v.id}`, kind: "analysis" as const, code: VIEW.analysis[0], viewDef: VIEW.analysis[1], title: analysisTitle(v), context: null,
+    members: extra?.views?.[`${ANALYSIS_PREFIX}${v.id}`] ?? [], view: v,
+  }));
+}
+/** 這張分析圖的元素清單：釘選類別的元素（亮色）與其他所有元素（暗色）。SysML v2 的任何元素都列，標準庫的與套件本身除外。 */
+export function analysisPalette(a: Pick<Analysis, "elements">, v: Pick<AnalysisView, "pinned">, members: Iterable<string> = []): { pinned: Element[]; other: Element[] } {
+  const on = new Set(members);
+  const pin = new Set(v.pinned);
+  const list = a.elements.filter((e) => !e.shared && !isPackage(e) && e.kind !== "Comment" && !on.has(e.id));
+  const items = new Set(modelItems(list).map((e) => e.id));
+  // 釘選：釘選類別、而且是可以放進圖裡的那一層（結構類別取定義，其餘取使用）
+  return { pinned: list.filter((e) => e.category !== null && pin.has(e.category) && items.has(e.id)), other: list.filter((e) => !(e.category !== null && pin.has(e.category) && items.has(e.id))) };
+}
+
+/** 零件照實際位置由上而下：有 station 或 position 屬性（自鼻錐尖端起算）就照它排，沒有就照模型裡的順序。 */
+export function stationOrder(parts: Element[]): Element[] {
+  const at = (e: Element) => { const v = parseFloat(e.attrs?.station ?? e.attrs?.position ?? ""); return Number.isFinite(v) ? v : null; };
+  return parts.map((e, i) => ({ e, i, s: at(e) })).sort((x, y) => (x.s ?? Infinity) - (y.s ?? Infinity) || (x.e.line ?? 0) - (y.e.line ?? 0) || x.i - y.i).map((x) => x.e);
+}
+/** 外框的上方留給名稱，零件之間不留空隙，疊起來像一枚火箭的箭體。 */
+export const CONTAINER_PAD = 24;
+function containerNode(e: Element, parts: GNode[]): { node: GNode; parts: GNode[] } {
+  const base = makeNode(e);
+  const head = 26 + base.title.length * 16 + 8;
+  const w = Math.max(base.width, ...parts.map((p) => p.width)) + CONTAINER_PAD * 2;
+  const h = head + parts.reduce((s, p) => s + p.height, 0) + CONTAINER_PAD;
+  return { node: { ...base, compartments: [], width: w, height: h, container: true }, parts: parts.map((p) => ({ ...p, inside: e.id })) };
+}
+/** 外框上方名稱區的高度 */
+export const containerHead = (n: GNode) => 26 + n.title.length * 16 + 8;
+
+type Spot = { x: number; y: number; w?: number; h?: number };
+/**
+ * 系統簡圖的預設排法：外框由左而右並排，外框裡的零件由上而下緊貼著疊起來、置中。
+ * 只替還沒有位置的節點找位置；已經排過的（使用者拖過的）一律不動。其餘的節點交給一般的排法。
+ */
+export function rocketLayout(g: Pick<Graph, "nodes">, known: Record<string, Spot>): Record<string, Spot> {
+  const out: Record<string, Spot> = {};
+  const boxes = g.nodes.filter((n) => n.container);
+  let x = Math.min(24, ...Object.values(known).map((p) => p.x));
+  const right = Math.max(-Infinity, ...g.nodes.filter((n) => known[n.id]).map((n) => known[n.id].x + (known[n.id].w ?? n.width)));
+  if (Number.isFinite(right)) x = right + 72;
+  for (const b of boxes) {
+    const kids = g.nodes.filter((n) => n.inside === b.id);
+    let at = known[b.id];
+    if (!at) { at = { x, y: 24, w: b.width, h: b.height }; out[b.id] = at; x += b.width + 72; }
+    const w = at.w ?? b.width;
+    let y = Math.max(at.y + containerHead(b), ...kids.filter((k) => known[k.id]).map((k) => known[k.id].y + k.height));
+    for (const k of kids) {
+      if (known[k.id]) continue;
+      out[k.id] = { x: Math.round(at.x + (w - k.width) / 2), y: Math.round(y) };
+      y += k.height;
+    }
+    // 零件超出外框時把外框拉長（只改這一次新排的外框）
+    if (out[b.id]) out[b.id] = { ...out[b.id], h: Math.max(b.height, y - at.y + CONTAINER_PAD) };
+  }
+  return out;
+}
+
+/** 手動連線的轉折點存在版面紀錄裡（layout.json 這張圖的底下），鍵是 bend|<連線>|<序號>。 */
+export const BEND = "bend|";
+export const bendKey = (edgeKey: string, i: number) => `${BEND}${edgeKey}|${i}`;
+export function bendsOf(nodes: Record<string, Spot> | undefined, edgeKey: string): { x: number; y: number }[] {
+  const pre = `${BEND}${edgeKey}|`;
+  return Object.entries(nodes ?? {}).filter(([k]) => k.startsWith(pre)).map(([k, p]) => ({ i: Number(k.slice(pre.length)), x: p.x, y: p.y }))
+    .filter((p) => Number.isInteger(p.i)).sort((a, b) => a.i - b.i).map(({ x, y }) => ({ x, y }));
+}
+/** 換掉某條連線的轉折點（list 是空的就是拉直），其餘的位置不動。 */
+export function withBends(nodes: Record<string, Spot> | undefined, edgeKey: string, list: { x: number; y: number }[]): Record<string, Spot> {
+  const pre = `${BEND}${edgeKey}|`;
+  const next = Object.fromEntries(Object.entries(nodes ?? {}).filter(([k]) => !k.startsWith(pre)));
+  list.forEach((p, i) => { next[bendKey(edgeKey, i)] = { x: Math.round(p.x), y: Math.round(p.y) }; });
+  return next;
+}
+/** 在折線上離 p 最近的那一段插入新的轉折點，回傳插入的位置。pts 含兩端點。 */
+export function insertAt(pts: { x: number; y: number }[], p: { x: number; y: number }): number {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
+    const d = (a.x + t * dx - p.x) ** 2 + (a.y + t * dy - p.y) ** 2;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best; // 插在 bends 的第 best 個之前（pts 的第 best 段）
+}

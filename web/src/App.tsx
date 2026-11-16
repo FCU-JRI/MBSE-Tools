@@ -3,7 +3,8 @@ import type { FormEvent } from "react";
 import { api, baseOf, getAuthor, setAuthor } from "./api.ts";
 import type { Diagrams, Element, Me, Meta, MeResponse, Project, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
-import { diagramsOf, isPackage, packageOf, TOP_DIAGRAM, treeOf } from "./model.ts";
+import { analysisDiagrams, diagramsOf, isPackage, packageOf, TOP_DIAGRAM, treeOf } from "./model.ts";
+import { ABBR } from "./method/zh.ts";
 import type { DiagramDef } from "./model.ts";
 import { Diagram } from "./Diagram.tsx";
 import { Inspector } from "./Inspector.tsx";
@@ -240,7 +241,8 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
     saveExtra({ ...extra, custom: [...extra.custom, { id: did, title: title.trim().slice(0, 60) || "自訂圖", members: [] }] });
     setDiagramId(did); setMode("diagram");
   };
-  const diagrams = useMemo(() => (view ? diagramsOf(view.analysis, extra) : []), [view, extra]);
+  // 分析圖（P2，METHOD.md 第 3 節）排在最前面：一個階段一張，由上而下
+  const diagrams = useMemo(() => (view ? [...analysisDiagrams(extra), ...diagramsOf(view.analysis, extra)] : []), [view, extra]);
   const tree = useMemo(() => (view ? treeOf(view.analysis) : null), [view]);
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><div className="tbtn-row">{id !== baseOf(id) && <button className="tbtn primary" onClick={() => onOpen(baseOf(id))}>回到 main</button>}<button className={`tbtn ${id === baseOf(id) ? "primary" : ""}`} onClick={onHome}>回專案列表</button></div></div>;
   if (!view) return <div className="page"><p className="label">載入模型中</p></div>;
@@ -367,6 +369,7 @@ interface TreeProps {
 
 /** 圖的清單分成幾組，各自可以收合（F-76）。 */
 const DIAGRAM_GROUPS: [id: string, zh: string, kinds: DiagramDef["kind"][]][] = [
+  ["analysis", "分析圖（依階段由上而下）", ["analysis"]],
   ["pkg", "套件內容", ["pkg"]], ["decomp", "分解", ["decomp"]], ["fdecomp", "功能分解", ["fdecomp"]],
   ["req", "需求與使用案例", ["req", "uc"]], ["behavior", "動作與狀態機", ["act", "stm"]], ["ibd", "互連", ["ibd"]], ["occ", "個體與時間切片", ["occ"]], ["calc", "計算與分析", ["calc"]],
   ["custom", "自訂圖", ["custom"]],
@@ -389,17 +392,29 @@ function Tree({ view, diagrams, onAddDiagram, mode, diagramId, scopeId, gateId, 
           if (list.length === 0) return null;
           // 正在看的圖所在的那一組一定展開，其餘依使用者上次的選擇
           const current = mode === "diagram" && list.some((d) => d.id === diagramId);
-          const expanded = open[gid] ?? (current || gid === "other" || gid === "custom");
+          const expanded = open[gid] ?? (current || gid === "other" || gid === "custom" || gid === "analysis");
           return (
             <div key={gid} className="diagram-group">
               <button className="tree-row group-row" aria-expanded={expanded} onClick={() => toggle(gid, !expanded)}>
                 <span className="tid">{expanded ? "▾" : "▸"}</span><span className="tn">{zh}</span><span className="tc">{list.length}</span>
               </button>
-              {expanded && <ul className="tree">{list.map((d) => (
-                <li key={d.id}><button className="tree-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)} title={d.id.includes(":") && d.kind !== "custom" ? d.id.slice(d.id.indexOf(":") + 1).replaceAll("::", " › ") || d.title : d.title}>
-                  <span className="tid">{d.code}</span><span className="tn">{d.title}</span>
-                </button></li>
-              ))}</ul>}
+              {expanded && <ul className="tree">{list.map((d) => {
+                // 分析圖（P2）：顯示這一步要回答的問題與還缺幾項；只是提示，不鎖
+                if (d.kind === "analysis" && d.view) {
+                  let miss = 0;
+                  try { miss = d.view.missing?.(view.analysis).length ?? 0; } catch { /* 檢查壞掉不影響清單 */ }
+                  return (
+                    <li key={d.id}><button className="tree-row analysis-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)} title={`${d.view.question}${miss ? `\n還缺 ${miss} 項` : "\n這一步要的項目都有了"}`}>
+                      <span className="tid">{d.view.order}</span><span className="tn">{d.view.zh}</span><span className="tc">{miss ? `缺 ${miss}` : "✓"}</span>
+                    </button></li>
+                  );
+                }
+                return (
+                  <li key={d.id}><button className="tree-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)} title={d.id.includes(":") && d.kind !== "custom" ? d.id.slice(d.id.indexOf(":") + 1).replaceAll("::", " › ") || d.title : d.title}>
+                    <span className="tid" title={ABBR[d.code] ? `${ABBR[d.code].zh}（${ABBR[d.code].en}）` : undefined}>{d.code}</span><span className="tn">{d.title}</span>
+                  </button></li>
+                );
+              })}</ul>}
             </div>
           );
         })}
