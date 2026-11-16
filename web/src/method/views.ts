@@ -5,6 +5,9 @@ import type { Analysis } from "../api.ts";
 import { verificationRows } from "../../../server/method/p1-req.ts";
 // [/P1]
 import { allocationGaps, MISSION_REQUIREMENT, profileGaps } from "./p3.ts";
+// [P4 介面與 N² 矩陣]
+import { interfaceMissing } from "./interfaceMissing.ts";
+// [/P4]
 
 export interface AnalysisView {
   /** 唯一的代號，例如 "stakeholders" */
@@ -43,6 +46,9 @@ export const ANALYSIS_VIEWS: AnalysisView[] = [
     pinned: ["Function", "System", "SystemRequirement", "MOE", "MOP"], missing: allocationGaps },
   // [/P3]
   // [P4 介面與 N² 矩陣]
+  { id: "interfaces", order: 6, zh: "介面", gate: "mdr",
+    question: "次系統之間交換什麼（機械、熱、電、流體、資料、人）？兩端的數字對得上嗎？兩端負責人都同意了嗎？",
+    pinned: ["InterfacePort", "Interface", "Subsystem", "Component", "ExternalEntity", "System"], missing: interfaceMissing },
   // [/P4]
   // [P5 FMEA、風險與圖表]
   // [/P5]

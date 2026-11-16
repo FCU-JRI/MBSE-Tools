@@ -5,6 +5,9 @@ import type { Me, Meta, View } from "../api.ts";
 import { VerificationMatrix } from "./P1Requirements.tsx";
 // [/P1]
 import { P3Page } from "./P3Page.tsx";
+// [P4 介面與 N² 矩陣]
+import { Interfaces } from "./Interfaces.tsx";
+// [/P4]
 
 export interface MethodPageProps {
   view: View;
@@ -33,6 +36,7 @@ export const METHOD_PAGES: MethodPage[] = [
   { id: "allocation", zh: "剖面與分配", Component: P3Page },
   // [/P3]
   // [P4 介面與 N² 矩陣]
+  { id: "interfaces", zh: "介面", Component: Interfaces },
   // [/P4]
   // [P5 FMEA、風險與圖表]
   // [/P5]

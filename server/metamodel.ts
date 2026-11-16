@@ -112,6 +112,10 @@ export const CATEGORIES: Category[] = [
   // [P3 任務剖面、功能分配、MOE／MOP／TPM]
   // [/P3]
   // [P4 介面與 N² 矩陣]
+  { id: "InterfacePort", zh: "連接埠", en: "Port Definition", pillar: "structure", prefix: "IFP", pkg: "Interfaces", keyword: "port def",
+    help: "次系統身上和別人交換東西的地方，帶它要管的物理量（電壓、力、溫度、資料速率⋯）。在「介面」頁新增與修改。", example: "電源埠（電壓、最大電流）" },
+  { id: "Interface", zh: "介面", en: "Interface Definition", pillar: "structure", prefix: "IF", pkg: "Interfaces", keyword: "interface def",
+    help: "兩個次系統之間交換什麼：機械、熱、電、流體、資料、人。兩端的數字用限制檢查是否對得上；變更要兩端負責人都同意才定案。", example: "航電供電介面" },
   // [/P4]
   // [P5 FMEA、風險與圖表]
   // [/P5]

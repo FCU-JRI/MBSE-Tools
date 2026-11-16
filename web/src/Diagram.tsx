@@ -453,7 +453,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     if (readOnly || !c.source || !c.target || c.source === c.target) return;
     const kind = tool !== "select" ? tool : linkTools[0]?.kind;
     if (!kind) return;
-    act(() => api<View>(`/projects/${pid}/relations`, "POST", { kind, from: c.source, to: c.target }));
+    // P4：介面走介面的路由（自動找兩邊的連接埠與介面定義）
+    act(() => api<View>(kind === "interface" ? `/projects/${pid}/interfaces/connect` : `/projects/${pid}/relations`, "POST", { kind, from: c.source, to: c.target }));
   }, [readOnly, tool, linkTools, pid, act]);
 
   const clearSel = () => { setSelEdge(null); setSelNote(null); setConfirm(null); onSelectEdge(null); };

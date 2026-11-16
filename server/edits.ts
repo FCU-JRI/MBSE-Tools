@@ -59,8 +59,8 @@ export function snippetFor(n: NewElement, elements: Element[], indent: string): 
     }
   }
   const head =
-    cat.keyword === "part def"
-      ? `part def <'${sn}'> ${quote(name)} :> ${cat.id}`
+    cat.keyword.endsWith(" def") // part def，以及 P4 的 port def、interface def：定義用特化
+      ? `${cat.keyword} <'${sn}'> ${quote(name)} :> ${cat.id}`
       : `${cat.keyword} <'${sn}'> ${quote(name)} : ${cat.id}`;
   if (body.length === 0) return `${indent}${head};\n`;
   return `${indent}${head} {\n${body.map((l) => `${indent}    ${l}\n`).join("")}${indent}}\n`;

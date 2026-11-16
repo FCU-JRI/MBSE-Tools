@@ -215,6 +215,36 @@ package JRI {
     }
     // [/P3]
     // [P4 介面與 N² 矩陣]
+    // 介面（METHOD.md 第 4 節）：連接埠帶它要管的物理量，介面把兩端接起來，兩端的數字用 assert constraint 檢查。
+    //   port def 電源埠 :> InterfacePort { attribute voltage : Real; }
+    //   interface def 電源介面 :> Interface { attribute :>> interfaceKind = InterfaceKind::electrical;
+    //       end supply : 電源埠; end load : 電源埠; assert constraint 電壓相符 { supply.voltage == load.voltage } }
+    //   part def 火箭 :> System { part 電池 : 電池組; part 航電 : 飛行電腦; interface 供電 : 電源介面 connect 電池.pwr to 航電.pwr; }
+    /* 介面種類：機械、熱、電、流體、資料、人 */
+    enum def InterfaceKind { enum mechanical; enum thermal; enum electrical; enum fluid; enum data; enum human; }
+    /* 連接埠：具體的連接埠特化它，帶它要管的物理量 */
+    port def InterfacePort;
+    /* 介面：兩端各一個連接埠。具體的介面特化它，兩端依序重定義 endA、endB。
+       負責人是兩端次系統的負責人，變更要兩人都同意才定案（同意紀錄在專案的 interfaces.json）。
+       驗證欄位和 P1 的需求屬性同名：驗證方法用標準的 @VerificationMethod，理由用 @Rationale（ModelingMetadata），
+       驗證負責人 verificationLead、驗證層級 verificationLevel（system／subsystem／component）。 */
+    abstract interface def Interface {
+        end port endA : InterfacePort;
+        end port endB : InterfacePort;
+        attribute interfaceKind : InterfaceKind;
+        /* 成熟度：存在（MDR）、暫定（PDR）、凍結（CDR） */
+        attribute maturity : String[0..1];
+        attribute ownerA : String[0..1];
+        attribute ownerB : String[0..1];
+        attribute verificationLead : String[0..1];
+        /* system／subsystem／component */
+        attribute verificationLevel : String[0..1];
+    }
+    /* 外部提供的次系統：只管介面，規格是給定值；收到時要檢查並確認適用於這次的用途與環境（SE Handbook 5.1.1.2.2）。
+       用法：#given part def 官方推進 :> Subsystem { ... } */
+    metadata def <given> GivenSpec {
+        attribute supplier : String[0..1];
+    }
     // [/P4]
     // [P5 FMEA、風險與圖表]
     // [/P5]
