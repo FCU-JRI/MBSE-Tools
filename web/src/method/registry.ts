@@ -1,6 +1,9 @@
 // METHOD.md 實作：各期新增的頁面登記在這裡，App.tsx 自動加上分頁（docs/IMPL-PLAN.md）。各期只改自己的區塊。
 import type { ComponentType } from "react";
 import type { Me, Meta, View } from "../api.ts";
+// [P5 FMEA、風險與圖表]
+import { RiskFmeaPage } from "./p5/Page.tsx";
+// [/P5]
 
 export interface MethodPageProps {
   view: View;
@@ -29,6 +32,7 @@ export const METHOD_PAGES: MethodPage[] = [
   // [P4 介面與 N² 矩陣]
   // [/P4]
   // [P5 FMEA、風險與圖表]
+  { id: "fmea", zh: "風險與 FMEA", Component: RiskFmeaPage },
   // [/P5]
   // [P6 方案比較與模型內公式]
   // [/P6]

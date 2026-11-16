@@ -66,15 +66,15 @@ export const CATEGORIES: Category[] = [
     help: "用測試、分析、檢查或展示，證明某條需求有被做到。", example: "以飛行電腦氣壓計紀錄遠地點高度。" },
   { id: "ValidationEvent", zh: "確認事件", en: "Validation Event", pillar: "vv", prefix: "VAL", pkg: "Verification", keyword: "verification",
     help: "確認做出來的系統真的符合利害關係人的期望（做對的東西）。", example: "飛行後與指導老師檢視任務是否達成目的。" },
-  { id: "Risk", zh: "風險", en: "Risk (FMEA)", pillar: "risk", prefix: "RISK", pkg: "Risks", keyword: "item",
-    help: "可能出錯的事。嚴重度與可能性各評 1–5，並寫下緩解方式。", example: "降落傘未展開",
+  { id: "Risk", zh: "風險", en: "Risk", pillar: "risk", prefix: "RISK", pkg: "Risks", keyword: "item",
+    help: "可能出錯的事。可能性與後果（嚴重度）各評 1–5，並寫下緩解方式。可以掛在任務、系統、次系統、元件或介面上，再連到它威脅的需求。", example: "降落傘未展開",
     fields: [
       { name: "failureMode", zh: "失效模式", type: "text" }, { name: "effect", zh: "影響", type: "text" },
-      { name: "cause", zh: "原因", type: "text" }, { name: "severity", zh: "嚴重度 1–5", type: "int" },
+      { name: "cause", zh: "原因", type: "text" }, { name: "severity", zh: "後果（嚴重度）1–5", type: "int" },
       { name: "likelihood", zh: "可能性 1–5", type: "int" }, { name: "detection", zh: "偵測度 1–5（越難發現越高）", type: "int" },
       { name: "mitigation", zh: "緩解措施", type: "text" }, { name: "residualSeverity", zh: "緩解後嚴重度 1–5", type: "int" },
       { name: "residualLikelihood", zh: "緩解後可能性 1–5", type: "int" }, { name: "owner", zh: "負責人", type: "text" },
-      { name: "status", zh: "狀態（開啟／結案）", type: "text" } ] },
+      { name: "status", zh: "狀態（開啟／結案）", type: "text" }, { name: "source", zh: "來源（FMEA／方案比較／任務剖面）", type: "text" } ] },
   { id: "SafetyFactor", zh: "安全係數", en: "Factor of Safety", pillar: "risk", prefix: "FOS", pkg: "Safety", keyword: "item",
     help: "結構或壓力元件的實際安全係數與要求值。", example: "燃燒室爆破安全係數",
     fields: [
@@ -111,6 +111,16 @@ export const CATEGORIES: Category[] = [
   // [P4 介面與 N² 矩陣]
   // [/P4]
   // [P5 FMEA、風險與圖表]
+  { id: "FailureMode", zh: "失效模式", en: "Failure Mode (FMEA)", pillar: "risk", prefix: "FM", pkg: "FMEA", keyword: "item",
+    help: "FMEA 的一列：某個次系統執行某個功能時可能怎麼失效。發生度、嚴重度、難檢度各評 1–10（比賽附件 12 的尺度），RPN = O × S × D。嚴重度 8 以上一定要寫矯正措施。", example: "無法有效提供各次系統電力",
+    fields: [
+      { name: "effect", zh: "失效影響", type: "text" }, { name: "cause", zh: "失效因素", type: "text" },
+      { name: "control", zh: "現狀控制", type: "text" }, { name: "occurrenceRating", zh: "發生度 O 1–10", type: "int" },
+      { name: "severity", zh: "嚴重度 S 1–10（空白用建議值）", type: "int" }, { name: "detection", zh: "難檢度 D 1–10（空白用建議值）", type: "int" },
+      { name: "correctiveAction", zh: "建議矯正措施／狀態", type: "text" }, { name: "owner", zh: "負責人", type: "text" },
+      { name: "due", zh: "日期", type: "text" }, { name: "done", zh: "完成校正（是／否）", type: "text" },
+      { name: "occurrenceAfter", zh: "矯正後 O", type: "int" }, { name: "severityAfter", zh: "矯正後 S", type: "int" },
+      { name: "detectionAfter", zh: "矯正後 D", type: "int" } ] },
   // [/P5]
   // [P6 方案比較與模型內公式]
   // [/P6]
