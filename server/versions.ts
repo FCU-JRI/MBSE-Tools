@@ -21,14 +21,21 @@ async function resolve(dir: string, ref: string): Promise<string> {
 
 /** 解析某個版本（分支、標籤或提交）的模型，用目前的元模型庫與共用元件庫。 */
 async function analyzeAt(dir: string, sha: string): Promise<Analysis> {
-  const names = (await git(dir, "ls-tree", "--name-only", sha, "model/")).split("\n").map((n) => n.trim()).filter((n) => n.endsWith(".sysml"));
+  const names = await modelFilesAt(dir, sha);
   const shared = await listShared();
   const list: Source[] = [["JRI.sysml", await fs.readFile(LIBRARY, "utf8")]];
   for (const f of shared) list.push([f, await readShared(f)]);
   // 舊版本可能還是舊寫法，先在記憶體裡轉換才解析得了（不動到版本紀錄）
-  for (const n of names) list.push([path.posix.basename(n), upgradeText(await git(dir, "show", `${sha}:${n}`) + "\n")]);
+  for (const n of names) list.push([inModel(n), upgradeText(await git(dir, "show", `${sha}:${n}`) + "\n")]);
   return analyze(list, shared);
 }
+
+/** 某個版本裡的模型檔（儲存庫內的完整路徑，含子資料夾，F-70）。 */
+async function modelFilesAt(dir: string, sha: string): Promise<string[]> {
+  return (await gitRaw(dir, ["ls-tree", "-r", "-z", "--name-only", sha, "--", "model/"])).split("\0").filter((n) => MODEL_FILE.test(n));
+}
+/** 儲存庫內的路徑 → 相對於 `model/` 的路徑，也就是解析時的檔名。 */
+const inModel = (n: string) => n.slice("model/".length);
 
 export interface BranchInfo { name: string; remote: boolean; ahead: number; behind: number; author: string; date: string; subject: string; ok: boolean; errors: number; firstError: string }
 
@@ -125,7 +132,7 @@ export function merge3(base: unknown, ours: unknown, theirs: unknown, prefer: "o
 
 // 模型檔的衝突（F-34）。git 只要兩邊改到相鄰的幾行就算衝突，其中一種其實不需要人判斷：
 // 一邊只刪了東西，而另一邊把同樣的東西也刪了、另外還多改了一些。這時「多改的那一邊」已經包含兩邊的修改。
-const MODEL_FILE = /^model\/[^/]+\.sysml$/;
+const MODEL_FILE = /^model\/.+\.sysml$/;
 const HUNK = /^<{7} [^\n]*\n([\s\S]*?)^\|{7}[^\n]*\n([\s\S]*?)^={7}\n([\s\S]*?)^>{7} [^\n]*\n/gm;
 const tally = (list: string[]) => { const m = new Map<string, number>(); for (const l of list) m.set(l, (m.get(l) ?? 0) + 1); return m; };
 /** 兩行文字有多像（0 到 1）：相鄰兩個字的組合有多少是共有的。 */
@@ -245,18 +252,19 @@ const fixedSources = async (shared: string[]): Promise<Source[]> => {
 
 /** 某個版本的模型檔轉成目前寫法後的內容：路徑 → [原本的內容, 轉換後的內容]。只在記憶體裡算，不動版本紀錄。 */
 async function modernAt(dir: string, sha: string): Promise<Map<string, [before: string, after: string]>> {
-  const names = (await git(dir, "-c", "core.quotepath=false", "ls-tree", "--name-only", sha, "model/")).split("\n").map((n) => n.trim()).filter((n) => MODEL_FILE.test(n));
+  const names = await modelFilesAt(dir, sha);
   const shared = await listShared();
   const raw = new Map<string, string>();
   for (const n of names) raw.set(n, await gitRaw(dir, ["show", `${sha}:${n}`]));
-  const texts = new Map(names.map((n) => [path.posix.basename(n), upgradeText(raw.get(n) as string)]));
+  const texts = new Map(names.map((n) => [inModel(n), upgradeText(raw.get(n) as string)]));
   const next = await embedChecked(await fixedSources(shared), texts, shared);
-  return new Map(names.map((n) => [n, [raw.get(n) as string, next.get(path.posix.basename(n)) as string]]));
+  return new Map(names.map((n) => [n, [raw.get(n) as string, next.get(inModel(n)) as string]]));
 }
 
 /** 把工作目錄裡的模型檔轉成目前的寫法並寫回。模型檔因此有未提交的變更時回傳 true。呼叫的人要自己排隊（lock）。 */
 async function modernizeWorktree(ref: string): Promise<boolean> {
   const dir = dirOf(ref);
+  if ((await readProject(ref)).pristine) return false; // 原封不動的專案不轉換（F-72）
   const list = await sources(ref); // 文字層的舊寫法（F-36）在這裡轉換並寫回
   const shared = await listShared();
   const own = new Set(await listFiles(ref));
@@ -291,7 +299,7 @@ async function mergeInto(ref: string, sha: string, author: string, message: stri
         const r = merged === null ? null : /^<{7} /m.test(merged) ? resolveConflicts(merged) : { text: merged, resolved: 0 };
         if (!r) { await stop(f); continue; }
         await fs.writeFile(path.join(dir, f), r.text, "utf8");
-        if (r.resolved) auto.push(`${path.posix.basename(f)} ${r.resolved} 段`);
+        if (r.resolved) auto.push(`${inModel(f)} ${r.resolved} 段`);
       } else if (!DATA_FILES.has(f) && !TOOL_COPY.test(f)) await stop(f);
       else if (DATA_FILES.has(f)) {
         const stage = async (n: number): Promise<unknown> => { try { return JSON.parse(await git(dir, "show", `:${n}:${f}`)); } catch { return undefined; } };
@@ -378,7 +386,8 @@ onPushRejected((dir) => {
  */
 async function commitUpgrade(ref: string): Promise<void> {
   const dir = dirOf(ref), model = path.join(dir, "model");
-  const names = (await fs.readdir(model).catch(() => [] as string[])).filter((n) => n.endsWith(".sysml"));
+  if ((await readProject(ref)).pristine) return; // 原封不動的專案不轉換（F-72）
+  const names = await listFiles(ref).catch(() => [] as string[]);
   const legacy = async (n: string) => { const t = await fs.readFile(path.join(model, n), "utf8").catch(() => ""); return upgradeText(t) !== t; };
   // 先不排隊看一眼需不需要轉換；大多數時候不需要，不必為此擋住別人的修改
   if (!(await Promise.all(names.map(legacy))).some(Boolean)) {
