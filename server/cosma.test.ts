@@ -140,7 +140,7 @@ test("F-86：CoSMA 範本照 Apollo 的資料夾與套件，可以解析；五�
 
 // ───────── F-84 Apollo 每個元素都歸類 ─────────
 
-test("F-84：Apollo 參考模型的每個具名元素都歸到五層之一，或標為基礎庫；唯一例外是模型的根套件 Apollo11Model", async () => {
+test("F-84：Apollo 參考模型的每個具名元素都歸到五層之一，或標為基礎庫；模型的根套件 Apollo11Model 歸 Purpose", async () => {
   const a = await analyze(await readTree(APOLLO));
   assert.equal(a.ok, true);
   assert.equal(a.elements.length, 2188);
@@ -149,7 +149,8 @@ test("F-84：Apollo 參考模型的每個具名元素都歸到五層之一，或
   const places = classify([...a.elements, ...a.unnamed]);
   assert.ok(a.elements.every((e) => e.layer === places.get(e.id)?.place));
   const outside = a.elements.filter((e) => ![...LAYERS, "library", "addon"].includes(e.layer ?? ""));
-  assert.deepEqual(outside.map((e) => `${e.kind} ${e.qualifiedName}`), ["Package Apollo11Model"]);
+  assert.deepEqual(outside.map((e) => `${e.kind} ${e.qualifiedName}`), []);
+  assert.equal(a.elements.find((e) => e.qualifiedName === "Apollo11Model")?.layer, "purpose");
   assert.equal(a.elements.filter((e) => e.layer === "library").length, 90);
   for (const l of LAYERS) assert.ok(a.elements.some((e) => e.layer === l), `${l} 沒有元素`);
   // 需求定義依套件分成任務、功能、技術需求與需要
