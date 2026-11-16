@@ -158,7 +158,7 @@ test("節點上限：超過的成員與零件改列在隔間，並回報有幾�
   for (const e of a.elements.filter((x) => x.qualifiedName.startsWith("Big::"))) assert.ok(all.has(e.id), `${e.qualifiedName} 不在圖上`);
   const d = graphOf(a, "decomp:Wide::Huge");
   assert.equal(d.nodes.length, NODE_LIMIT);
-  // Huge 自己、Small，其餘 148 個零件是節點，剩下 12 個列在 Huge 的 parts 隔間
+  // Huge 自己、Small 各占一個節點，其餘到上限為止的零件是節點，剩下 12 個列在 Huge 的 parts 隔間
   assert.equal(d.folded, 12);
   assert.deepEqual([d.nodes[0].compartments[0][0], d.nodes[0].compartments[0].length], ["parts", 13]);
   const shown = new Set(d.nodes.flatMap((n) => [n.id, ...(n.covers ?? [])]));
@@ -191,6 +191,16 @@ test("JRI 的範本專案：原本結構分解圖上的節點都在新圖上，�
   const everywhere = new Set(defs.filter((d) => d.kind === "pkg").flatMap((d) => buildGraph(d, a).nodes.map((n) => n.id)));
   for (const e of [...partDefs, ...oldParts]) assert.ok(everywhere.has(e.id), `${e.qualifiedName} 不是任何套件內容圖的節點`);
   assert.equal(g.edges.filter((e) => e.kind === "compose").length, oldParts.filter((u) => g.nodes.some((n) => n.id === u.id)).length);
+  // 原本在 api.test.ts 檢查舊結構分解圖的內容：定義都是方角的 «part def»；組成至少 3 條，定義 ◆— 零件（使用）；零件以「defined by」指向它的定義
+  assert.equal(frameLabel(s), "«view» Structure : GeneralView");
+  assert.ok(g.nodes.filter((n) => n.shape === "def").every((n) => n.keyword === "«part def»"));
+  const comp = g.edges.filter((e) => e.kind === "compose");
+  assert.ok(comp.length >= 3 && comp.every((e) => e.tail === "diamond" && g.nodes.find((n) => n.id === e.target)?.keyword === "«part»"));
+  assert.ok(g.edges.filter((e) => e.kind === "define").every((e) => e.head === "typing" && g.nodes.find((n) => n.id === e.target)?.shape === "def"));
+  const svg = toSvg("«view» t : GeneralView", g.nodes.map((n, i) => ({ g: n, x: i * 240, y: 0 })), g.edges);
+  assert.match(svg, /«view» t : GeneralView/);
+  assert.match(svg, /rx="10"/);
+  assert.match(svg, /url\(#typ\)/);
   // 工具：這個套件的類別，加上「組成」
   const cats = [{ id: "System", pkg: "Structure" }, { id: "Subsystem", pkg: "Structure" }, { id: "Component", pkg: "Structure" }, { id: "ExternalEntity", pkg: "Structure" }, { id: "SystemRequirement", pkg: "Requirements" }];
   assert.deepEqual(paletteOf(s, a, cats), ["System", "Subsystem", "Component", "ExternalEntity"]);

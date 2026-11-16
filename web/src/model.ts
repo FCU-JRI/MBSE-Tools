@@ -199,8 +199,8 @@ function node(e: Element, a: Analysis): GNode {
 
 /** 最上層的套件內容圖。 */
 export const TOP_DIAGRAM = "pkg:";
-/** 一張圖最多畫幾個節點；超過的改列在隔間裡（F-76）。 */
-export const NODE_LIMIT = 150;
+/** 一張圖最多畫幾個節點；超過的改列在隔間裡（F-76）。只是防止極端的模型拖垮瀏覽器的保險，一般的模型不會碰到。 */
+export const NODE_LIMIT = 500;
 
 export function diagramsOf(a: Analysis, extra?: Diagrams): DiagramDef[] {
   const def = (id: string, kind: DiagramKind, title: string, context: string | null, members?: string[]): DiagramDef => ({ id, kind, code: VIEW[kind][0], viewDef: VIEW[kind][1], title, context, members });
