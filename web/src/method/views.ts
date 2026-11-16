@@ -57,7 +57,12 @@ export const ANALYSIS_VIEWS: AnalysisView[] = [
     id: "verification", order: 8, zh: "驗證矩陣", gate: "mdr",
     question: "每一條需求要怎麼證明有做到？用什麼驗證事件？結果如何？",
     pinned: ["MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOE", "MOP", "VerificationEvent"],
-    missing: (a) => verificationRows(a).filter((r) => r.gaps.length).map((r) => ({ id: r.element.id, text: `${r.element.shortName ?? r.element.name} 缺${r.gaps.join("、")}` })),
+    missing: (a) => {
+      const rows = verificationRows(a);
+      // 還沒有任何需求時也要提示（空的新專案，每張分析圖都標出還缺什麼）
+      if (!rows.length) return [{ id: null, text: "還沒有任何需求。每條需求建立時就要填驗證方法。" }];
+      return rows.filter((r) => r.gaps.length).map((r) => ({ id: r.element.id, text: `${r.element.shortName ?? r.element.name} 缺${r.gaps.join("、")}` }));
+    },
   },
   // [/P1]
   // [P2 分析圖骨架與中文化]
