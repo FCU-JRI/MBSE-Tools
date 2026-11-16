@@ -248,3 +248,13 @@ test("Apollo 11 參考模型：21 個定義都有分解圖且每個零件都在�
   assert.deepEqual(mc.nodes.map((n) => n.name), ["MassedComponent", "subcomponents"]);
   assert.deepEqual(mc.edges.map((e) => e.kind).sort(), ["compose", "define"]);
 });
+
+test("自動排列不清掉手動轉折點：轉折點跟著兩端節點移動（Mars，2026-11-17）", async () => {
+  const { moveBends, bendsOf, withBends } = await import("./model.ts");
+  const before = withBends({ A: { x: 0, y: 0 }, B: { x: 100, y: 0 } }, "e1", [{ x: 50, y: 50 }]);
+  // 起點往右移 20、終點往下移 40：中間唯一的轉折點取兩者的一半
+  const after = moveBends(before, { ...withBends({}, "e1", [{ x: 50, y: 50 }]), A: { x: 20, y: 0 }, B: { x: 100, y: 40 } }, [{ id: "e1", source: "A", target: "B" }]);
+  assert.deepEqual(bendsOf(after, "e1"), [{ x: 60, y: 70 }]);
+  // 沒有轉折點的連線不受影響，節點位置照新的
+  assert.deepEqual(after.A, { x: 20, y: 0 });
+});

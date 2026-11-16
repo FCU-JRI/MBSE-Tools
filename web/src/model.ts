@@ -1035,6 +1035,25 @@ export function withBends(nodes: Record<string, Spot> | undefined, edgeKey: stri
   list.forEach((p, i) => { next[bendKey(edgeKey, i)] = { x: Math.round(p.x), y: Math.round(p.y) }; });
   return next;
 }
+/**
+ * 自動排列之後，手動拉的轉折點跟著兩端的節點一起移動，不清掉（Mars，2026-11-17）。
+ * 第 i 個（共 n 個）轉折點的位移，是起點節點的位移與終點節點的位移依 (i+1)/(n+1) 內插；端點沒有新舊位置時當作沒動。
+ */
+export function moveBends(before: Record<string, Spot>, after: Record<string, Spot>, edges: Pick<GEdge, "id" | "key" | "source" | "target">[]): Record<string, Spot> {
+  const out = { ...after };
+  const delta = (id: string) => (before[id] && after[id] ? { x: after[id].x - before[id].x, y: after[id].y - before[id].y } : { x: 0, y: 0 });
+  for (const e of edges) {
+    const k = e.key ?? e.id;
+    const list = bendsOf(after, k);
+    if (!list.length) continue;
+    const ds = delta(e.source), dt = delta(e.target);
+    list.forEach((p, i) => {
+      const t = (i + 1) / (list.length + 1);
+      out[bendKey(k, i)] = { x: Math.round(p.x + ds.x + (dt.x - ds.x) * t), y: Math.round(p.y + ds.y + (dt.y - ds.y) * t) };
+    });
+  }
+  return out;
+}
 /** 在折線上離 p 最近的那一段插入新的轉折點，回傳插入的位置。pts 含兩端點。 */
 export function insertAt(pts: { x: number; y: number }[], p: { x: number; y: number }): number {
   let best = 0, bd = Infinity;

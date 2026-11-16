@@ -5,7 +5,7 @@ import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { api } from "./api.ts";
 import type { Annotation, Diagrams, Element, Layout, Meta, View } from "./api.ts";
-import { ALL_LINKS, ANALYSIS_LINKS, analysisPalette, BEND, bendsOf, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, insertAt, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, rocketLayout, seedLayout, STRUCTURAL_KINDS, suggestPartName, withBends } from "./model.ts";
+import { ALL_LINKS, ANALYSIS_LINKS, analysisPalette, BEND, bendsOf, moveBends, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, insertAt, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, rocketLayout, seedLayout, STRUCTURAL_KINDS, suggestPartName, withBends } from "./model.ts";
 import { expandFirst, PACKAGE_ZH, zhKeyword } from "./method/zh.ts";
 import type { DiagramDef, GEdge, GNode, Graph, LinkTool } from "./model.ts";
 import { annotationSvg, edgeMarkers, frameLayout, frameSvg, iconSvg, MARKERS, markerSvg, nodeSvg, SCREEN } from "./shapes.ts";
@@ -396,6 +396,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     onBends(ed.id, list, true);
   };
   const hasBends = Object.keys(layout?.[def.id] ?? {}).some((k) => k.startsWith(BEND));
+  /** 「自動排列」前的位置：排好之後用來把轉折點跟著節點移過去 */
+  const rearrangeFrom = useRef<Record<string, Spot> | null>(null);
 
   useEffect(() => {
     if (!layout) return;
@@ -422,6 +424,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           pos = { ...pos, ...(members.length ? { [g.id]: boxAround(members) } : placeNew({ ...inner, nodes: [g] }, {})) };
         }
       }
+      // 自動排列：保留手動轉折點，跟著兩端節點的新位置移動
+      if (rearrangeFrom.current) { pos = moveBends(rearrangeFrom.current, pos, graph.edges); rearrangeFrom.current = null; }
       saveLayout({ ...layoutRef.current, [def.id]: pos });
     } else if (saved !== layoutRef.current[def.id] && inner.nodes.length > 0) saveLayout({ ...layoutRef.current, [def.id]: pos }); // 全部沿用舊位置時也記到這張圖底下
     const isSel = (id: string, single: boolean) => (multiRef.current.length ? multiRef.current.includes(id) : single);
@@ -537,7 +541,14 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [def.id, saveLayout, setNotes, graph, flow, setEdges, vertical, straight, readOnly, byId, moveTo, applyLayout]);
 
-  const resetLayout = () => { const next = { ...layoutRef.current }; delete next[def.id]; saveLayout(next); setLayout(next); setTimeout(() => flow.fitView({ padding: 0.15, maxZoom: 1 }), 60); };
+  // 自動排列：節點重新排，手動拉的轉折點留著、排好後跟著節點移動（Mars：不可以清掉轉折點）
+  const resetLayout = () => {
+    const cur = layoutRef.current[def.id] ?? {};
+    const keep = Object.fromEntries(Object.entries(cur).filter(([k]) => k.startsWith(BEND)));
+    const next = { ...layoutRef.current };
+    if (Object.keys(keep).length) { rearrangeFrom.current = cur; next[def.id] = keep; } else { rearrangeFrom.current = null; delete next[def.id]; }
+    saveLayout(next); setLayout(next); setTimeout(() => flow.fitView({ padding: 0.15, maxZoom: 1 }), 60);
+  };
 
   const onConnect = useCallback((c: Connection) => {
     if (readOnly || !c.source || !c.target || c.source === c.target) return;
@@ -919,7 +930,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           <Tool onClick={() => flow.zoomIn()} glyph="＋" text="放大" />
           <Tool onClick={() => flow.zoomOut()} glyph="－" text="縮小" />
           <Tool onClick={() => flow.fitView({ padding: 0.15, maxZoom: 1 })} glyph="⤢" text="全覽" />
-          <Tool onClick={resetLayout} glyph="▦" text="自動排列" title={hasBends ? "重新排列這張圖的所有節點（標註不動），手動拉的轉折點會一起清掉" : "重新排列這張圖的所有節點（標註不動）"} />
+          <Tool onClick={resetLayout} glyph="▦" text="自動排列" title={hasBends ? "重新排列這張圖的所有節點（標註不動）；手動拉的轉折點會保留，跟著節點移動" : "重新排列這張圖的所有節點（標註不動）"} />
         </div>
         <div className="tool-group">
           <span className="label">匯出</span>
