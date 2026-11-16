@@ -5,6 +5,7 @@ import { analyze, shutdown } from "../../server/engine.ts";
 import { buildGraph, diagramsOf, NODE_LIMIT, seedLayout, transitionLabel } from "./model.ts";
 import type { Graph } from "./model.ts";
 import { toSvg } from "./exportSvg.ts";
+import { frameLayout, PORT } from "./shapes.ts";
 import type { Analysis } from "./api.ts";
 
 after(() => shutdown());
@@ -166,11 +167,13 @@ test("狀態機（F-78）：entry 畫成起始節點、do／entry action 列在�
   assert.ok(svg.includes("Start [true] / beep") && svg.includes("<circle"), "匯出的 SVG 有轉換的標籤與起始節點");
 });
 
-test("動作（F-79）：參數畫成小方塊、子動作的參數列在隔間、先後是開放箭頭；perform 有自己的隔間；功能分解不會無限展開", async () => {
+test("動作（F-79）：這個動作的參數貼在圖框邊上（in 左、out 右）、子動作的參數貼在它的邊上、先後是開放箭頭；perform 有自己的隔間；功能分解不會無限展開", async () => {
   const a = await load();
   const g = graph(a, "act:Demo::Behavior::Move");
-  assert.deepEqual(g.nodes.map((n) => [n.shape, n.keyword, n.title.join("")]), [["param", "«in»", "in speed"], ["param", "«out»", "out distance"], ["usage", "«action»", "accelerate"], ["usage", "«action»", "cruise"]]);
-  assert.deepEqual(node(g, "accelerate").compartments, [["parameters", "in target"]]);
+  assert.deepEqual(g.nodes.map((n) => [n.shape, n.keyword, n.title.join(""), n.boundary ?? null]), [["param", "«in»", "in speed", "left"], ["param", "«out»", "out distance", "right"], ["usage", "«action»", "accelerate", null], ["usage", "«action»", "cruise", null]]);
+  const acc = node(g, "accelerate");
+  assert.deepEqual([acc.compartments, acc.ports?.map((p) => [p.label, p.side])], [[], [["target", "left"]]], "子動作的參數不再列在隔間");
+  assert.ok(acc.height >= 26 + 16 + 4 + (acc.band ?? 0) && (acc.band ?? 0) > 0, "名稱下方留出放方塊的高度");
   assert.deepEqual(edges(g, "succession"), ["accelerate → cruise"]);
   assert.equal(g.nodes.some((n) => n.shape === "start" || n.shape === "done"), false, "沒有寫起點的一般模型不補起始與完成節點");
   const f = graph(a, "fdecomp:Demo::Behavior::Move");
@@ -181,19 +184,44 @@ test("動作（F-79）：參數畫成小方塊、子動作的參數列在隔間�
   const pkg = graph(a, "pkg:Demo::Behavior");
   assert.deepEqual(node(pkg, "Driver").compartments, [["perform actions", "move : Move"]]);
   assert.ok(node(pkg, "Modes").compartments.some((c) => c[0] === "states"));
-  assert.ok(svgOf(g).includes('width="12" height="12"'), "匯出的 SVG 有參數的小方塊");
+  assert.equal((svgOf(g).match(/width="12" height="12"/g) ?? []).length, 3, "匯出的 SVG 有 3 個方塊：圖框上的 speed、distance 與 accelerate 的 target");
 });
 
-test("互連（F-80）：零件的 ports 隔間含定義上的連接埠、自己的連接埠是小方塊、介面與連結接在端點的零件上", async () => {
+test("互連（F-80）：連接埠是零件邊上的小方塊、介面接在方塊上、直接連零件的連結接在外框；定義自己的連接埠貼在圖框邊上", async () => {
   const a = await load();
   const g = graph(a, "ibd:Demo::Wiring::Rack");
-  assert.deepEqual(g.nodes.map((n) => [n.shape, n.title.join("")]), [["param", "port ext : Plug"], ["usage", "left : Box"], ["usage", "right : Box"]]);
-  assert.deepEqual(node(g, "left : Box").compartments, [["ports", "p : Plug"]]);
-  const links = g.edges.map((e) => [title(g, e.source), title(g, e.target), e.label, e.head, e.tail, e.dashed, e.remove?.type ?? null]);
-  assert.deepEqual(links, [["left : Box", "right : Box", "cable : Cable", "none", "none", false, null], ["left : Box", "right : Box", "", "none", "none", false, "relation"]]);
-  assert.ok(svgOf(g).includes("cable : Cable"));
+  assert.deepEqual(g.nodes.map((n) => [n.shape, n.title.join(""), n.boundary ?? null]), [["param", "port ext : Plug", "left"], ["usage", "left : Box", null], ["usage", "right : Box", null]]);
+  const left = node(g, "left : Box"), right = node(g, "right : Box");
+  assert.deepEqual([left.compartments, right.compartments], [[], []], "連接埠不再列在 ports 隔間");
+  assert.deepEqual(left.ports?.map((p) => [p.key, p.label, p.side]), [["Demo__Wiring__Box__p", "p", "right"]], "起點的連接埠在右邊");
+  assert.deepEqual(right.ports?.map((p) => [p.key, p.label, p.side]), [["Demo__Wiring__Box__p", "p", "left"]], "終點的連接埠在左邊");
+  const links = g.edges.map((e) => [title(g, e.source), e.sourcePort ?? null, title(g, e.target), e.targetPort ?? null, e.label, e.head, e.tail, e.dashed, e.remove?.type ?? null]);
+  assert.deepEqual(links, [["left : Box", "Demo__Wiring__Box__p", "right : Box", "Demo__Wiring__Box__p", "cable : Cable", "none", "none", false, null], ["left : Box", null, "right : Box", null, "", "none", "none", false, "relation"]]);
+  // 匯出：介面的線從 left 右邊的方塊水平出去，接到 right 左邊的方塊
+  const placed = [{ g: g.nodes[0], x: 0, y: 0 }, { g: left, x: 100, y: 100 }, { g: right, x: 500, y: 100 }];
+  const svg = toSvg("f", placed, g.edges);
+  const py = 100 + (left.ports?.[0].y ?? 0);
+  // 第一條連線（介面）的路徑；開放箭頭記號的 path 線寬是 1.2，連線是 1
+  const path = svg.match(/<path d="M([\d.]+) ([\d.]+) L[^"]*L([\d.]+) ([\d.]+)" fill="none" stroke="#111" stroke-width="1" /);
+  assert.ok(path, "介面的線是折線");
+  assert.equal(Number(path[4]) - Number(path[2]), 0, "兩個方塊同高，折線的兩端同高");
+  assert.equal(Number(path[3]) - Number(path[1]), 500 - 6 - (100 + left.width + 6), "兩端是方塊外側的中心");
+  assert.ok(svg.includes("cable : Cable") && py > 100);
   const c = a.connectors?.find((x) => x.name === "cable");
   assert.deepEqual([c?.kind, c?.type, c?.fromPath, c?.toPath, c?.fromChain.length], ["interface", "Cable", "left.p", "right.p", 2]);
+});
+
+test("圖框：貼在框邊上的節點，方塊的中心在框線上，左右各自由上往下排，排不下時圖框往下長；畫面與匯出共用", () => {
+  const fl = frameLayout([{ x: 100, y: 100, w: 200, h: 40 }], [
+    { id: "a", boundary: "left", width: 80, height: 22 }, { id: "b", boundary: "left", width: 60, height: 22 }, { id: "c", boundary: "right", width: 70, height: 22 },
+    { id: "d", boundary: "left", width: 50, height: 22 },
+  ], 36);
+  assert.deepEqual([fl.x, fl.w], [64, 272]);
+  const center = (id: string, w: number, side: "left" | "right") => { const p = fl.places.get(id)!; return side === "left" ? p.x + w - PORT / 2 : p.x + PORT / 2; };
+  assert.deepEqual([center("a", 80, "left"), center("b", 60, "left"), center("d", 50, "left"), center("c", 70, "right")], [64, 64, 64, 336]);
+  const ys = ["a", "b", "d"].map((id) => fl.places.get(id)!.y);
+  assert.deepEqual([ys[1] - ys[0], ys[2] - ys[1], fl.places.get("c")!.y], [34, 34, ys[0]]);
+  assert.ok(fl.y + fl.h >= ys[2] + 22, "圖框長到包住最下面的方塊");
 });
 
 test("個體、時間切片與快照（F-81）：«timeslice»、«snapshot»，先後依 then", async () => {

@@ -82,4 +82,4 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
 - 模擬為標準大氣、無風。
 - 相依套件 `glob`／`minimatch` 有中度警告，來自解析器選用的下載驗證元件，沒有修正版；它們不處理使用者輸入。
 - 排程工作在使用者登入後才啟動；電腦重開機後需登入 Windows。
-- 圖上還沒有畫：流（`flow`）、綁定（`bind`）、分配、`perform` 的線；連接埠列在零件的 `ports` 隔間、連結接在零件上（規範畫在零件邊上的小方塊）；動作的參數是獨立的小方塊，沒有貼在圖框邊上。差異列在 `docs/COSMA-PHASE-A.md` 的「階段 4 的結果」。
+- 圖上還沒有畫：流（`flow`）、綁定（`bind`）、分配、`perform` 的線；互連圖不畫零件裡面那一層零件（端點在更深一層時，在外層零件邊上放一個寫路徑的方塊）。差異列在 `docs/COSMA-PHASE-A.md` 的「階段 4 的結果」。

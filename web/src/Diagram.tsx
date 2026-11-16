@@ -7,7 +7,7 @@ import { api } from "./api.ts";
 import type { Annotation, Diagrams, Element, Layout, Meta, View } from "./api.ts";
 import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, LINK_TOOLS, modelItems, NODE_LIMIT, paletteOf, PKG_TAB, seedLayout, STRUCTURAL_KINDS, suggestPartName } from "./model.ts";
 import type { DiagramDef, GEdge, GNode, Graph, LinkTool } from "./model.ts";
-import { annotationSvg, edgeMarkers, FRAME_HEAD, frameSvg, iconSvg, MARKERS, markerSvg, nodeSvg, SCREEN } from "./shapes.ts";
+import { annotationSvg, edgeMarkers, frameLayout, frameSvg, iconSvg, MARKERS, markerSvg, nodeSvg, SCREEN } from "./shapes.ts";
 import { downloadPng, downloadSvg, toSvg } from "./exportSvg.ts";
 
 /** g：模型元素的節點；a：草稿標註（便箋、外框、文字，不進模型）。 */
@@ -23,6 +23,8 @@ function ElementNode({ data, selected }: NodeProps<FlowNode>) {
     <div className={`sysml-node ${selected ? "is-selected" : ""}`} style={{ width: g.width, height: g.height }}>
       <svg width={g.width} height={g.height} viewBox={`0 0 ${g.width} ${g.height}`} role="img" aria-label={`${g.keyword} ${g.name}`.trim() || g.shape} dangerouslySetInnerHTML={{ __html: svg }} />
       {SIDES.map((p) => <Handle key={p} id={p} type="source" position={p} isConnectable={!!g.el} style={g.el ? undefined : { visibility: "hidden" }} />)}
+      {/* 連接埠與參數的小方塊：連線接在方塊上（規範 8.2.3.12、8.2.3.17）；不能從這裡拉新的線 */}
+      {(g.ports ?? []).map((p) => <Handle key={`p:${p.key}`} id={`p:${p.key}`} type="source" position={p.side === "left" ? Position.Left : Position.Right} isConnectable={false} className="port-handle" style={{ top: p.y }} />)}
     </div>
   );
 }
@@ -142,7 +144,7 @@ function toEdge(e: GEdge, pos: Map<string, Box>, vertical: boolean, straight: bo
   const [sh, th] = a && b ? sides(a, b, vertical) : vertical ? [Position.Bottom, Position.Top] : [Position.Right, Position.Left];
   const marks = edgeMarkers(e);
   return {
-    id: e.id, source: e.source, target: e.target, sourceHandle: sh, targetHandle: th, label: e.label || undefined, data: { g: e },
+    id: e.id, source: e.source, target: e.target, sourceHandle: e.sourcePort ? `p:${e.sourcePort}` : sh, targetHandle: e.targetPort ? `p:${e.targetPort}` : th, label: e.label || undefined, data: { g: e },
     type: straight ? "straight" : "smoothstep", pathOptions: { borderRadius: 0 },
     style: { strokeWidth: 1, strokeDasharray: e.dashed ? "6 4" : undefined }, labelBgPadding: [4, 2],
     markerStart: marks.start ? `jri-${marks.start.id}` : undefined,
@@ -152,6 +154,17 @@ function toEdge(e: GEdge, pos: Map<string, Box>, vertical: boolean, straight: bo
 }
 const boxes = (list: { id: string; position: { x: number; y: number }; data: NData }[]) =>
   new Map<string, Box>(list.filter((n) => n.data.g).map((n) => [n.id, { x: n.position.x, y: n.position.y, w: n.data.g!.width, h: n.data.g!.height }]));
+
+/** 圖框的留白（畫面）。 */
+const FRAME_PAD = 36;
+/** 貼在圖框邊上的節點（參數、這個定義自己的連接埠）跟著圖框放；其餘節點不動。 */
+function placeBoundary(list: FlowNode[], notes: Annotation[]): FlowNode[] {
+  const edge = list.filter((n) => n.data.g?.boundary);
+  if (!edge.length) return list;
+  const inner = list.filter((n) => !n.data.g?.boundary).map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g?.width ?? n.width ?? n.data.a?.w ?? 0, h: n.data.g?.height ?? n.height ?? n.data.a?.h ?? 0 }));
+  const fl = frameLayout(inner.length ? inner : notes.map((a) => ({ x: a.x, y: a.y, w: a.w, h: a.h })), edge.map((n) => ({ id: n.id, boundary: n.data.g!.boundary!, width: n.data.g!.width, height: n.data.g!.height })), FRAME_PAD);
+  return list.map((n) => (fl.places.has(n.id) ? { ...n, position: fl.places.get(n.id)! } : n));
+}
 
 export interface DiagramProps {
   readOnly?: boolean;
@@ -304,30 +317,33 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     if (!layout) return;
     // 位置一旦決定就存起來，之後編輯模型不會重排；只有「自動排列」會整張重排。
     // 新的套件內容圖與分解圖還沒有紀錄時，沿用舊結構分解圖裡同一個節點的位置
-    const saved = seedLayout(layoutRef.current, def, graph.nodes.map((g) => g.id));
-    const missing = graph.nodes.filter((g) => !saved[g.id]);
+    // 貼在圖框邊上的節點不排版、不存位置，由圖框決定
+    const inner = { ...graph, nodes: graph.nodes.filter((g) => !g.boundary) };
+    const saved = seedLayout(layoutRef.current, def, inner.nodes.map((g) => g.id));
+    const missing = inner.nodes.filter((g) => !saved[g.id]);
     let pos: Record<string, Spot> = saved;
     if (missing.length > 0) {
-      if (!graph.nodes.some((g) => saved[g.id])) pos = { ...saved, ...autoLayout(graph) };
+      if (!inner.nodes.some((g) => saved[g.id])) pos = { ...saved, ...autoLayout(inner) };
       else {
         // 還沒有位置的套件：先讓成員各自就位，再用框包住它們
-        const plain = { ...graph, nodes: graph.nodes.filter((g) => g.shape !== "package" || saved[g.id]) };
+        const plain = { ...inner, nodes: inner.nodes.filter((g) => g.shape !== "package" || saved[g.id]) };
         pos = { ...saved, ...placeNew(plain, saved) };
-        for (const g of graph.nodes) {
+        for (const g of inner.nodes) {
           if (g.shape !== "package" || pos[g.id]) continue;
-          const members = graph.nodes.filter((m) => m.parent === g.id && pos[m.id]).map((m) => ({ ...pos[m.id], w: m.width, h: m.height }));
-          pos = { ...pos, ...(members.length ? { [g.id]: boxAround(members) } : placeNew({ ...graph, nodes: [g] }, {})) };
+          const members = inner.nodes.filter((m) => m.parent === g.id && pos[m.id]).map((m) => ({ ...pos[m.id], w: m.width, h: m.height }));
+          pos = { ...pos, ...(members.length ? { [g.id]: boxAround(members) } : placeNew({ ...inner, nodes: [g] }, {})) };
         }
       }
       saveLayout({ ...layoutRef.current, [def.id]: pos });
-    } else if (saved !== layoutRef.current[def.id] && graph.nodes.length > 0) saveLayout({ ...layoutRef.current, [def.id]: pos }); // 全部沿用舊位置時也記到這張圖底下
+    } else if (saved !== layoutRef.current[def.id] && inner.nodes.length > 0) saveLayout({ ...layoutRef.current, [def.id]: pos }); // 全部沿用舊位置時也記到這張圖底下
     const isSel = (id: string, single: boolean) => (multiRef.current.length ? multiRef.current.includes(id) : single);
-    const els: FlowNode[] = graph.nodes.map((g0) => {
-      const p = pos[g0.id];
+    const els: FlowNode[] = placeBoundary(graph.nodes.map((g0) => {
+      const p = pos[g0.id] ?? { x: 0, y: 0 };
+      if (g0.boundary) return { id: g0.id, type: "el", position: { x: p.x, y: p.y }, data: { g: g0 }, selected: isSel(g0.id, g0.id === selectedId), selectable: !!g0.el, draggable: false, width: g0.width, height: g0.height };
       if (g0.shape !== "package") return { id: g0.id, type: "el", position: { x: p.x, y: p.y }, data: { g: g0 }, selected: isSel(g0.id, g0.id === selectedId), selectable: !!g0.el, width: g0.width, height: g0.height };
       const g = { ...g0, width: p.w ?? g0.width, height: p.h ?? g0.height };
       return { id: g.id, type: "pkg", position: { x: p.x, y: p.y }, data: { g, editable: !readOnly, onResize: onPkgResize }, selected: isSel(g.id, g.id === selectedId), connectable: false, width: g.width, height: g.height, zIndex: -1 };
-    });
+    }), notes);
     const marks: FlowNode[] = notes.map((a) => ({ id: a.id, type: "note", position: { x: a.x, y: a.y }, data: { a, editable: !readOnly, onResize }, selected: isSel(a.id, a.id === selNote), draggable: !readOnly, connectable: false, width: a.w, height: a.h, zIndex: a.type === "frame" ? -1 : 2 }));
     setNodes([...marks.filter((n) => n.data.a!.type === "frame"), ...els, ...marks.filter((n) => n.data.a!.type !== "frame")]);
     setEdges(graph.edges.map((e) => toEdge(e, boxes(els), vertical, straight)));
@@ -401,8 +417,10 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     }
     if (moved.some((n) => !n.data.a)) saveLayout({ ...layoutRef.current, [def.id]: cur });
     if (marks.size > 0) setNotes((l) => l.map((a) => (marks.has(a.id) ? { ...a, ...marks.get(a.id)! } : a)));
-    // 節點移動後重新挑選連接點
-    setEdges(graph.edges.map((e) => toEdge(e, boxes(all), vertical, straight)));
+    // 節點移動後，貼在圖框邊上的節點跟著圖框走，再重新挑選連接點
+    const placed = placeBoundary(all, notes);
+    if (placed !== all) setNodes((ns) => { const at = new Map(placed.map((n) => [n.id, n.position])); return ns.map((n) => (n.data.g?.boundary && at.has(n.id) ? { ...n, position: at.get(n.id)! } : n)); });
+    setEdges(graph.edges.map((e) => toEdge(e, boxes(placed), vertical, straight)));
 
     // 放進套件的框裡就歸屬那個套件，拖出框外就移出
     if (readOnly) return;
@@ -642,11 +660,12 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
 
   // 圖框：包住目前所有節點與標註，跟著內容伸縮
   const frame = useMemo(() => {
-    const boxes = nodes.map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g?.width ?? n.width ?? n.data.a?.w ?? 0, h: n.data.g?.height ?? n.height ?? n.data.a?.h ?? 0 }));
-    if (!boxes.length) return null;
-    const pad = 36;
-    const x = Math.min(...boxes.map((b) => b.x)) - pad, y = Math.min(...boxes.map((b) => b.y)) - pad - FRAME_HEAD;
-    const w = Math.max(...boxes.map((b) => b.x + b.w)) + pad - x, h = Math.max(...boxes.map((b) => b.y + b.h)) + pad - y;
+    // 貼在圖框邊上的節點不算在內：圖框由其餘的節點決定，它們再排到框線上（shapes.ts 的 frameLayout，匯出相同）
+    const inner = nodes.filter((n) => !n.data.g?.boundary);
+    const boxes = inner.map((n) => ({ x: n.position.x, y: n.position.y, w: n.data.g?.width ?? n.width ?? n.data.a?.w ?? 0, h: n.data.g?.height ?? n.height ?? n.data.a?.h ?? 0 }));
+    if (!nodes.length) return null;
+    const edge = nodes.filter((n) => n.data.g?.boundary).map((n) => ({ id: n.id, boundary: n.data.g!.boundary!, width: n.data.g!.width, height: n.data.g!.height }));
+    const { x, y, w, h } = frameLayout(boxes, edge, FRAME_PAD);
     return { x, y, w, h, svg: frameSvg(frameLabel(def), 0, 0, w, h, SCREEN) };
   }, [nodes, def]);
 

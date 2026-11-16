@@ -184,6 +184,8 @@ tr.rowbtn { cursor: pointer; } tr.rowbtn:hover td { background: var(--surface-1)
 .react-flow__edge.selected .react-flow__edge-path { stroke-width: 2; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.5)); }
 .react-flow__handle { width: 8px; height: 8px; border-radius: 0; opacity: 0; }
 .react-flow__node:hover .react-flow__handle, .react-flow__node.selected .react-flow__handle { opacity: 1; }
+/* 連接埠與參數的方塊由節點自己畫；這裡的 handle 只是連線的接點，不顯示、不能拉線 */
+.react-flow__handle.port-handle { opacity: 0 !important; pointer-events: none; }
 .node { min-width: 148px; max-width: 240px; background: var(--bg); border: var(--stroke-hair) solid var(--line-strong); }
 .react-flow__node.selected .node { border-color: var(--ink); box-shadow: var(--glow-ink); }
 .node-head { padding: var(--space-2) var(--space-3); text-align: center; }

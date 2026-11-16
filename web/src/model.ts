@@ -122,7 +122,17 @@ export interface GNode {
   dashed?: boolean;
   /** 列在這個節點隔間裡的元素（套件內容圖與分解圖才有） */
   covers?: string[];
+  /**
+   * 貼在節點左右邊上的小方塊（階段 4，規範 8.2.3.12 的連接埠、8.2.3.17 的參數）。y 是方塊中心到節點頂端的距離；
+   * key 用來讓連線接在這個方塊上（GEdge 的 sourcePort／targetPort）。
+   */
+  ports?: NodePort[];
+  /** 名稱與隔間之間留給 ports 的高度 */
+  band?: number;
+  /** 貼在圖框邊上的節點（這張圖的動作自己的參數、這個定義自己的連接埠）：位置由圖框決定，不能拖曳 */
+  boundary?: "left" | "right";
 }
+export interface NodePort { key: string; label: string; side: "left" | "right"; y: number }
 export interface GEdge {
   id: string; source: string; target: string; kind: string; label: string;
   dashed: boolean;
@@ -131,6 +141,8 @@ export interface GEdge {
   tail: "diamond" | "hollow" | "none"; // 起點記號：實心菱形（組成）、空心菱形（非組成）
   /** 刪除這條線時要做的事：刪關係，或刪掉代表它的元素。 */
   remove: { type: "relation"; kind: string; from: string; to: string } | { type: "element"; id: string } | null;
+  /** 接在端點節點的哪一個小方塊（NodePort 的 key）上；沒有就接在節點的外框 */
+  sourcePort?: string; targetPort?: string;
 }
 /** reverse：排版時要反向看待的連線種類（例如追溯是由下層指向上層，上層應排在上方）。 */
 export interface Graph { nodes: GNode[]; edges: GEdge[]; direction: "TB" | "BT" | "LR" | "RL"; reverse?: string[];
@@ -175,6 +187,8 @@ function makeNode(el: Element, compartments: string[][] = [], text = nameOf(el))
   const height = 26 + title.length * 16 + 8 + comps.reduce((s, c) => s + c.length * 16 + 9, 0);
   return { id: el.id, el, shape: el.kind.endsWith("Definition") ? "def" : "usage", keyword: stereotype(el), name: el.name, title, compartments: comps, width: NODE_W, height };
 }
+/** 隔間佔的高度（和 makeNode 的算法相同）。 */
+const heightOf = (comps: string[][]) => comps.reduce((h, c) => h + c.length * 16 + 9, 0);
 const pseudo = (id: string, shape: "start" | "done"): GNode => ({ id, el: null, shape, keyword: "", name: "", title: [], compartments: [], width: 26, height: 26 });
 
 /** 套件節點：大小由版面決定，這裡給預設值。 */
@@ -602,11 +616,22 @@ function richNode(s: Structure, e: Element, extra: string[][] = []): GNode {
   const n = makeNode(e, [...doc, ...merged.map(cap)], titleOf(s, e));
   return { ...n, keyword: e.keyword ? `«${e.keyword}»` : n.keyword, ...(isRef(e) ? { dashed: true } : {}) };
 }
-/** 參數與連接埠：小方塊加「方向 名稱 : 型別」。 */
-function paramNode(s: Structure, e: Element): GNode {
-  const text = rowOf(s, e);
-  const title = wrap(text, 30, 1);
-  return { id: e.id, el: e, shape: "param", keyword: e.keyword ? `«${e.keyword}»` : "", name: e.name, title, compartments: [], width: Math.max(96, Math.min(240, 26 + title[0].length * 6.6)), height: 26 };
+/** 貼在圖框邊上的參數與連接埠：小方塊在圖框的線上，名稱寫在圖框外側（規範 8.2.3.12、8.2.3.17）。 */
+function paramNode(s: Structure, e: Element, side: "left" | "right"): GNode {
+  const title = wrap(rowOf(s, e), 34, 1);
+  return { id: e.id, el: e, shape: "param", keyword: e.keyword ? `«${e.keyword}»` : "", name: e.name, title, compartments: [], width: Math.min(260, 24 + [...title[0]].reduce((n, ch) => n + (ch.charCodeAt(0) > 0x2e7f ? 11 : 6.2), 0)), height: 22, boundary: side };
+}
+/** 參數的方向決定貼在哪一邊：in 在左，out、inout 在右。 */
+const sideOf = (e: Element): "left" | "right" => (/^in\b(?!out)/.test(e.keyword ?? "") ? "left" : "right");
+/** 把小方塊排在節點的左右兩邊：名稱下方留一段高度，左右各自由上往下排。 */
+const PORT_ROW = 20;
+export function withPorts(n: GNode, list: Omit<NodePort, "y">[]): GNode {
+  if (!list.length) return n;
+  const top = 26 + n.title.length * 16 + 4 + 12;
+  const count = { left: 0, right: 0 };
+  const ports = list.map((p) => ({ ...p, y: top + (count[p.side]++) * PORT_ROW }));
+  const band = Math.max(count.left, count.right) * PORT_ROW + 8;
+  return { ...n, ports, band, height: n.height + band };
 }
 /** 節點超過上限時，其餘的列在一個節點的隔間裡（和套件內容圖相同）。 */
 function foldRest(s: Structure, d: DiagramDef, list: Element[]): { shown: Element[]; more: GNode | null; folded: number } {
@@ -718,7 +743,10 @@ function actionGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge): Graph {
   const children = kids.filter(isAction);
   const params = kids.filter((c) => /^(in|out|inout)\b/.test(c.keyword ?? ""));
   const ids = new Set(children.map((c) => c.id));
-  const nodes = [...params.map((p) => paramNode(s, p)), ...children.map((c) => richNode(s, c))];
+  // 子動作的參數是貼在它邊上的小方塊（in 在左、out 在右），不再列在隔間
+  const pins = (c: Element) => (s.t.children.get(c.id) ?? []).filter((x) => /^(in|out|inout)\b/.test(x.keyword ?? "")).map((x) => ({ key: x.id, label: rowOf(s, x).replace(/^(in|out|inout) /, ""), side: sideOf(x) }));
+  const actionNode = (c: Element) => { const n = richNode(s, c); return withPorts({ ...n, compartments: n.compartments.filter((x) => x[0] !== "parameters"), height: n.height - heightOf(n.compartments.filter((x) => x[0] === "parameters")) }, pins(c)); };
+  const nodes = [...params.map((p) => paramNode(s, p, sideOf(p))), ...children.map(actionNode)];
   const edges = a.relations.filter((r) => r.kind === "succession" && ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i));
   if (ctx.category !== null) legacyEnds(d, children, edges, nodes, "succession");
   return { nodes, edges, direction: "LR" };
@@ -734,21 +762,57 @@ function interconnectionGraph(d: DiagramDef, a: Analysis, relEdge: RelEdge): Gra
   if (!ctx) return { nodes: [], edges: [], direction: "LR" };
   const kids = s.t.children.get(ctx.id) ?? [];
   const parts = kids.filter((c) => c.kind === "PartUsage");
-  const ports = kids.filter((c) => c.kind === "PortUsage");
-  const portRows = (u: Element) => ["ports", ...definitionsOf(s, u.id).flatMap((t) => (s.t.children.get(t) ?? []).filter((c) => c.kind === "PortUsage").map((c) => rowOf(s, c, "port")))];
-  const nodes = [...ports.map((p) => paramNode(s, p)), ...parts.map((u) => richNode(s, u, [portRows(u)]))];
-  const ids = new Set(nodes.map((n) => n.id));
+  const own = kids.filter((c) => c.kind === "PortUsage");
+  const partIds = new Set(parts.map((u) => u.id)), ownIds = new Set(own.map((p) => p.id));
+  // 每個零件邊上的小方塊：它自己與它的定義上的連接埠，加上連結的端點在更深一層時（a.b.p）剩下的那一段
+  const ports = new Map<string, Omit<NodePort, "y">[]>(parts.map((u) => [u.id, []]));
+  // used：連結用到的端點。同一個連接埠既是起點又是終點時放右邊；沒有連結用到的只補上，不改已經決定的那一邊
+  const addPort = (part: string, key: string, label: string, side: "left" | "right", used: boolean) => {
+    const list = ports.get(part) as Omit<NodePort, "y">[];
+    const had = list.find((p) => p.key === key);
+    if (!had) list.push({ key, label, side });
+    else if (used && side === "right") had.side = "right";
+  };
+  type End = { node: string; port?: string };
+  const endOf = (chain: string[], path: string): End | null => {
+    const i = chain.findIndex((x) => partIds.has(x) || ownIds.has(x));
+    if (i < 0) return null;
+    const node = chain[i], rest = chain.slice(i + 1);
+    if (!rest.length || !partIds.has(node)) return { node };
+    const segs = path.split(".");
+    const label = segs.length === chain.length ? segs.slice(i + 1).join(".") : rest.map((x) => s.t.byId.get(x)?.name ?? x).join(".");
+    return { node, port: rest.join(".") + "|" + label };
+  };
+  const conns = (a.connectors ?? []).map((c, i) => ({ c, i, from: endOf(c.fromChain, c.fromPath), to: endOf(c.toChain, c.toPath) }))
+    .filter((x): x is { c: typeof x.c; i: number; from: End; to: End } => !!x.from && !!x.to && (x.from.node !== x.to.node || x.from.port !== x.to.port));
+  // 先放連結用到的（起點在右、終點在左），再放其餘的連接埠（右邊）
+  for (const { from, to } of conns) {
+    if (from.port) addPort(from.node, from.port.split("|")[0], from.port.split("|")[1], "right", true);
+    if (to.port) addPort(to.node, to.port.split("|")[0], to.port.split("|")[1], "left", true);
+  }
+  for (const u of parts) {
+    const all = [...(s.t.children.get(u.id) ?? []), ...definitionsOf(s, u.id).flatMap((t) => s.t.children.get(t) ?? [])].filter((c) => c.kind === "PortUsage");
+    for (const c of all) addPort(u.id, c.id, rowOf(s, c, "port"), "right", false);
+  }
+  const partNode = (u: Element) => {
+    const n = richNode(s, u);
+    const kept = n.compartments.filter((x) => x[0] !== "ports");
+    return withPorts({ ...n, compartments: kept, height: n.height - heightOf(n.compartments.filter((x) => x[0] === "ports")) }, ports.get(u.id) ?? []);
+  };
+  const nodes = [...own.map((p) => paramNode(s, p, "left")), ...parts.map(partNode)];
   const edges: GEdge[] = [];
   if (a.connectors) {
-    a.connectors.forEach((c, i) => {
-      const from = c.fromChain.find((x) => ids.has(x)), to = c.toChain.find((x) => ids.has(x));
-      if (!from || !to || from === to) return;
+    for (const { c, i, from, to } of conns) {
       const label = `${c.name}${c.type ? ` : ${c.type}` : ""}`.trim();
       // 直接連兩個零件的連結可以照原本的方式刪除；接在連接埠上的不提供（要改原始碼）
       const direct = c.fromChain.length === 1 && c.toChain.length === 1;
-      edges.push(edge(`connect:${from}:${to}:${i}`, from, to, "connect", label, direct ? { type: "relation", kind: "connect", from, to } : null));
-    });
+      edges.push({
+        ...edge(`connect:${from.node}:${to.node}:${i}`, from.node, to.node, "connect", label, direct ? { type: "relation", kind: "connect", from: from.node, to: to.node } : null),
+        ...(from.port ? { sourcePort: from.port.split("|")[0] } : {}), ...(to.port ? { targetPort: to.port.split("|")[0] } : {}),
+      });
+    }
   } else {
+    const ids = new Set(nodes.map((n) => n.id));
     edges.push(...a.relations.filter((r) => r.kind === "connect" && ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i)));
   }
   return { nodes, edges, direction: "LR" };

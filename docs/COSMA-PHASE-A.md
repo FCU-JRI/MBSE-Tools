@@ -305,7 +305,11 @@ A-9 已退回上位文件第 C、D 期（Mars，2026-11-16 晚），不在第 A 
   - 計算與分析（`calc:<元素>`，新的一類）：每個不在另一個計算或分析裡的計算定義、計算、分析定義、分析一張。
 - 原本的 `req`、`uc`、`act`、`stm`、`ibd` 圖在同一個 PR 換成新的畫法，識別碼不變，所以 `layout.json` 的紀錄直接沿用；每個套件的需求圖與使用案例圖第一次開啟時，沿用整張 `req`、`uc` 裡同一個節點的位置（`seedLayout`，舊紀錄不刪）。
 - 隔間（A-7a 留下的「A-7c 到 A-7e 再分」）：`features` 分出 `subject`、`actors`、`stakeholders`、`objective`、`parameters`、`ports`、`actions`、`perform actions`、`states`、`exhibit states`、`require constraints`、`assume constraints`、`constraints`、`requirements`、`use cases`、`connections`、`interfaces`、`calcs`、`analyses`、`timeslices`、`snapshots`。套件內容圖也一起換。行為（動作、計算、狀態、需求、案例）的 in／out／inout 特徵放 `parameters`。
-- 新的節點形狀 `param`：參數與連接埠畫成小方塊加名稱（畫面與匯出共用 `shapes.ts` 的 `nodeSvg`）。連線記號沒有新增，沿用 `MARKERS`。
+- 連接埠與參數照規範畫成小方塊（Mars 2026-11-16 晚：「照規範畫」）：
+  - 零件的連接埠（它自己的與它的定義上的）貼在零件的左右邊上，方塊的中心在外框線上；連結與介面接在方塊上（端點在更深一層，例如 `instrumentUnit.payloadInterfacePort`，就在零件邊上放一個寫這段路徑的方塊）。連結的起點放右邊、終點放左邊，沒有連結用到的放右邊。
+  - 子動作的參數貼在子動作的邊上：in 在左、out 與 inout 在右，不再列在隔間。
+  - 這張圖的動作自己的參數、互連圖的定義自己的連接埠，貼在圖框的邊上（in 與連接埠在左、out 在右），名稱寫在框外；位置由圖框決定，不能拖曳，也不存進版面紀錄。
+  - 畫面與匯出共用 `shapes.ts` 的 `nodeSvg`、`frameLayout`、`portPoint`；React Flow 在每個方塊放一個接點，連線接在接點上。連線記號沒有新增，沿用 `MARKERS`。
 - 需求、使用案例、狀態機、動作、互連、個體這幾類圖，節點的每個隔間最多列 6 列，其餘寫 `...`（完整內容在套件內容圖上）。計算與分析的主體不省略。
 - 可寫的專案：原本五類圖的新增、連線、刪除工具照舊（每個套件的需求圖、使用案例圖用和整張相同的工具列）。功能分解、個體、計算與分析三類只顯示，不提供工具。互連圖上直接連兩個零件的連結可以照原本的方式刪除；接在連接埠上的不提供刪除（要改原始碼）。
 - 沒有寫起點的模型：JRI 類別的任務與模式照原本的做法補起始與完成節點；一般的模型不補（Apollo 的 `initial`、`final` 是自己寫的狀態）。
@@ -326,12 +330,12 @@ A-9 已退回上位文件第 C、D 期（Mars，2026-11-16 晚），不在第 A 
 | 轉換 | 8.2.3.18 | 實線開放箭頭，標「觸發條件 [守衛] / 效果」 | 待確認 | 觸發條件寫訊號型別的名稱，不寫 `accept` |
 | 起點 | 8.2.3.18 | 實心圓，指向 `entry; then X;` 的 X | 是 | |
 | 動作 | 8.2.3.17 | 圓角矩形，關鍵字照原始碼（«action»、«perform action»、«accept»） | 是 | |
-| 參數 | 8.2.3.17 | 這張圖的動作自己的參數畫成小方塊加「方向 名稱 : 型別」；子動作的參數列在 `parameters` 隔間 | 否 | 規範把參數畫在動作或圖框的邊上；我們的小方塊是獨立的節點，沒有貼在圖框邊上 |
+| 參數 | 8.2.3.17 | 小方塊：這張圖的動作自己的參數貼在圖框邊上（in 左、out 右），名稱在框外；子動作的參數貼在子動作的邊上，名稱在節點內 | 是 | 階段 4 第二輪改（原本是獨立的節點與隔間） |
 | 先後（succession） | 8.2.3.17 | 實線開放箭頭 | 是 | |
 | `perform` | 8.2.3.17 | 零件與零件定義的 `perform actions` 隔間 | 是 | 沒有畫「誰執行哪個動作」的線 |
 | 功能分解 | 8.2.3.17、8.2.3.11 | 動作定義 ◆— 動作 —▷: 動作的定義 | 是 | 和零件的分解圖相同的記號 |
-| 零件、連接埠 | 8.2.3.12 | 零件是圓角矩形，它和它的定義上的連接埠列在 `ports` 隔間；這張圖的定義自己的連接埠畫成小方塊 | 否 | 規範把連接埠畫成零件邊上的小方塊，連線接在小方塊上；我們接在零件上 |
-| 連結、介面 | 8.2.3.13、8.2.3.14 | 實線，沒有箭頭，標「名稱 : 型別」（沒有名字的寫「: 型別」） | 部分 | 端點的連接埠名稱沒有寫在線上（列在零件的 `ports` 隔間） |
+| 零件、連接埠 | 8.2.3.12 | 零件是圓角矩形，它和它的定義上的連接埠是零件邊上的小方塊，名稱寫在節點內；這張圖的定義自己的連接埠貼在圖框邊上 | 是 | 階段 4 第二輪改（原本列在 `ports` 隔間）；方塊排在左右兩邊，沒有放在上下兩邊 |
+| 連結、介面 | 8.2.3.13、8.2.3.14 | 實線，沒有箭頭，標「名稱 : 型別」（沒有名字的寫「: 型別」）；端點是連接埠時接在零件邊上的方塊，直接連零件時接在外框 | 是 | 階段 4 第二輪改（原本一律接在零件上） |
 | 個體 | 8.2.3.9 | 關鍵字 «individual part»、«individual part def» | 是 | |
 | 時間切片、快照 | 8.2.3.9 | 圓角矩形 «timeslice»、«snapshot»；下層的快照列在 `snapshots` 隔間；先後依 `then`，實線開放箭頭 | 部分 | 規範也可以把快照畫在時間軸上；我們只用節點與先後線 |
 | 計算、分析 | 8.2.3.19、8.2.3.23 | 方角／圓角矩形 «calc def»、«analysis def»，`subject`、`parameters`、`objective`、`constraints` 完整列出；擁有的計算接組成線，定義接「由誰定義」 | 是 | `return` 參數寫成 `out`；計算的呼叫（`= rollupPowerGeneration(...)`）沒有畫線 |
@@ -354,7 +358,7 @@ A-9 已退回上位文件第 C、D 期（Mars，2026-11-16 晚），不在第 A 
 - 流（`flow`、`succession flow`）、綁定（`bind`）、分配（allocation）在圖上沒有畫；`perform` 沒有畫線。
 - Apollo 的 Logical、Operation 兩層沒有自己類別的圖：Logical 是只寫 `perform` 的零件定義（在套件內容圖的 `perform actions` 隔間），Operation 是沒有子動作的動作定義（在套件內容圖上），兩者都沒有可以畫流程或互連的內容。
 - `rtc-2027` 的版面沒有實際算過哪些節點沿用（A-7a 是只讀 clone 它的儲存庫算的，這次沒有做）。原本五類圖的識別碼不變，所以紀錄直接沿用；節點因為多了隔間會變高，原本手動排好的位置可能會重疊。
-- 互連圖的端點以特徵鏈上第一個在圖上的零件為準；端點在更深一層（`launchVehicle.instrumentUnit.payloadInterfacePort`）時，線接在最上層的零件 `launchVehicle`。
+- 互連圖的端點以特徵鏈上第一個在圖上的零件為準；端點在更深一層（`launchVehicle.instrumentUnit.payloadInterfacePort`）時，線接在 `launchVehicle` 邊上寫 `instrumentUnit.payloadInterfacePort` 的方塊，不畫裡面那一層零件。
 
 ### A-9 表單、流程引導、節點檢查改依 CoSMA（已退回第 C、D 期）
 
@@ -406,7 +410,7 @@ A-9 已退回上位文件第 C、D 期（Mars，2026-11-16 晚），不在第 A 
 | 5 | 表上看得到全部元素 | 「通用的表…」測試（階段 2）通過 | 同 #3；表一次畫 300 列 | 通過 |
 | 6 | 零件定義的分解圖畫得出來 | 新的 Apollo 驗收：`decomp` 21 張 | 圖清單「分解 21」 | 通過 |
 | 7 | 圖上看得到全部元素 | 新的 Apollo 驗收：每張圖都建得出來、沒有超過上限，2,188 個具名元素每個至少在一張圖上（沒有在圖上的清單是空的） | — | 通過 |
-| 8 | Apollo 每一層都有對應的圖，畫法對照過規範 | 新的 Apollo 驗收：Requirements → `req`（每個套件一張）；Purpose → `stm`、`act`、`req`、`decomp`、`ibd`；Function → `act`、`fdecomp`、`req`；Technical → `decomp`、`ibd`、`req`；Execution → `occ`；Analysis → `calc`；Logical、Operation、Program、CoSMA → 套件內容圖。另查：狀態機 15 狀態、14 轉換、13 條有觸發條件；任務階段作業 28 條先後；10 條介面都標名稱與型別；14 個時間切片 13 條先後；分析定義列出 subject 與參數 | 圖清單：套件內容 29、分解 21、功能分解 18、需求與使用案例 12、動作與狀態機 32、互連 21、個體與時間切片 43、計算與分析 23。`apollo11Phases`：15 個節點、14 條線、13 個觸發條件標籤、開放箭頭；`Apollo11MissionSystem` 的互連圖：線標 `lvToPayload : LVPayloadInterface`；`ApolloCommandServiceModule`：`cmSMUmbilical : CSMInterface`、`ports` 隔間；`TraverseToEarth` 的動作流程：2 個參數小方塊；`lunarSurfaceOpsOperations`：6 條先後；時間切片圖 14 個 «timeslice»、13 條線 | 部分：圖都有；記號對照表見上方「階段 4 的結果」，其中標「待確認」與「否」的項目要 Mars 看過 |
+| 8 | Apollo 每一層都有對應的圖，畫法對照過規範 | 新的 Apollo 驗收：Requirements → `req`（每個套件一張）；Purpose → `stm`、`act`、`req`、`decomp`、`ibd`；Function → `act`、`fdecomp`、`req`；Technical → `decomp`、`ibd`、`req`；Execution → `occ`；Analysis → `calc`；Logical、Operation、Program、CoSMA → 套件內容圖。另查：狀態機 15 狀態、14 轉換、13 條有觸發條件；任務階段作業 28 條先後；10 條介面都標名稱與型別；14 個時間切片 13 條先後；分析定義列出 subject 與參數 | 圖清單：套件內容 29、分解 21、功能分解 18、需求與使用案例 12、動作與狀態機 32、互連 21、個體與時間切片 43、計算與分析 23。`apollo11Phases`：15 個節點、14 條線、13 個觸發條件標籤、開放箭頭；`Apollo11MissionSystem` 的互連圖：線標 `lvToPayload : LVPayloadInterface`；`ApolloCommandServiceModule`：`cmSMUmbilical : CSMInterface`、`ports` 隔間；`TraverseToEarth` 的動作流程：2 個參數小方塊；`lunarSurfaceOpsOperations`：6 條先後；時間切片圖 14 個 «timeslice»、13 條線 | 部分：圖都有；記號對照表見上方「階段 4 的結果」，標「否」的三項已依 Mars 照規範改畫；標「待確認」的兩項要再看原圖 |
 | 9 | 任何合法的模型都能顯示 | 「解析器涵蓋每種定義與使用」（A-2）通過；新的 `web/src/stage4.test.ts` 10 項以合成模型檢查每一類圖的節點、連線與記號、匯出的 SVG | — | 通過 |
 | 10 | 多檔案、多資料夾 | 「多資料夾：…」三項通過 | — | 通過 |
 | 11 | 參考專案唯讀 | 「參考專案：建立後唯讀…」通過 | Apollo 首頁標「唯讀」 | 通過 |
@@ -417,6 +421,8 @@ A-9 已退回上位文件第 C、D 期（Mars，2026-11-16 晚），不在第 A 
 另外：`npx tsc --noEmit` 0 個錯誤；`npm run build` 成功（只有原本就有的「chunk 大於 500 kB」提示）。
 
 依第 4 節例外改寫的測試（功能依決定被取代，檢查內容沒有放寬）：`web/src/diagrams.test.ts` 的套件內容圖測試，`Car` 的隔間由 `["features", "action spin", "· action inner"]` 改成 `["actions", "spin", "· action inner"]`。A-7a 的對照表寫了「規範對連接埠、動作、狀態等另有專屬的隔間，A-7c 到 A-7e 做到那一類圖時再分」，這次分出 `actions` 隔間，`action` 關鍵字由隔間表示，不再寫在列上。
+
+第二輪（連接埠與參數貼邊）的瀏覽器結果：`ApolloCommandServiceModule` 的互連圖 5 個方塊，介面的線兩端和方塊中心的距離是 0 px；`TraverseToEarth` 的動作流程，兩個參數方塊的中心和圖框的左右框線差 0.1 px。
 
 瀏覽器沒有驗到的：範本專案的圖在讀 DOM 時預覽面板被隱藏，React Flow 沒有畫連線（節點與工具列讀得到），所以範本專案圖上的連線數量沒有在瀏覽器確認；同樣的圖在 `server/api.test.ts`「圖的資料依 SysML v2 記法」裡以模型檢查過連線。Apollo 的圖是在面板顯示時讀的，連線都有畫出來。
 

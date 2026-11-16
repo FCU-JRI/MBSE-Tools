@@ -35,6 +35,44 @@ function compartmentsSvg(n: GNode, x: number, top: number, c: Palette): [string,
 /** 不畫成員的套件，標籤頁的大小。 */
 const BOX_TAB_W = 64, BOX_TAB_H = PKG_TAB / 2;
 
+/** 連接埠與參數的小方塊（規範 8.2.3.12、8.2.3.17）。 */
+export const PORT = 12;
+/** 貼在節點左右邊上的小方塊：方塊的中心在外框線上，名稱寫在節點裡面。 */
+function portsSvg(n: GNode, x: number, y: number, c: Palette): string {
+  const half = Math.floor((n.width - 24) / 2 / 6.2);
+  return (n.ports ?? []).map((p) => {
+    const px = p.side === "left" ? x - PORT / 2 : x + n.width - PORT / 2;
+    return `<rect x="${px}" y="${y + p.y - PORT / 2}" width="${PORT}" height="${PORT}" fill="${c.bg}" stroke="${c.ink}" stroke-width="1"/>` +
+      (p.side === "left" ? text(x + 10, y + p.y + 4, one(p.label, half), 10.5, c.ink) : text(x + n.width - 10, y + p.y + 4, one(p.label, half), 10.5, c.ink, `text-anchor="end"`));
+  }).join("");
+}
+/** 小方塊在畫布上的座標（連線的端點）。 */
+export function portPoint(n: GNode, x: number, y: number, key: string | undefined): [number, number] | null {
+  const p = key ? n.ports?.find((q) => q.key === key) : undefined;
+  return p ? [p.side === "left" ? x - PORT / 2 : x + n.width + PORT / 2, y + p.y] : null;
+}
+
+type Rect = { x: number; y: number; w: number; h: number };
+/**
+ * 圖框的範圍，與貼在圖框邊上的節點的位置。圖框包住其餘的節點（四周留 pad，上方再加名稱隔間）；
+ * 左邊的小方塊由上往下排在左框線上、右邊的排在右框線上，排不下時圖框往下長。畫面與匯出共用。
+ */
+export function frameLayout(inner: Rect[], edge: { id: string; boundary: "left" | "right"; width: number; height: number }[], pad: number): Rect & { places: Map<string, { x: number; y: number }> } {
+  const base = inner.length ? inner : [{ x: 0, y: 0, w: 240, h: 80 }];
+  const x = Math.min(...base.map((b) => b.x)) - pad, y = Math.min(...base.map((b) => b.y)) - pad - FRAME_HEAD;
+  const right = Math.max(...base.map((b) => b.x + b.w)) + pad;
+  let bottom = Math.max(...base.map((b) => b.y + b.h)) + pad;
+  const places = new Map<string, { x: number; y: number }>();
+  const row = { left: 0, right: 0 };
+  for (const n of edge) {
+    const cy = y + FRAME_HEAD + 24 + row[n.boundary]++ * 34;
+    // 方塊的中心落在框線上
+    places.set(n.id, { x: n.boundary === "left" ? x - n.width + PORT / 2 : right - PORT / 2, y: cy - n.height / 2 });
+    bottom = Math.max(bottom, cy + 24);
+  }
+  return { x, y, w: right - x, h: bottom - y, places };
+}
+
 /** 在 (x, y) 畫出一個節點，大小取自節點本身。 */
 export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth = 1): string {
   const { width: w, height: h } = n;
@@ -60,9 +98,11 @@ export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth 
       return out + compartmentsSvg(n, x, y + BOX_TAB_H + 22 + n.title.length * 16 + 6, c)[0];
     }
     case "param": {
-      // 參數與連接埠（規範 8.2.3.12、8.2.3.17）：小方塊，名稱寫在旁邊
-      return `<rect x="${x + 0.5}" y="${y + h / 2 - 6}" width="12" height="12" fill="${c.bg}" ${sw}/>` +
-        text(x + 18, y + h / 2 + 4, one(n.title[0] ?? n.name, Math.floor((w - 20) / 6.2)), 11, c.ink);
+      // 貼在圖框邊上的參數與連接埠（規範 8.2.3.12、8.2.3.17）：小方塊在圖框內側那一端，名稱寫在圖框外側
+      const label = n.title[0] ?? n.name;
+      return n.boundary === "right"
+        ? `<rect x="${x + 0.5}" y="${y + h / 2 - PORT / 2}" width="${PORT}" height="${PORT}" fill="${c.bg}" ${sw}/>` + text(x + PORT + 6, y + h / 2 + 4, label, 11, c.ink)
+        : `<rect x="${x + w - PORT - 0.5}" y="${y + h / 2 - PORT / 2}" width="${PORT}" height="${PORT}" fill="${c.bg}" ${sw}/>` + text(x + w - PORT - 6, y + h / 2 + 4, label, 11, c.ink, `text-anchor="end"`);
     }
     case "comment": {
       const f = 12; // 折角大小
@@ -77,7 +117,8 @@ export function nodeSvg(n: GNode, x: number, y: number, c: Palette, strokeWidth 
       let out = `<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="${n.shape === "usage" ? 10 : 0}" fill="${c.bg}" ${sw}${n.dashed ? ` stroke-dasharray="6 4"` : ""}/>`;
       out += text(cx, y + 17, n.keyword, 10.5, c.ink, `text-anchor="middle"`);
       n.title.forEach((l, i) => { out += text(cx, y + 34 + i * 16, l, 12.5, c.ink, `text-anchor="middle" font-weight="600"`); });
-      return out + compartmentsSvg(n, x, y + 26 + n.title.length * 16 + 4, c)[0];
+      out += portsSvg(n, x, y, c);
+      return out + compartmentsSvg(n, x, y + 26 + n.title.length * 16 + 4 + (n.band ?? 0), c)[0];
     }
   }
 }
