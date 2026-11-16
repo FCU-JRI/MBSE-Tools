@@ -34,7 +34,7 @@ export interface Element {
   parent?: string | null;
   /** 沒有自己名字的使用（F-71）。name 取自被重定義的特徵，取不到就用原始碼的第一行 */
   unnamed?: true;
-  /** CoSMA 專案才有（F-84）：五層之一，或 library（基礎庫、共用元件庫）、addon（附加庫）、root（模型根套件） */
+  /** CoSMA 專案才有（F-84）：五層之一，或 library（基礎庫、共用元件庫）、addon（附加庫）；模型的根套件歸 purpose */
   layer?: string;
 }
 

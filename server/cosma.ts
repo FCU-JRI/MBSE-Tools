@@ -16,8 +16,8 @@ export const COSMA_SOURCE = "cosma:";
 export const ADDON_SOURCE = "addon:";
 
 export type Layer = "purpose" | "operational" | "functional" | "logical" | "technical";
-/** 五層以外：CoSMA 基礎庫與共用元件庫（library）、JRI 附加庫（addon）、整個模型的根套件（root） */
-export type Place = Layer | "library" | "addon" | "root";
+/** 五層以外：CoSMA 基礎庫與共用元件庫（library）、JRI 附加庫（addon）。模型的根套件（只放匯入、套件名稱看不出層）歸 Purpose（Mars，2026-11-16） */
+export type Place = Layer | "library" | "addon";
 
 export const LAYERS: Record<Layer, string> = {
   purpose: "Purpose 為什麼",
@@ -26,7 +26,7 @@ export const LAYERS: Record<Layer, string> = {
   logical: "Logical 誰負責",
   technical: "Technical 怎麼做出來",
 };
-export const PLACES: Record<Exclude<Place, Layer>, string> = { library: "標準庫與基礎庫", addon: "附加庫", root: "模型根套件" };
+export const PLACES: Record<Exclude<Place, Layer>, string> = { library: "標準庫與基礎庫", addon: "附加庫" };
 
 export interface CosmaCategory extends Omit<Category, "pillar"> {
   pillar: Layer;
@@ -235,7 +235,7 @@ export function classify(elements: Element[]): Map<string, { category: string | 
       else {
         const byName = layerOfPackage(e.kind === "Package" ? e.name : nearestPackageOf(e, byId)?.name ?? "");
         const top = topPackageOf(e, byId);
-        r = { category: null, place: byName ?? (top && top.id !== e.id ? visit(top).place : "root") };
+        r = { category: null, place: byName ?? (top && top.id !== e.id ? visit(top).place : "purpose") };
       }
     }
     out.set(e.id, r);

@@ -5,7 +5,7 @@ export interface Element {
   about?: string[];
   /** 關鍵字（part def、perform action…）、樹上的上層、是不是沒有名字的使用（F-71） */
   keyword?: string; parent?: string | null; unnamed?: true;
-  /** CoSMA 專案才有（F-84）：purpose／operational／functional／logical／technical，或 library、addon、root */
+  /** CoSMA 專案才有（F-84）：purpose／operational／functional／logical／technical，或 library、addon */
   layer?: string;
 }
 /** 通用的關係（F-71）。to 是 null 時對象在標準庫或沒有列出來，名稱在 toName */
