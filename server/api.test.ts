@@ -1302,3 +1302,69 @@ test("多資料夾：歷史版本、分支審查、合併衝突的自動解決�
   assert.equal(gitIn(dir, "log", "-1", "--format=%an｜%s").trim(), "JRI MBSE｜模型改用 SysML v2 標準庫與內建的寫法");
   assert.equal(gitIn(dir, "status", "--porcelain", "--", "model"), "");
 });
+
+// ───────── 唯讀、原封不動的參考專案（F-72、F-73）─────────
+test("參考專案：建立後唯讀、原封不動；任何身分都不能改，瀏覽不會寫入任何檔案", async () => {
+  const { createHash } = await import("node:crypto");
+  const AP = `${I}/api/projects/apollo-11`, dir = path.join(home, "projects", "apollo-11");
+  let refs = (await call(`${I}/api/admin/references`)).data;
+  assert.deepEqual(refs.map((r: any) => [r.id, r.installed, r.problems, r.files, r.license]), [["apollo-11", false, [], 31, "MPL-2.0"]]);
+  assert.equal((await call(`${I}/api/admin/references/none/install`, "POST", {})).status, 400);
+  let r = await call(`${I}/api/admin/references/apollo-11/install`, "POST", {});
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal((await call(`${I}/api/admin/references/apollo-11/install`, "POST", {})).status, 400, "重複建立");
+
+  const listed = (await call(`${I}/api/projects`)).data.find((p: any) => p.id === "apollo-11");
+  assert.deepEqual([listed.readOnly, listed.pristine, listed.reference.license, listed.reference.commit.slice(0, 7)], [true, true, "MPL-2.0", "0e8a7d6"]);
+
+  // 走伺服器實際的載入路徑：28 個檔、沒有錯誤、2,188 個元素
+  const view = (await call(AP)).data;
+  assert.equal(view.analysis.ok, true);
+  assert.equal(view.analysis.diagnostics.filter((d: any) => d.severity === "error").length, 0);
+  assert.deepEqual([view.analysis.elements.length, view.analysis.unnamed.length], [2188, 330]);
+  const files = (await call(`${AP}/files`)).data as string[];
+  assert.equal(files.length, 28);
+  assert.match((await call(`${AP}/files/Purpose/MissionPackage.sysml`)).data.content, /package MissionPackage/);
+  // 只檢查、不儲存的請求可以用
+  assert.equal((await call(`${AP}/validate`, "POST", { file: "Apollo11Model.sysml", content: "package Apollo11Model { }\n" })).status, 200);
+
+  // 本機操作者是管理員，一樣不能改
+  const el = view.analysis.elements.find((e: any) => e.kind === "PartDefinition");
+  const writes: [string, string, unknown][] = [
+    ["PUT", "/files/Apollo11Model.sysml", { content: "package Apollo11Model { }\n" }],
+    ["PUT", "/files/New.sysml", { content: "package New { }\n" }],
+    ["POST", "/elements", { category: "Component", name: "不該出現" }],
+    ["PATCH", "/elements", { id: el.id, doc: "不該出現" }],
+    ["POST", "/elements/delete", { id: el.id }],
+    ["POST", "/comments", { text: "不該出現" }],
+    ["POST", "/packages", { name: "不該出現" }],
+    ["PATCH", "/layout", { diagram: "bdd", nodes: { a: { x: 1, y: 2 } } }],
+    ["PUT", "/diagrams", { diagrams: { custom: [], notes: {} } }],
+    ["POST", "/signoffs", { gate: "mdr", decision: "APPROVE" }],
+    ["POST", "/manual", { key: "x", done: true }],
+    ["POST", "/branches/merge", { name: "x" }],
+    ["POST", "/remote", { url: "" }],
+  ];
+  for (const [method, p, body] of writes) {
+    const w = await call(`${AP}${p}`, method, body);
+    assert.equal(w.status, 403, `${method} ${p} → ${w.status} ${JSON.stringify(w.data).slice(0, 120)}`);
+    assert.match(w.data.error, /唯讀/);
+  }
+  assert.equal((await call(`${I}/api/projects/apollo-11@feature~x`)).status, 403, "唯讀的專案不開分支");
+
+  // 原封不動：瀏覽之後沒有任何變更，沒有放進工具自己的檔案，每個模型檔和清單上的雜湊相同
+  assert.equal(gitIn(dir, "status", "--porcelain"), "");
+  for (const extra of ["lib", ".claude", "CLAUDE.md", "layout.json"]) assert.equal(await fs.stat(path.join(dir, extra)).then(() => true, () => false), false, `不應該有 ${extra}`);
+  const manifest = JSON.parse(await fs.readFile("reference/apollo-11-sysml-v2.manifest.json", "utf8"));
+  for (const f of files) assert.equal(createHash("sha256").update(await fs.readFile(path.join(dir, "model", ...f.split("/")))).digest("hex"), manifest.files[f], f);
+  assert.match(await fs.readFile(path.join(dir, "LICENSE.md"), "utf8"), /Mozilla Public License/);
+  assert.equal(gitIn(dir, "log", "--format=%s").trim().split("\n").length, 1, "只有建立時的那一筆提交");
+  refs = (await call(`${I}/api/admin/references`)).data;
+  assert.deepEqual([refs[0].installed, refs[0].problems], [true, []]);
+
+  // 檔案被動過時，管理頁查得出來
+  await fs.appendFile(path.join(dir, "model", "Apollo11Model.sysml"), "\n");
+  assert.deepEqual((await call(`${I}/api/admin/references`)).data[0].problems, ["內容不同 Apollo11Model.sysml"]);
+  gitIn(dir, "checkout", "--", "model/Apollo11Model.sysml");
+  assert.deepEqual((await call(`${I}/api/admin/references`)).data[0].problems, []);
+});

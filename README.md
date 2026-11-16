@@ -14,6 +14,7 @@
 - **版本**：每次儲存自動提交並推送 GitHub，GitHub 上的新提交（例如在 GitHub 合併的 PR）也會接回來；分支審查與合併；分支可以像 main 一樣完整開啟、瀏覽與編輯；基線比較。
 - **匯出**：Excel 表格、審查報告（可列印成 PDF 的網頁版與 Word）。
 - **共用元件庫**：跨專案共用的元件（以航電為主）。
+- **參考專案**：Airbus 的 Apollo 11 模型（CoSMA 框架的參考實作），由管理員在「管理」頁建立成唯讀的專案。檔案原封不動，建立時逐一核對。
 
 ## 存取
 
@@ -61,6 +62,12 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
 - `library/JRI.sysml`：JRI 元模型庫。
 - `sim/run_sim.py`：RocketPy 模擬腳本。
 - `templates/`：新專案的範本模型與給 Claude 的說明。
+- `reference/`：第三方的參考模型，原封不動。來源、提交與授權見 `reference/apollo-11-sysml-v2.md`。
+
+## 授權
+
+- 本儲存庫的程式與文件採 MIT 授權。根目錄的授權檔在版權人姓名確認後加入。
+- `reference/apollo-11-sysml-v2/` 是 AIRBUS 的作品，採 Mozilla Public License 2.0（全文在該資料夾的 `LICENSE.md`），沒有修改。這個資料夾不適用 MIT。
 
 ## 已知限制
 

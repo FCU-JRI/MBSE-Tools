@@ -18,6 +18,7 @@ import * as sim from "./sim.ts";
 import { evaluateProcess, stepOfCategory } from "./process.ts";
 import { buildReport, renderDocx, renderHtml } from "./report.ts";
 import { paramLines, paramWord } from "./modernize.ts";
+import * as reference from "./reference.ts";
 import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -92,6 +93,16 @@ auth.mountAuthRoutes(app);
 app.use("/api", auth.authenticate);
 app.use("/api/projects/:id", auth.projectGuard);
 
+// 唯讀的專案（F-72）：任何身分都不能改內容，也不開分支。封存只是從清單移除，管理員仍可操作
+app.use("/api/projects/:id", (req, res, next) => {
+  const ref = String(req.params.id), branch = ref.includes("@");
+  if (!branch && (req.method === "GET" || req.method === "HEAD" || /\/(validate|archive)$/.test(req.path))) return next();
+  store.readProject(ref.split("@")[0]).then((p) => {
+    if (p.readOnly) { res.status(403).json({ error: branch ? "唯讀的專案不能開分支。" : "這是唯讀的專案，不能修改。" }); return; }
+    next();
+  }, () => next());
+});
+
 // 分支（F-33）：參照是「代號@分支」，第一次開啟時建立它的工作目錄。載入整個專案時，main 和分支都順便跟上 GitHub 上的新提交。
 app.use("/api/projects/:id", (req, _res, next) => {
   versions.openBranch(String(req.params.id), req.method === "GET" && req.path === "/").then(() => next(), next);
@@ -133,6 +144,10 @@ app.get("/api/admin/config", admin, wrap(async (_req, res) => {
   res.json({ publicUrl: c.publicUrl, clientId: c.github.clientId, hasSecret: !!c.github.clientSecret, tailscaleAdmins: c.tailscaleAdmins, autoRepo: c.autoRepo });
 }));
 app.post("/api/admin/config", admin, wrap(async (req, res) => { await auth.updateConfig(req.body ?? {}); res.json({ saved: true }); }));
+
+// 參考專案（F-73）：放在 reference/ 的第三方模型，原封不動建成唯讀的專案
+app.get("/api/admin/references", admin, wrap(async (_req, res) => res.json(await reference.listReferences())));
+app.post("/api/admin/references/:ref/install", admin, wrap(async (req, res) => res.json(await reference.installReference(String(req.params.ref), author(req)))));
 
 // 共用元件庫（跨專案，以航電為主）
 app.get("/api/shared", wrap(async (_req, res) => {

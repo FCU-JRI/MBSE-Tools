@@ -264,6 +264,7 @@ async function modernAt(dir: string, sha: string): Promise<Map<string, [before: 
 /** 把工作目錄裡的模型檔轉成目前的寫法並寫回。模型檔因此有未提交的變更時回傳 true。呼叫的人要自己排隊（lock）。 */
 async function modernizeWorktree(ref: string): Promise<boolean> {
   const dir = dirOf(ref);
+  if ((await readProject(ref)).pristine) return false; // 原封不動的專案不轉換（F-72）
   const list = await sources(ref); // 文字層的舊寫法（F-36）在這裡轉換並寫回
   const shared = await listShared();
   const own = new Set(await listFiles(ref));
@@ -385,6 +386,7 @@ onPushRejected((dir) => {
  */
 async function commitUpgrade(ref: string): Promise<void> {
   const dir = dirOf(ref), model = path.join(dir, "model");
+  if ((await readProject(ref)).pristine) return; // 原封不動的專案不轉換（F-72）
   const names = await listFiles(ref).catch(() => [] as string[]);
   const legacy = async (n: string) => { const t = await fs.readFile(path.join(model, n), "utf8").catch(() => ""); return upgradeText(t) !== t; };
   // 先不排隊看一眼需不需要轉換；大多數時候不需要，不必為此擋住別人的修改

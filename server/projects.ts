@@ -38,6 +38,12 @@ export interface Project {
   highPower?: boolean; // 高功率（H 級以上）：TRR／FRR 只有指導老師能核可
   manual: Record<string, boolean>;
   signoffs: Signoff[];
+  /** 唯讀（F-72）：任何身分都不能改這個專案的內容 */
+  readOnly?: boolean;
+  /** 原封不動（F-72）：載入只讀檔，不加入 JRI.sysml 與共用元件庫，不轉換舊寫法，不寫入任何檔案 */
+  pristine?: boolean;
+  /** 參考專案的來源（F-73） */
+  reference?: { name: string; source: string; commit: string; license: string };
 }
 
 export class UserError extends Error {}
@@ -344,7 +350,13 @@ export async function saveShared(file: string, content: string): Promise<{ saved
 
 export async function sources(id: string, override?: { file: string; content: string }): Promise<Source[]> {
   const dir = dirOf(id);
-  await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
+  const project = await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
+  if (project.pristine) {
+    // 原封不動的專案（F-72）：只讀模型檔，其餘什麼都不做
+    const own = await listFiles(id);
+    if (override && !own.includes(override.file)) own.push(override.file);
+    return Promise.all(own.map(async (f): Promise<Source> => [f, override?.file === f ? override.content : await fs.readFile(path.join(dir, "model", f), "utf8")]));
+  }
 // 元模型庫以工具內的版本為準；專案內的副本（給 Claude 與離線閱讀用）不同時就更新，隨下一次儲存提交
   const lib = await fs.readFile(LIBRARY, "utf8");
   const copy = path.join(dir, "lib", "JRI.sysml");
@@ -371,7 +383,7 @@ export async function sources(id: string, override?: { file: string; content: st
 }
 
 export async function analyzeProject(id: string, override?: { file: string; content: string }): Promise<Analysis> {
-  return analyze(await sources(id, override), await listShared());
+  return analyze(await sources(id, override), (await readProject(id)).pristine ? [] : await listShared());
 }
 
 /** 儲存前先解析；有錯誤就不寫入，回傳診斷讓使用者修正。 */
