@@ -508,7 +508,7 @@ test("衍生、細化、驗證方法用 SysML v2 標準庫的寫法；舊寫法�
   assert.equal(el(r.data, "飛行測試遠地點量測").attrs.kind, "VerificationMethodKind::test");
   assert.equal(await fs.readFile(file, "utf8"), standard, "轉換結果和新專案的範本完全相同");
   // 轉換單獨提交成一筆，不和使用者的修改混在一起
-  assert.equal(gitIn(dir, "log", "-1", "--format=%an｜%s").trim(), "JRI MBSE｜衍生、細化、驗證方法改用 SysML v2 標準庫的寫法");
+  assert.equal(gitIn(dir, "log", "-1", "--format=%an｜%s").trim(), "JRI MBSE｜模型改用 SysML v2 標準庫與內建的寫法");
   assert.equal(gitIn(dir, "status", "--porcelain", "--", "model"), "");
   assert.equal(gitIn(dir, "show", "--stat", "--format=", "HEAD").trim().split("\n").length, 2, "這一筆只動到模型檔");
 
@@ -575,6 +575,85 @@ test("衍生、細化、驗證方法用 SysML v2 標準庫的寫法；舊寫法�
   r = await call(`${M}/undo`, "POST", {});
   assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
   assert.equal(r.data.analysis.ok, true);
+});
+
+test("利害關係人與參與者用內建的 stakeholder、actor；使用案例可以包含；舊的 #trace 相依自動改寫（F-37）", async () => {
+  await call(`${I}/api/projects`, "POST", { id: "tv", name: "參與者測試", kind: "annual" });
+  const dir = path.join(home, "projects", "tv"), file = path.join(dir, "model", "model.sysml");
+  const M = `${I}/api/projects/tv`;
+  const el = (view: any, name: string) => view.analysis.elements.find((e: any) => e.name === name);
+  const traces = (view: any) => view.analysis.relations.filter((r: any) => r.kind === "trace").map((r: any) => `${view.analysis.elements.find((e: any) => e.id === r.from)?.name}→${view.analysis.elements.find((e: any) => e.id === r.to)?.name}:${r.form ?? "相依"}`).sort();
+  const fresh = (await call(M)).data;
+  assert.deepEqual(traces(fresh), ["安全發射與回收→指導老師:stakeholder", "執行發射→指導老師:actor"].sort());
+  const standard = await fs.readFile(file, "utf8");
+
+  // 模擬升級前的專案：這兩條關係還是 #trace 相依
+  const legacy = standard
+    .replace("            subject;\n            stakeholder :> Project::Stakeholders::'指導老師';\n        }\n", "        }\n        #trace dependency from '安全發射與回收' to '指導老師';\n")
+    .replace("            subject;\n            actor :> Project::Stakeholders::'指導老師';\n        }\n", "        }\n")
+    .replace("            doc /* 回收團隊依落點預測與定位訊號尋回火箭。 */\n        }\n", "            doc /* 回收團隊依落點預測與定位訊號尋回火箭。 */\n        }\n        #trace dependency from '執行發射' to Stakeholders::'指導老師';\n");
+  assert.equal((legacy.match(/#trace dependency/g) ?? []).length, 2);
+  assert.ok(!/stakeholder :>|actor :>/.test(legacy));
+  await fs.writeFile(file, legacy, "utf8");
+  gitIn(dir, "commit", "-qam", "升級前的專案（#trace 相依）");
+  const legacySha = gitIn(dir, "rev-parse", "HEAD").trim();
+
+  // 開啟後自動改寫，單獨一筆提交；關係不變，檔案和新專案的範本相同
+  let r = await call(M);
+  assert.equal(r.data.analysis.ok, true, JSON.stringify(r.data.analysis.diagnostics).slice(0, 300));
+  assert.deepEqual(traces(r.data), ["安全發射與回收→指導老師:stakeholder", "執行發射→指導老師:actor"].sort());
+  assert.equal(await fs.readFile(file, "utf8"), standard);
+  assert.equal(gitIn(dir, "log", "-1", "--format=%an｜%s").trim(), "JRI MBSE｜模型改用 SysML v2 標準庫與內建的寫法");
+  assert.equal(gitIn(dir, "status", "--porcelain", "--", "model"), "");
+  assert.equal((await call(`${M}/compare?from=${legacySha}&to=HEAD`)).data.changes.length, 0, "轉換前後模型內容相同");
+
+  // 新增：期望 → 利害關係人寫成 stakeholder，使用案例 → 利害關係人寫成 actor；已經有 subject 的不重複補
+  const [exp, uc1, uc2, host, teacher] = ["安全發射與回收", "執行發射", "尋回火箭", "競賽主辦方", "指導老師"].map((n) => el(r.data, n));
+  r = await call(`${M}/relations`, "POST", { kind: "trace", from: exp.id, to: host.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  r = await call(`${M}/relations`, "POST", { kind: "trace", from: uc2.id, to: host.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.deepEqual(traces(r.data), ["安全發射與回收→指導老師:stakeholder", "安全發射與回收→競賽主辦方:stakeholder", "執行發射→指導老師:actor", "尋回火箭→競賽主辦方:actor"].sort());
+  let text = await fs.readFile(file, "utf8");
+  assert.match(text, /subject;\n\s+stakeholder :> Project::Stakeholders::'指導老師';\n\s+stakeholder :> Project::Stakeholders::'競賽主辦方';\n\s+\}/);
+  assert.match(text, /use case <'UC-002'> '尋回火箭' : UseCase \{\n\s+doc [^\n]+\n\s+subject;\n\s+actor :> Project::Stakeholders::'競賽主辦方';\n\s+\}/);
+  assert.equal((await call(`${M}/relations`, "POST", { kind: "trace", from: exp.id, to: host.id })).status, 400, "重複的關係被拒絕");
+
+  // 包含：只能在使用案例之間
+  r = await call(`${M}/relations`, "POST", { kind: "include", from: uc1.id, to: uc2.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.ok(r.data.analysis.relations.some((x: any) => x.kind === "include" && x.from === uc1.id && x.to === uc2.id));
+  assert.match(await fs.readFile(file, "utf8"), /include Project::UseCases::'尋回火箭';/);
+  assert.equal((await call(`${M}/relations`, "POST", { kind: "include", from: uc1.id, to: teacher.id })).status, 400);
+
+  // 刪除關係、改名、刪除利害關係人
+  r = await call(`${M}/relations/delete`, "POST", { kind: "trace", from: exp.id, to: host.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  r = await call(`${M}/relations/delete`, "POST", { kind: "include", from: uc1.id, to: uc2.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.deepEqual(traces(r.data), ["安全發射與回收→指導老師:stakeholder", "執行發射→指導老師:actor", "尋回火箭→競賽主辦方:actor"].sort());
+
+  // 從升級前的版本開出來的分支，用舊寫法在旁邊加了新的期望：列得出來、合併不衝突、合併後是新寫法
+  gitIn(dir, "checkout", "-q", "-b", "feature/old-trace", legacySha);
+  await fs.writeFile(file, legacy.replace("        #trace dependency from '安全發射與回收' to '指導老師';\n",
+    "        #trace dependency from '安全發射與回收' to '指導老師';\n        requirement <'EXP-090'> '分支上的期望' : Expectation { doc /* 用舊寫法加的。 */ }\n        #trace dependency from '分支上的期望' to '指導老師';\n"), "utf8");
+  gitIn(dir, "commit", "-qam", "分支：用 #trace 相依新增期望");
+  gitIn(dir, "checkout", "-q", "main");
+  assert.equal((await call(`${M}/branches`)).data.find((b: any) => b.name === "feature/old-trace")?.ok, true);
+  r = await call(`${M}/branches/merge`, "POST", { name: "feature/old-trace" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.ok, true);
+  assert.deepEqual(traces(r.data), ["分支上的期望→指導老師:stakeholder", "安全發射與回收→指導老師:stakeholder", "執行發射→指導老師:actor", "尋回火箭→競賽主辦方:actor"].sort());
+  assert.ok(!/#trace dependency/.test(await fs.readFile(file, "utf8")));
+
+  // 利害關係人改名：寫在各個主體裡的引用跟著改；刪除利害關係人：指向它的 actor 一併拿掉
+  r = await call(`${M}/elements`, "PATCH", { id: teacher.id, name: "社團指導老師" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.deepEqual(traces(r.data), ["分支上的期望→社團指導老師:stakeholder", "安全發射與回收→社團指導老師:stakeholder", "執行發射→社團指導老師:actor", "尋回火箭→競賽主辦方:actor"].sort());
+  r = await call(`${M}/elements/delete`, "POST", { id: el(r.data, "競賽主辦方").id });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.ok, true);
+  assert.deepEqual(traces(r.data), ["分支上的期望→社團指導老師:stakeholder", "安全發射與回收→社團指導老師:stakeholder", "執行發射→社團指導老師:actor"].sort());
 });
 
 test("GitHub 儲存庫網址只接受 github.com", async () => {
@@ -757,10 +836,16 @@ test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字�
   assert.deepEqual(["ibd", "act", "stm"].map((k) => defs.find((d: any) => d.kind === k)?.viewDef), ["InterconnectionView", "ActionFlowView", "StateTransitionView"]);
   const uc = g("uc");
   assert.ok(uc.nodes.some((n: any) => n.keyword === "«use case»" && n.shape === "usage"), "使用案例是圓角的 «use case»");
-  assert.ok(uc.nodes.filter((n: any) => n.keyword === "«part»" && / : Stakeholder$/.test(n.title.join(""))).length >= 2, "利害關係人是 «part»");
+  // 參與者是使用案例的 actor 參數：節點標 «actor»，用沒有箭頭、沒有標籤的實線連到使用案例（8.2.3.21）；沒有參與任何使用案例的仍是 «part»
+  const people = uc.nodes.filter((n: any) => / : Stakeholder$/.test(n.title.join("")));
+  assert.ok(people.length >= 2);
+  assert.equal(people.find((n: any) => n.name === "指導老師")?.keyword, "«actor»");
+  for (const n of people) assert.equal(n.keyword, uc.edges.some((e: any) => e.target === n.id && e.head === "none") ? "«actor»" : "«part»", n.name);
   const tr = uc.edges.find((e: any) => name(e.source) === "執行發射");
-  assert.deepEqual([tr?.kind, tr?.dashed, tr?.head, tr?.label], ["trace", true, "open", "«#trace»"]);
+  assert.deepEqual([tr?.kind, tr?.dashed, tr?.head, tr?.label], ["trace", false, "none", ""]);
   const req = g("req");
+  const st = req.edges.find((e: any) => name(e.source) === "安全發射與回收" && name(e.target) === "指導老師");
+  assert.deepEqual([st?.dashed, st?.head, st?.label, req.nodes.find((x: any) => x.name === "指導老師")?.keyword], [false, "none", "", "«stakeholder»"], "期望的利害關係人");
   assert.ok(req.edges.some((e: any) => e.label === "«#refinement»" && e.dashed && e.head === "open"), "相依為虛線開放箭頭");
   assert.ok(req.edges.some((e: any) => e.label === "«#derivation»" && !e.dashed && e.head === "open"), "需求衍生是連結，實線開放箭頭（8.2.3.13）");
   assert.ok(req.edges.some((e: any) => e.label === "«satisfy»" && !e.dashed) && req.edges.some((e: any) => e.label === "«verify»" && !e.dashed), "satisfy、verify 為實線");

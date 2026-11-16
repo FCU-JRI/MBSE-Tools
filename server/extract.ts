@@ -26,12 +26,16 @@ export interface Element {
   about: string[]; // 註解（Comment）所說明的元素
   line: number | null;
   endLine: number | null;
+  /** 主體裡有沒有寫 subject。stakeholder 與 actor 前面一定要先有 subject */
+  hasSubject?: boolean;
 }
 
 export interface Relation {
-  kind: "derive" | "trace" | "refine" | "satisfy" | "verify" | "allocate" | "succession" | "connect" | "transition";
+  kind: "derive" | "trace" | "refine" | "satisfy" | "verify" | "allocate" | "succession" | "connect" | "transition" | "include";
   from: string;
   to: string;
+  /** 追溯到利害關係人時，是不是用語言內建的寫法：需求裡的 stakeholder，或使用案例裡的 actor（F-37）。相依（#trace）沒有這個欄位 */
+  form?: "stakeholder" | "actor";
   line: number | null;
   loc: Loc | null;
   /** 這條關係所在的整句原始碼；只有和其他關係共用一句時（一條衍生連結掛多個子需求）才和 loc 不同 */
@@ -173,6 +177,7 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
     }
   }
 
+  const withSubject = new Set(raw.filter((e) => e["@type"] === "SubjectMembership").map((e) => ref(e.owner) ?? ref(e.owningRelatedElement) ?? ""));
   const NAMED = /(Definition|Usage|Package|^Comment)$/;
   const elements: Element[] = [];
   for (const e of raw) {
@@ -229,13 +234,14 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       about: e["@type"] === "Comment" ? refs(e.annotatedElement) : [],
       line: e["sysx:sourceLine"] ?? null,
       endLine: e["sysx:sourceEndLine"] ?? null,
+      ...(withSubject.has(id) ? { hasSubject: true } : {}),
     });
   }
 
   const known = new Set(elements.map((e) => e.id));
   const relations: Relation[] = [];
-  const push = (kind: Relation["kind"], from: string | null, to: string | null, src: Raw | undefined, whole?: Raw) => {
-    if (from && to && known.has(from) && known.has(to)) relations.push({ kind, from, to, line: src?.["sysx:sourceLine"] ?? null, loc: locOf(src), outer: whole ? locOf(whole) : null, file: fileOf(src) });
+  const push = (kind: Relation["kind"], from: string | null, to: string | null, src: Raw | undefined, whole?: Raw, form?: Relation["form"]) => {
+    if (from && to && known.has(from) && known.has(to)) relations.push({ kind, from, to, ...(form ? { form } : {}), line: src?.["sysx:sourceLine"] ?? null, loc: locOf(src), outer: whole ? locOf(whole) : null, file: fileOf(src) });
   };
   // 往上找到第一個已知的具名元素
   const namedOwner = (id: string | null): string | null => {
@@ -254,6 +260,16 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
       const tags = tagsOf.get(e["@id"]) ?? [];
       const kind = tags.map((x) => LINK_KINDS[x]).find(Boolean) ?? "trace";
       for (const c of refs(e.client)) for (const s of refs(e.supplier)) push(kind, c, s, e);
+    } else if (t === "StakeholderMembership" || t === "ActorMembership") {
+      // 語言內建的寫法：需求裡的 stakeholder、使用案例裡的 actor。參數本身通常沒有名字，指向的利害關係人才是關係的對象
+      const param = byId.get(ref(e.ownedMemberElement) ?? "");
+      if (!param || !inProject(param)) continue;
+      const target = (generals.get(param["@id"]) ?? []).find((g) => known.has(g)) ?? null;
+      push("trace", namedOwner(ref(e.owner) ?? ref(e.owningRelatedElement)), target, param, undefined, t === "ActorMembership" ? "actor" : "stakeholder");
+    } else if (t === "IncludeUseCaseUsage") {
+      if (!inProject(e)) continue;
+      const sub = byId.get(ref(e.ownedReferenceSubsetting) ?? "");
+      push("include", namedOwner(ref(e.owner)), ref(sub?.referencedFeature) ?? ref(sub?.general) ?? null, e);
     } else if (t === "SatisfyRequirementUsage") {
       const req = ref(e.subsets) ?? (generals.get(e["@id"]) ?? [])[0] ?? null;
       // 寫在定義主體內的 satisfy 沒有明示滿足者，以所在的元素為準

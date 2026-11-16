@@ -17,6 +17,7 @@ import * as pm from "./pm.ts";
 import * as sim from "./sim.ts";
 import { evaluateProcess, stepOfCategory } from "./process.ts";
 import { buildReport, renderDocx, renderHtml } from "./report.ts";
+import { paramLines, paramWord } from "./modernize.ts";
 import type { User } from "./auth.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -237,7 +238,9 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   if (kind0 === "derive" && !(/RequirementUsage$/.test(from.kind) && /RequirementUsage$/.test(to.kind))) throw new store.UserError("衍生只能連接需求類的項目（需要、目標、目的、量度、各層需求）。其他項目之間請用「追溯」。");
   const owner0 = before.elements.find((x) => x.id === from.owner);
   // 寫進某個元素主體的關係用該元素的檔案，其餘寫在根套件
-  const file = kind0 === "compose" || (kind0 === "satisfy" && /Definition$/.test(from.kind)) ? editable(from).file
+  // 追溯到利害關係人：需求用內建的 stakeholder、使用案例用 actor，寫在起點的主體裡（F-37）
+  const param = kind0 === "trace" ? paramWord(from, to) : null;
+  const file = kind0 === "compose" || kind0 === "include" || param || (kind0 === "satisfy" && /Definition$/.test(from.kind)) ? editable(from).file
     : ["connect", "succession", "transition"].includes(kind0) && owner0 ? editable(owner0).file : rootFile(before);
   const content = await store.readFile(id, file);
   const kind = String(req.body.kind);
@@ -274,6 +277,11 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
       next = insertInto(content, inFile(before, file), ROOT_PACKAGE, null, (indent) => `${indent}allocate ${featureRef(from)} to ${featureRef(target)};
 `);
     }
+  } else if (param) {
+    next = insertInside(content, from, (indent) => paramLines(from, [to], param, indent));
+  } else if (kind === "include") {
+    if (from.kind !== "UseCaseUsage" || to.kind !== "UseCaseUsage") throw new store.UserError("「包含」只能連接兩個使用案例。");
+    next = insertInside(content, from, (indent) => `${indent}include ${qn(to.qualifiedName)};\n`);
   } else if (kind === "compose") {
     // 結構分解：在上層定義內加入一個以下層定義為型別的零件
     if (from.kind !== "PartDefinition" || to.kind !== "PartDefinition") throw new store.UserError("結構分解只能連接兩個定義（part def）。");
@@ -292,7 +300,7 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
     next = insertInto(content, inFile(before, file), ROOT_PACKAGE, null, (indent) =>
       relationSnippet({ kind: req.body.kind, from: from.qualifiedName, to: to.qualifiedName }, indent));
   }
-  const zh = RELATION_LABELS[kind]?.zh ?? ({ compose: "包含", connect: "連接", succession: "之後是", transition: "轉換到" } as Record<string, string>)[kind] ?? kind;
+  const zh = RELATION_LABELS[kind]?.zh ?? ({ compose: "組成", connect: "連接", succession: "之後是", transition: "轉換到" } as Record<string, string>)[kind] ?? kind;
   const r = await store.saveFile(id, file, next, author(req), `新增關係：${from.name} ${zh} ${to.name}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });

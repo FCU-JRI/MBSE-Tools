@@ -18,7 +18,9 @@
 - 追溯關係：
   - `#derivation connection { end #derive ::> 子; end #original ::> 母; }`　需求衍生（兩端都必須是需求類的項目）
   - `#refinement dependency from 量度 to 目的;`　細化
-  - `#trace dependency from 期望 to 利害關係人;`　一般追溯
+  - 期望是誰提的：寫在期望的主體內，`subject;` 之後接 `stakeholder :> 利害關係人;`
+  - 誰參與使用案例：寫在使用案例的主體內，`subject;` 之後接 `actor :> 利害關係人;`；使用案例之間用 `include 另一個使用案例;`
+  - `#trace dependency from 下層 to 上層;`　其他的一般追溯
   - `satisfy 需求 by 元件;`　滿足
   - 驗證寫在驗證事件內：`objective { verify 需求; }`，方法寫成 `@VerificationMethod { kind = VerificationMethodKind::test; }`（test、analyze、inspect、demo）
   - 衍生、細化、驗證方法用的是 SysML v2 標準庫的寫法。舊的 `#derive dependency`、`#refine dependency`、`@VVMethod` 工具會自動轉換，但請不要再寫

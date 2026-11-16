@@ -68,7 +68,7 @@ export const stereotype = (e: Element) => {
   const k = KEYWORD[e.kind] ?? e.kind.replace(/(Usage|Definition)$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() + (e.kind.endsWith("Definition") ? " def" : "");
   return `«${k}»`;
 };
-const EDGE_LABEL: Record<string, string> = { derive: "«#derivation»", refine: "«#refinement»", trace: "«#trace»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»" };
+const EDGE_LABEL: Record<string, string> = { derive: "«#derivation»", refine: "«#refinement»", trace: "«#trace»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»", include: "«include»" };
 
 /** 依寬度折行：中日韓字算 2、其餘算 1。 */
 export function wrap(text: string, units: number, maxLines: number): string[] {
@@ -178,8 +178,20 @@ export function buildGraph(d: DiagramDef, a: Analysis, opts?: { packages: Set<st
 
 function baseGraph(d: DiagramDef, a: Analysis): Graph {
   const byId = new Map(a.elements.map((e) => [e.id, e]));
-  const relEdge = (r: Analysis["relations"][number], i: number): GEdge =>
-    edge(`${r.kind}:${r.from}:${r.to}:${i}`, r.from, r.to, r.kind, EDGE_LABEL[r.kind] ?? "", { type: "relation", kind: r.kind, from: r.from, to: r.to });
+  const relEdge = (r: Analysis["relations"][number], i: number): GEdge => {
+    const e = edge(`${r.kind}:${r.from}:${r.to}:${i}`, r.from, r.to, r.kind, EDGE_LABEL[r.kind] ?? "", { type: "relation", kind: r.kind, from: r.from, to: r.to });
+    // 內建的 stakeholder、actor 是需求或使用案例的參數，規範 8.2.3.21 畫成一條沒有箭頭、沒有標籤的實線
+    return r.form ? { ...e, dashed: false, head: "none", label: "" } : e;
+  };
+  /**
+   * 被當成參與者或利害關係人連上的節點，關鍵字改成 «actor»、«stakeholder»（規範 8.2.3.21）。
+   * 同一位利害關係人在一張圖上同時有兩種身分時，用這張圖的主題決定（prefer）；自訂圖沒有主題，就維持原本的 «part»。
+   */
+  const roles = (nodes: GNode[], rels: Analysis["relations"], prefer?: "stakeholder" | "actor"): GNode[] => nodes.map((n) => {
+    const forms = new Set(rels.filter((r) => r.form && r.to === n.id).map((r) => r.form));
+    const role = prefer && forms.has(prefer) ? prefer : forms.size === 1 ? [...forms][0] : null;
+    return role ? { ...n, keyword: `«${role}»` } : n;
+  });
   /** 結構分解：定義擁有零件（實心菱形在定義端），零件再指向定義它的定義。 */
   const composition = (ids: Set<string>, nodes: GNode[], edges: GEdge[]) => {
     for (const u of a.elements) {
@@ -195,8 +207,9 @@ function baseGraph(d: DiagramDef, a: Analysis): Graph {
   if (d.kind === "custom") {
     // 自訂圖：使用者挑選的任何模型項目，以及它們之間已存在的所有關係
     const ids = new Set((d.members ?? []).filter((id) => byId.has(id)));
-    const nodes = [...ids].map((id) => node(byId.get(id)!, a));
-    const edges = a.relations.filter((r) => ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i));
+    const rels = a.relations.filter((r) => ids.has(r.from) && ids.has(r.to));
+    const nodes = roles([...ids].map((id) => node(byId.get(id)!, a)), rels);
+    const edges = rels.map((r, i) => relEdge(r, i));
     composition(ids, nodes, edges);
     return { nodes, edges, direction: "TB", reverse: ["derive", "refine", "trace", "satisfy", "verify"] };
   }
@@ -213,15 +226,16 @@ function baseGraph(d: DiagramDef, a: Analysis): Graph {
     const rels = a.relations.filter((r) => ["derive", "refine", "trace", "satisfy", "verify"].includes(r.kind));
     const ids = new Set(listOf(a.elements, ...REQ_CATS).map((e) => e.id));
     for (const r of rels) if (ids.has(r.to) || ids.has(r.from)) { ids.add(r.from); ids.add(r.to); }
-    const nodes = [...ids].map((id) => byId.get(id)).filter((e): e is Element => !!e).map((e) => node(e, a));
-    return { nodes, edges: rels.filter((r) => ids.has(r.from) && ids.has(r.to)).map((r, i) => relEdge(r, i)), direction: "BT" };
+    const shown = rels.filter((r) => ids.has(r.from) && ids.has(r.to));
+    const nodes = roles([...ids].map((id) => byId.get(id)).filter((e): e is Element => !!e).map((e) => node(e, a)), shown, "stakeholder");
+    return { nodes, edges: shown.map((r, i) => relEdge(r, i)), direction: "BT" };
   }
 
   if (d.kind === "uc") {
-    // 使用案例與利害關係人；兩者之間目前以 «trace» 相依表示
+    // 使用案例與利害關係人。參與者是使用案例的 actor 參數（舊模型可能還是 «#trace» 相依）；使用案例之間可以互相包含
     const ids = new Set([...listOf(a.elements, "UseCase"), ...listOf(a.elements, "Stakeholder")].map((e) => e.id));
-    const rels = a.relations.filter((r) => r.kind === "trace" && ids.has(r.from) && ids.has(r.to));
-    const nodes = [...ids].map((id) => byId.get(id)).filter((e): e is Element => !!e).map((e) => node(e, a));
+    const rels = a.relations.filter((r) => (r.kind === "trace" || r.kind === "include") && ids.has(r.from) && ids.has(r.to));
+    const nodes = roles([...ids].map((id) => byId.get(id)).filter((e): e is Element => !!e).map((e) => node(e, a)), rels, "actor");
     return { nodes, edges: rels.map((r, i) => relEdge(r, i)), direction: "RL" };
   }
 
@@ -249,7 +263,8 @@ function baseGraph(d: DiagramDef, a: Analysis): Graph {
 export interface LinkTool { kind: string; zh: string; en: string; hint: string }
 /** 所有連線種類。 */
 export const ALL_LINKS: LinkTool[] = [
-  { kind: "trace", zh: "追溯", en: "#trace dependency", hint: "從項目拉到它的來源（例如期望拉到利害關係人）" },
+  { kind: "trace", zh: "追溯", en: "#trace／stakeholder／actor", hint: "從項目拉到它的來源。拉到利害關係人時，期望寫成 stakeholder、使用案例寫成 actor" },
+  { kind: "include", zh: "包含", en: "include", hint: "從使用案例拉到它會用到的另一個使用案例" },
   { kind: "derive", zh: "衍生", en: "#derivation connection", hint: "從衍生出的需求拉到來源需求或目的" },
   { kind: "refine", zh: "細化", en: "#refinement dependency", hint: "從細化者（例如量度）拉到被細化的項目" },
   { kind: "satisfy", zh: "滿足", en: "satisfy", hint: "從負責的系統或元件拉到需求" },
@@ -265,7 +280,7 @@ export const CUSTOM_DEFAULT = { els: ["Stakeholder", "Expectation", "SystemRequi
 /** 每種圖可以用的連線工具（選了工具再從起點拉到終點）。 */
 export const LINK_TOOLS: Record<DiagramKind, LinkTool[]> = {
   bdd: link("compose"), ibd: link("connect"), req: link("derive", "refine", "satisfy", "trace"),
-  uc: [{ kind: "trace", zh: "追溯", en: "#trace dependency", hint: "從使用案例拉到參與的利害關係人" }],
+  uc: [{ kind: "trace", zh: "參與者", en: "actor", hint: "從使用案例拉到參與的利害關係人" }, ...link("include")],
   act: link("succession"), stm: link("transition"), custom: ALL_LINKS,
 };
 export const PALETTE: Record<DiagramKind, string[]> = {
