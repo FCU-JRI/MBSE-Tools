@@ -307,5 +307,33 @@ package JRI {
     }
     // [/P6]
     // [P7 火箭外形與模擬圖]
+    /* 火箭幾何 Geometry：標在任何零件（次系統、元件、外形段）上，給出它沿箭軸的位置與尺寸。
+       火箭外形（2D 側視圖）、重心、壓力中心與系統簡圖都讀這一份數字。
+       座標：原點在鼻錐尖端，往尾端為正；單位是 m、kg，寫數字即可；套件有匯入 SI 時也可以寫 100 [mm]、500 [g]，工具會換算。
+       geoKind：nose 鼻錐、body 箭體段、transition 過渡段、fins 尾翼組、mass 只有質量（裝在箭體內的東西）。
+       用法：part '鼻錐' { @Geometry { geoKind = "nose"; geoPosition = 0; geoLength = 0.4; geoDiameter = 0.1; geoMass = 0.5; } } */
+    metadata def Geometry {
+        attribute geoKind : String;
+        /* 前端（尾翼組是翼根前緣）到鼻錐尖端的距離 */
+        attribute geoPosition : Real;
+        attribute geoLength : Real[0..1];
+        /* 外徑；鼻錐是底部外徑，過渡段是前端外徑 */
+        attribute geoDiameter : Real[0..1];
+        /* 過渡段的後端外徑 */
+        attribute geoAftDiameter : Real[0..1];
+        /* 鼻錐外形：conical、ogive、vonKarman、lvhaack、tangent、parabolic、elliptical */
+        attribute geoShape : String[0..1];
+        /* 尾翼組：片數、翼根弦長、翼尖弦長、翼展（單片高度）、後掠長度（翼根前緣到翼尖前緣） */
+        attribute geoFinCount : Integer[0..1];
+        attribute geoRootChord : Real[0..1];
+        attribute geoTipChord : Real[0..1];
+        attribute geoSpan : Real[0..1];
+        attribute geoSweep : Real[0..1];
+        /* 質量（含推進劑）與它自己的重心距本段前端的距離；沒寫重心就當作本段中點 */
+        attribute geoMass : Real[0..1];
+        attribute geoCg : Real[0..1];
+        /* 推進劑質量：燃燒完會扣掉，用來算燃畢的重心與穩定裕度 */
+        attribute geoPropellant : Real[0..1];
+    }
     // [/P7]
 }

@@ -15,6 +15,9 @@ import { RiskFmeaPage } from "./p5/Page.tsx";
 import { TradeStudiesPage } from "./TradeStudies.tsx";
 import { FormulasPage } from "./Formulas.tsx";
 // [/P6]
+// [P7 火箭外形與模擬圖]
+import { RocketPage } from "./P7Rocket.tsx";
+// [/P7]
 
 export interface MethodPageProps {
   view: View;
@@ -53,5 +56,6 @@ export const METHOD_PAGES: MethodPage[] = [
   { id: "formulas", zh: "公式", Component: FormulasPage },
   // [/P6]
   // [P7 火箭外形與模擬圖]
+  { id: "rocket", zh: "火箭外形", Component: RocketPage },
   // [/P7]
 ];
