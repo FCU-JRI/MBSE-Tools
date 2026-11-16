@@ -23,6 +23,63 @@ export function modelItems(elements: Element[]): Element[] {
   return elements.filter((e) => e.category !== null && e.kind !== "ReferenceUsage" && (STRUCTURAL.has(e.category) ? e.kind === "PartDefinition" : e.kind.endsWith("Usage")));
 }
 
+// ───────── 依套件瀏覽（F-74、F-75）─────────
+export const isPackage = (e: Element) => e.kind === "Package" || e.kind === "LibraryPackage";
+/** all：依樹的順序（先上層、再下層）；children 的鍵是上層的識別碼，最上層是 null；size：底下一共有幾個元素。 */
+export interface TreeIndex { all: Element[]; byId: Map<string, Element>; children: Map<string | null, Element[]>; size: Map<string, number>;
+  /** 底下具名的元素有幾個（畫面上顯示的數字） */
+  named: Map<string, number> }
+
+/** 把具名的元素與沒有名字的使用依擁有關係接成樹。每個元素恰好出現一次。同一層依檔案與行號排，沒有名字的排在同一行的後面。 */
+export function treeOf(a: Pick<Analysis, "elements" | "unnamed">): TreeIndex {
+  const list = [...a.elements, ...(a.unnamed ?? [])];
+  const byId = new Map(list.map((e) => [e.id, e]));
+  const children = new Map<string | null, Element[]>();
+  list.forEach((e) => {
+    // 上層不在清單裡（不應該發生）就放到最上層，不要讓元素消失
+    const p = e.parent != null && byId.has(e.parent) && e.parent !== e.id ? e.parent : null;
+    children.set(p, [...(children.get(p) ?? []), e]);
+  });
+  const order = new Map(list.map((e, i) => [e.id, i]));
+  for (const kids of children.values()) kids.sort((x, y) => x.file.localeCompare(y.file) || (x.line ?? 1e9) - (y.line ?? 1e9) || (order.get(x.id) as number) - (order.get(y.id) as number));
+  const all: Element[] = [], size = new Map<string, number>(), named = new Map<string, number>();
+  const walk = (parent: string | null, seen: Set<string>): [number, number] => {
+    let n = 0, m = 0;
+    for (const e of children.get(parent) ?? []) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id); all.push(e);
+      const [below, belowNamed] = walk(e.id, seen);
+      size.set(e.id, below); named.set(e.id, belowNamed);
+      n += 1 + below; m += (e.unnamed ? 0 : 1) + belowNamed;
+    }
+    return [n, m];
+  };
+  walk(null, new Set());
+  return { all, byId, children, size, named };
+}
+/** 由近到遠的上層。 */
+export function ancestorsOf(t: TreeIndex, id: string): string[] {
+  const out: string[] = [];
+  for (let cur = t.byId.get(id); cur?.parent != null && t.byId.has(cur.parent) && out.length < 60; cur = t.byId.get(cur.parent)) out.push(cur.parent);
+  return out;
+}
+/** 某個元素底下的全部元素（不含它自己），依樹的順序；id 是 null 表示整個模型。 */
+export function descendantsOf(t: TreeIndex, id: string | null): Element[] {
+  if (id === null) return t.all;
+  const i = t.all.findIndex((e) => e.id === id);
+  return i < 0 ? [] : t.all.slice(i + 1, i + 1 + (t.size.get(id) ?? 0));
+}
+/** 元素所在的套件（它自己是套件就是自己）；沒有就是 null。 */
+export function packageOf(t: TreeIndex, id: string): string | null {
+  const self = t.byId.get(id);
+  if (!self) return null;
+  if (isPackage(self)) return id;
+  return ancestorsOf(t, id).find((x) => isPackage(t.byId.get(x) as Element)) ?? null;
+}
+/** 型別一欄的寫法，和 SysML v2 文字記法一致。 */
+export const LINK_SYMBOL: Record<string, string> = { type: ":", specialize: ":>", subset: ":>", redefine: ":>>", reference: "::>" };
+export const LINK_ZH: Record<string, string> = { specialize: "特化", type: "由…定義", subset: "子集", redefine: "重定義", reference: "參照", perform: "執行" };
+
 export type DiagramKind = "bdd" | "req" | "act" | "ibd" | "uc" | "stm" | "custom";
 /**
  * code／viewDef：SysML v2 標準檢視定義的短名稱與名稱（StandardViewDefinitions）。
