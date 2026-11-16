@@ -454,7 +454,8 @@ export async function remapIds(id: string, pairs: [string, string][], qnames: [s
   for (const [d, nodes] of Object.entries(layout)) nextLayout[diagram(d)] = Object.fromEntries(Object.entries(nodes).map(([n, p]) => [node(n), p]));
   await fs.writeFile(path.join(dirOf(id), "layout.json"), JSON.stringify(nextLayout, null, 1) + "\n", "utf8");
   const dg = await readDiagrams(id);
-  const next: Diagrams = { custom: dg.custom.map((c) => ({ ...c, members: c.members.map(node) })), notes: Object.fromEntries(Object.entries(dg.notes).map(([d, list]) => [diagram(d), list])) };
+  const next: Diagrams = { custom: dg.custom.map((c) => ({ ...c, members: c.members.map(node) })), notes: Object.fromEntries(Object.entries(dg.notes).map(([d, list]) => [diagram(d), list])),
+    ...(dg.views ? { views: Object.fromEntries(Object.entries(dg.views).map(([v, list]) => [v, list.map(node)])) } : {}) };
   await fs.writeFile(path.join(dirOf(id), "diagrams.json"), JSON.stringify(next, null, 1) + "\n", "utf8");
 }
 
@@ -480,7 +481,8 @@ export async function writeLayout(id: string, layout: Layout): Promise<void> {
 
 /** 自訂圖與圖上的標註。自訂圖只記錄「放了哪些模型項目」；標註（註解、外框、文字）只是說明，不進模型。 */
 export interface Annotation { id: string; type: "note" | "frame" | "text"; x: number; y: number; w: number; h: number; text: string }
-export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]> }
+/** views（P2）：分析圖（view:<登記的 id>）放了哪些模型項目，和自訂圖的 members 相同 */
+export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]>; views?: Record<string, string[]> }
 
 export async function readDiagrams(id: string): Promise<Diagrams> {
   const raw = await fs.readFile(path.join(dirOf(id), "diagrams.json"), "utf8").catch(() => "{}");
@@ -488,7 +490,7 @@ export async function readDiagrams(id: string): Promise<Diagrams> {
 }
 
 function cleanDiagrams(input: unknown): Diagrams {
-  const src = (input ?? {}) as { custom?: unknown; notes?: unknown };
+  const src = (input ?? {}) as { custom?: unknown; notes?: unknown; views?: unknown };
   const str = (v: unknown, max: number) => String(v ?? "").slice(0, max);
   const num = (v: unknown, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(Number(v) || 0)));
   const out: Diagrams = { custom: [], notes: {} };
@@ -513,6 +515,14 @@ function cleanDiagrams(input: unknown): Diagrams {
         clean.push({ id: nid, type: n.type, x: num(n.x, -100000, 100000), y: num(n.y, -100000, 100000), w: num(n.w, 48, 4000), h: num(n.h, 24, 4000), text: str(n.text, 500) });
       }
       if (clean.length > 0) out.notes[diagram] = clean;
+    }
+  }
+  // 分析圖（P2）的成員：沒有任何成員的不存，舊的資料原封不動
+  if (src.views && typeof src.views === "object") {
+    for (const [vid, list] of Object.entries(src.views as Record<string, unknown>).slice(0, 50)) {
+      if (!/^view:[A-Za-z0-9_-]{1,40}$/.test(vid) || !Array.isArray(list)) continue;
+      const members = [...new Set<string>(list.filter((m: unknown): m is string => typeof m === "string" && m.length <= 400))].slice(0, 500);
+      if (members.length) (out.views ??= {})[vid] = members;
     }
   }
   return out;
@@ -602,7 +612,11 @@ export async function stepHistory(id: string, author: string, step: -1 | 1): Pro
   await writeLayout(id, layout);
   const ids = new Set(a.elements.map((e) => e.id));
   const was = new Map((await old<Partial<Diagrams>>("diagrams.json", {})).custom?.map((c) => [c.id, c.members ?? []]) ?? []);
-  await writeDiagrams(id, { ...before.diagrams, custom: before.diagrams.custom.map((c) => ({ ...c, members: [...c.members, ...(was.get(c.id) ?? []).filter((m) => ids.has(m) && !c.members.includes(m))] })) });
+  // 分析圖（P2）的成員也一樣補回來
+  const wasViews = (await old<Partial<Diagrams>>("diagrams.json", {})).views ?? {};
+  const views = { ...(before.diagrams.views ?? {}) };
+  for (const [v, list] of Object.entries(wasViews)) if (Array.isArray(list)) { const cur = views[v] ?? []; const add = list.filter((m) => ids.has(m) && !cur.includes(m)); if (add.length) views[v] = [...cur, ...add]; }
+  await writeDiagrams(id, { ...before.diagrams, custom: before.diagrams.custom.map((c) => ({ ...c, members: [...c.members, ...(was.get(c.id) ?? []).filter((m) => ids.has(m) && !c.members.includes(m))] })), views });
   await commit(dir, author, `${step < 0 ? "復原" : "重做"}：${subject}`.slice(0, 200));
   await fs.writeFile(await histFile(dir), JSON.stringify({ tip: await lastModelCommit(dir), snaps: h.snaps, pos: to }), "utf8");
 }

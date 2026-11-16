@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { Analysis, Element } from "./api.ts";
 import { ancestorsOf, isPackage, treeOf } from "./model.ts";
+import { PACKAGE_ZH, zhKeyword } from "./method/zh.ts";
 
 /**
  * 依套件瀏覽的樹（F-74）：最上層套件 → 成員，依擁有關係往下展開。
@@ -22,9 +23,12 @@ export function PackageTree({ analysis, selectedId, scopeId, onPick }: { analysi
   }, [selectedId, tree]);
   const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
+  // 中文化（P2）：關鍵字中文在前、英文小字在後；工具建立的套件加上中文名稱
+  const kw = (e: Element) => { const k = zhKeyword(e.keyword); return k.zh ? <>{k.zh} <small className="en">{k.en}</small></> : e.keyword; };
+  const pkgZh = (e: Element) => (isPackage(e) && e.qualifiedName.split("::").length === 2 ? PACKAGE_ZH[e.name] : undefined);
   const row = (e: Element, hint?: string): ReactNode => (
     <button className={`tree-row ${e.unnamed ? "unnamed" : ""}`} aria-current={e.id === selectedId || (!selectedId && e.id === scopeId)} onClick={() => onPick(e)} title={`${e.keyword ?? ""} ${e.qualifiedName}`}>
-      <span className="tid">{e.keyword}</span><span className="tn">{e.name}{hint && <span className="faint">　{hint}</span>}</span>
+      <span className="tid">{kw(e)}</span><span className="tn">{pkgZh(e) ? <>{pkgZh(e)} <small className="faint">{e.name}</small></> : e.name}{hint && <span className="faint">　{hint}</span>}</span>
       {e.shared && <span className="tid">共用</span>}{e.shortName && <span className="tid">{e.shortName}</span>}{isPackage(e) && <span className="tc">{tree.named.get(e.id) ?? 0}</span>}
     </button>
   );

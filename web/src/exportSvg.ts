@@ -1,6 +1,6 @@
 // 把圖匯出成 SVG／PNG，放進審查報告用。固定用白底黑線，列印時清楚。
 import type { GEdge, GNode } from "./model.ts";
-import { annotationSvg, edgeMarkers, esc, FRAME_HEAD, frameSvg, MARKERS, markerSvg, nodeSvg, PRINT } from "./shapes.ts";
+import { annotationSvg, edgeMarkers, esc, frameLayout, frameSvg, MARKERS, markerSvg, nodeSvg, portPoint, PRINT } from "./shapes.ts";
 import type { Annotation } from "./api.ts";
 
 export interface Placed { g: GNode; x: number; y: number }
@@ -37,13 +37,26 @@ function ortho(a: Placed, b: Placed, vertical: boolean): { pts: [number, number]
   return vertical ? v() ?? h() : h() ?? v();
 }
 
-export function toSvg(frame: string, nodes: Placed[], edges: GEdge[], vertical = true, straight = false, notes: Annotation[] = []): string {
-  const m = 12, pad = 32 + m, head = FRAME_HEAD;
-  const all = [...nodes.map((n) => ({ x: n.x, y: n.y, w: n.g.width, h: n.g.height })), ...notes];
-  const minX = Math.min(...all.map((n) => n.x)), minY = Math.min(...all.map((n) => n.y));
-  const maxX = Math.max(...all.map((n) => n.x + n.w)), maxY = Math.max(...all.map((n) => n.y + n.h));
-  const W = Math.ceil(maxX - minX + pad * 2), H = Math.ceil(maxY - minY + pad * 2 + head);
-  const ox = pad - minX, oy = pad + head - minY;
+/** 至少一端接在小方塊上的連線：端點是方塊的外側中心，水平出去、中間折成直角。 */
+function viaPorts(a: Placed, b: Placed, pa: [number, number] | null, pb: [number, number] | null): { pts: [number, number][]; label: [number, number] } {
+  const s = pa ?? [b.x + b.g.width / 2 < a.x + a.g.width / 2 ? a.x : a.x + a.g.width, a.y + a.g.height / 2] as [number, number];
+  const t = pb ?? [a.x + a.g.width / 2 < b.x + b.g.width / 2 ? b.x : b.x + b.g.width, b.y + b.g.height / 2] as [number, number];
+  const mx = (s[0] + t[0]) / 2;
+  return { pts: [s, [mx, s[1]], [mx, t[1]], t], label: [mx, (s[1] + t[1]) / 2] };
+}
+
+/** bends（P2）：使用者拉的轉折點，鍵是 GEdge 的 key（沒有就是 id）；有轉折點的連線照轉折點畫折線。manual：沒有轉折點的連線也畫直線（分析圖）。 */
+export function toSvg(frame: string, placed: Placed[], edges: GEdge[], vertical = true, straight = false, notes: Annotation[] = [], bends: Map<string, { x: number; y: number }[]> = new Map(), manual = false): string {
+  const m = 12;
+  // 圖框包住一般的節點與標註；貼在圖框邊上的節點（參數、連接埠）由圖框決定位置，和畫面相同（shapes.ts 的 frameLayout）
+  const inner = placed.filter((n) => !n.g.boundary);
+  const fl = frameLayout([...inner.map((n) => ({ x: n.x, y: n.y, w: n.g.width, h: n.g.height })), ...notes], placed.filter((n) => n.g.boundary).map((n) => ({ id: n.g.id, boundary: n.g.boundary!, width: n.g.width, height: n.g.height })), 32);
+  const nodes = placed.map((n) => (n.g.boundary ? { ...n, ...fl.places.get(n.g.id)! } : n));
+  // 畫布：圖框，加上伸出框外的參數名稱與連接埠的方塊
+  const ext = [{ x: fl.x, y: fl.y, w: fl.w, h: fl.h }, ...nodes.map((n) => ({ x: n.x - 8, y: n.y, w: n.g.width + 16, h: n.g.height }))];
+  const minX = Math.min(...ext.map((b) => b.x)), minY = Math.min(...ext.map((b) => b.y));
+  const W = Math.ceil(Math.max(...ext.map((b) => b.x + b.w)) - minX + m * 2), H = Math.ceil(Math.max(...ext.map((b) => b.y + b.h)) - minY + m * 2);
+  const ox = m - minX, oy = m - minY;
   const by = new Map(nodes.map((n) => [n.g.id, n]));
   const out: string[] = [];
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`);
@@ -54,14 +67,17 @@ export function toSvg(frame: string, nodes: Placed[], edges: GEdge[], vertical =
   const mid = (id: string) => (id === "typing" ? "typ" : id);
   out.push(Object.values(MARKERS).filter((k) => used.has(k.id)).map((k) => markerSvg({ ...k, id: mid(k.id) }, "", PRINT, "auto")).join("") + `</defs>`);
   out.push(`<rect width="${W}" height="${H}" fill="#fff"/>`);
-  out.push(frameSvg(frame, m, m, W - m * 2, H - m * 2, PRINT));
+  out.push(frameSvg(frame, fl.x + ox, fl.y + oy, fl.w, fl.h, PRINT));
   for (const a of notes) if (a.type === "frame") out.push(annotationSvg(a, a.x + ox, a.y + oy, PRINT));
   // 套件畫在最底層，成員與連線疊在上面
-  for (const n of nodes) if (n.g.shape === "package") out.push(nodeSvg(n.g, n.x + ox, n.y + oy, PRINT));
+  for (const n of nodes) if (n.g.shape === "package" || n.g.container) out.push(nodeSvg(n.g, n.x + ox, n.y + oy, PRINT));
   for (const e of edges) {
     const a = by.get(e.source), b = by.get(e.target);
     if (!a || !b) continue;
-    const o = straight ? null : ortho(a, b, vertical);
+    // 接在小方塊上的連線：從方塊水平出去，中間折一次
+    const pa = portPoint(a.g, a.x, a.y, e.sourcePort), pb = portPoint(b.g, b.x, b.y, e.targetPort);
+    const bs = bends.get(e.key ?? e.id) ?? [];
+    const o = bs.length ? viaBends(a, b, bs) : pa || pb ? viaPorts(a, b, pa, pb) : straight || manual ? null : ortho(a, b, vertical);
     const [x1, y1] = edgePoint(a, b.x + b.g.width / 2, b.y + b.g.height / 2);
     const [x2, y2] = edgePoint(b, a.x + a.g.width / 2, a.y + a.g.height / 2);
     const k = edgeMarkers(e);
@@ -75,10 +91,17 @@ export function toSvg(frame: string, nodes: Placed[], edges: GEdge[], vertical =
       out.push(`<text x="${mx.toFixed(1)}" y="${(my + 3).toFixed(1)}" font-size="10" fill="#333" text-anchor="middle" font-family="'Noto Sans TC','Microsoft JhengHei',sans-serif">${esc(e.label)}</text>`);
     }
   }
-  for (const n of nodes) if (n.g.shape !== "package") out.push(nodeSvg(n.g, n.x + ox, n.y + oy, PRINT));
+  for (const n of nodes) if (n.g.shape !== "package" && !n.g.container) out.push(nodeSvg(n.g, n.x + ox, n.y + oy, PRINT));
   for (const a of notes) if (a.type !== "frame") out.push(annotationSvg(a, a.x + ox, a.y + oy, PRINT));
   out.push(`</svg>`);
   return out.join("");
+}
+
+/** 使用者拉的轉折點（P2）：兩端從節點外框朝第一個、最後一個轉折點出去，中間照轉折點走。 */
+function viaBends(a: Placed, b: Placed, bs: { x: number; y: number }[]): { pts: [number, number][]; label: [number, number] } {
+  const pts: [number, number][] = [edgePoint(a, bs[0].x, bs[0].y), ...bs.map((p) => [p.x, p.y] as [number, number]), edgePoint(b, bs[bs.length - 1].x, bs[bs.length - 1].y)];
+  const m = Math.floor((pts.length - 1) / 2);
+  return { pts, label: [(pts[m][0] + pts[m + 1][0]) / 2, (pts[m][1] + pts[m + 1][1]) / 2] };
 }
 
 function save(blob: Blob, name: string): void {

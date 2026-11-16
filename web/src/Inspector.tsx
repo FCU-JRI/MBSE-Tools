@@ -4,6 +4,9 @@ import { api } from "./api.ts";
 import type { Category, Element, Meta, View } from "./api.ts";
 import { isPackage, label, LINK_ZH, listOf, stereotype } from "./model.ts";
 import type { GEdge } from "./model.ts";
+// [P1] 需求的共同屬性與必填的驗證方法
+import { emptyReqForm, RequirementFields, toInput } from "./method/P1Requirements.tsx";
+import { REQ_CATEGORIES } from "../../server/method/p1-req.ts";
 
 export type Selection =
   | { type: "element"; id: string }
@@ -119,8 +122,10 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
   const [method, setMethod] = useState("test");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reqForm, setReqForm] = useState(emptyReqForm); // [P1]
+  const isReq = REQ_CATEGORIES.includes(cat.id); // [P1]
   const isVer = cat.keyword === "verification";
-  const reqs = listOf(view.analysis.elements, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  const reqs = listOf(view.analysis.elements, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
   const parent = parentId ? view.analysis.elements.find((e) => e.id === parentId) : undefined;
 
   const submit = async (ev: FormEvent) => {
@@ -128,11 +133,11 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
     setBusy(true); setMsg(null);
     try {
       const before = new Set(view.analysis.elements.map((e) => e.id));
-      const v = await api<View>(`/projects/${view.project.id}/elements`, "POST", { category: cat.id, name, doc, attrs, source: src.doc ? src : undefined, parentId: parentId ?? undefined, ...(isVer ? { verifies: verifies || undefined, method } : {}) });
+      const v = await api<View>(`/projects/${view.project.id}/${isReq ? "requirements" : "elements"}`, "POST", { category: cat.id, name, doc, attrs, source: src.doc ? src : undefined, parentId: parentId ?? undefined, ...(isVer ? { verifies: verifies || undefined, method } : {}), ...(isReq ? toInput(reqForm) : {}) });
       onChanged(v);
       const created = v.analysis.elements.find((e) => !before.has(e.id) && e.name === name.trim());
       if (created) setSel({ type: "element", id: created.id });
-      else { setMsg({ ok: true, text: `已新增「${name}」。` }); setName(""); setDoc(""); setAttrs({}); }
+      else { setMsg({ ok: true, text: `已新增「${name}」。` }); setName(""); setDoc(""); setAttrs({}); setReqForm(emptyReqForm()); }
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
     finally { setBusy(false); }
   };
@@ -156,6 +161,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
       </label>
       <Fields cat={cat} attrs={attrs} setAttrs={setAttrs} />
       <SourceFields view={view} doc={src.doc} section={src.ref} onChange={(d, r) => setSrc({ doc: d, ref: r })} />
+      {isReq && <RequirementFields category={cat.id} value={reqForm} onChange={setReqForm} />}
       {isVer && <>
         <label className="field"><span className="label">要驗證的需求</span>
           <select className="input" value={verifies} onChange={(e) => setVerifies(e.target.value)}>

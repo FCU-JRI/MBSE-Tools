@@ -3,7 +3,8 @@ import type { FormEvent } from "react";
 import { api, baseOf, getAuthor, setAuthor } from "./api.ts";
 import type { Diagrams, Element, Me, Meta, MeResponse, Project, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
-import { diagramsOf, isPackage, packageOf, TOP_DIAGRAM, treeOf } from "./model.ts";
+import { analysisDiagrams, diagramsOf, isPackage, packageOf, TOP_DIAGRAM, treeOf } from "./model.ts";
+import { ABBR } from "./method/zh.ts";
 import type { DiagramDef } from "./model.ts";
 import { Diagram } from "./Diagram.tsx";
 import { Inspector } from "./Inspector.tsx";
@@ -18,6 +19,7 @@ import { VersionsView } from "./Versions.tsx";
 import { PlanView } from "./Plan.tsx";
 import { SimView } from "./Sim.tsx";
 import { SourceTab } from "./SourceTab.tsx";
+import { METHOD_PAGES } from "./method/registry.ts";
 
 export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -191,8 +193,10 @@ function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: strin
   );
 }
 
-type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history";
-const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
+type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history" | `m:${string}`;
+const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"],
+  // METHOD.md 實作的頁面（web/src/method/registry.ts）
+  ...METHOD_PAGES.map((p): [Mode, string] => [`m:${p.id}`, p.zh])];
 
 /** id 是專案參照：main 或某個分支。分支和 main 用同一個畫面，所有分頁都能看、能改（F-33）。 */
 function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
@@ -237,7 +241,8 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
     saveExtra({ ...extra, custom: [...extra.custom, { id: did, title: title.trim().slice(0, 60) || "自訂圖", members: [] }] });
     setDiagramId(did); setMode("diagram");
   };
-  const diagrams = useMemo(() => (view ? diagramsOf(view.analysis, extra) : []), [view, extra]);
+  // 分析圖（P2，METHOD.md 第 3 節）排在最前面：一個階段一張，由上而下
+  const diagrams = useMemo(() => (view ? [...analysisDiagrams(extra), ...diagramsOf(view.analysis, extra)] : []), [view, extra]);
   const tree = useMemo(() => (view ? treeOf(view.analysis) : null), [view]);
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><div className="tbtn-row">{id !== baseOf(id) && <button className="tbtn primary" onClick={() => onOpen(baseOf(id))}>回到 main</button>}<button className={`tbtn ${id === baseOf(id) ? "primary" : ""}`} onClick={onHome}>回專案列表</button></div></div>;
   if (!view) return <div className="page"><p className="label">載入模型中</p></div>;
@@ -310,6 +315,7 @@ function Workspace({ id, meta, user: me, onHome, onOpen, who }: { id: string; me
           {mode === "deliver" && <Deliverables view={view} meta={meta} user={user} tab={deliverTab} setTab={setDeliverTab} selectedId={selectedId} onSelect={(eid) => setSel({ type: "element", id: eid })} onChanged={setView} />}
           {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
           {mode === "plan" && <div className="center-scroll"><PlanView view={view} meta={meta} user={user} /></div>}
+          {METHOD_PAGES.filter((p) => mode === `m:${p.id}`).map((p) => <div key={p.id} className="center-scroll"><p.Component view={view} meta={meta} user={user} onChanged={setView} onOpen={(eid) => openElement(eid)} /></div>)}
           {mode === "sim" && <div className="center-scroll"><SimView view={view} user={user} onChanged={setView} /></div>}
           {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} at={sourceAt} /></div>}
           {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} branch={view.branch ?? null} onOpen={onOpen} onChanged={(v) => { setView(v); api<Diagrams>(`/projects/${id}/diagrams`).then(setExtra).catch(() => {}); }} /></div>}
@@ -363,7 +369,10 @@ interface TreeProps {
 
 /** 圖的清單分成幾組，各自可以收合（F-76）。 */
 const DIAGRAM_GROUPS: [id: string, zh: string, kinds: DiagramDef["kind"][]][] = [
-  ["pkg", "套件內容", ["pkg"]], ["decomp", "分解", ["decomp"]], ["other", "需求、行為與互連", ["req", "uc", "ibd", "act", "stm"]], ["custom", "自訂圖", ["custom"]],
+  ["analysis", "分析圖（依階段由上而下）", ["analysis"]],
+  ["pkg", "套件內容", ["pkg"]], ["decomp", "分解", ["decomp"]], ["fdecomp", "功能分解", ["fdecomp"]],
+  ["req", "需求與使用案例", ["req", "uc"]], ["behavior", "動作與狀態機", ["act", "stm"]], ["ibd", "互連", ["ibd"]], ["occ", "個體與時間切片", ["occ"]], ["calc", "計算與分析", ["calc"]],
+  ["custom", "自訂圖", ["custom"]],
 ];
 
 /** 左側欄：圖、模型樹（依套件，F-74）、節點進度。 */
@@ -383,17 +392,29 @@ function Tree({ view, diagrams, onAddDiagram, mode, diagramId, scopeId, gateId, 
           if (list.length === 0) return null;
           // 正在看的圖所在的那一組一定展開，其餘依使用者上次的選擇
           const current = mode === "diagram" && list.some((d) => d.id === diagramId);
-          const expanded = open[gid] ?? (current || gid === "other" || gid === "custom");
+          const expanded = open[gid] ?? (current || gid === "other" || gid === "custom" || gid === "analysis");
           return (
             <div key={gid} className="diagram-group">
               <button className="tree-row group-row" aria-expanded={expanded} onClick={() => toggle(gid, !expanded)}>
                 <span className="tid">{expanded ? "▾" : "▸"}</span><span className="tn">{zh}</span><span className="tc">{list.length}</span>
               </button>
-              {expanded && <ul className="tree">{list.map((d) => (
-                <li key={d.id}><button className="tree-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)} title={d.id.includes(":") && d.kind !== "custom" ? d.id.slice(d.id.indexOf(":") + 1).replaceAll("::", " › ") || d.title : d.title}>
-                  <span className="tid">{d.code}</span><span className="tn">{d.title}</span>
-                </button></li>
-              ))}</ul>}
+              {expanded && <ul className="tree">{list.map((d) => {
+                // 分析圖（P2）：顯示這一步要回答的問題與還缺幾項；只是提示，不鎖
+                if (d.kind === "analysis" && d.view) {
+                  let miss = 0;
+                  try { miss = d.view.missing?.(view.analysis).length ?? 0; } catch { /* 檢查壞掉不影響清單 */ }
+                  return (
+                    <li key={d.id}><button className="tree-row analysis-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)} title={`${d.view.question}${miss ? `\n還缺 ${miss} 項` : "\n這一步要的項目都有了"}`}>
+                      <span className="tid">{d.view.order}</span><span className="tn">{d.view.zh}</span><span className="tc">{miss ? `缺 ${miss}` : "✓"}</span>
+                    </button></li>
+                  );
+                }
+                return (
+                  <li key={d.id}><button className="tree-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)} title={d.id.includes(":") && d.kind !== "custom" ? d.id.slice(d.id.indexOf(":") + 1).replaceAll("::", " › ") || d.title : d.title}>
+                    <span className="tid" title={ABBR[d.code] ? `${ABBR[d.code].zh}（${ABBR[d.code].en}）` : undefined}>{d.code}</span><span className="tn">{d.title}</span>
+                  </button></li>
+                );
+              })}</ul>}
             </div>
           );
         })}
