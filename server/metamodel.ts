@@ -108,8 +108,9 @@ export const CATEGORY = new Map(CATEGORIES.map((c) => [c.id, c]));
 export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
   derive: { zh: "衍生自", help: "這條需求是從哪一條上層需求或目的推導出來的。" },
   refine: { zh: "細化", help: "這個量度或需求把哪一個上層項目說得更具體。" },
-  trace: { zh: "追溯到", help: "一般性的關聯，例如期望來自哪位利害關係人。" },
+  trace: { zh: "追溯到", help: "一般性的關聯。連到利害關係人時，期望會寫成 stakeholder、使用案例會寫成 actor（SysML v2 內建的寫法）。" },
   satisfy: { zh: "滿足", help: "哪個系統或元件負責做到這條需求。" },
   verify: { zh: "驗證", help: "哪個驗證事件用來證明這條需求。" },
   allocate: { zh: "分配給", help: "這個功能由哪個次系統或元件執行。" },
+  include: { zh: "包含", help: "這個使用案例進行時會用到另一個使用案例。" },
 };

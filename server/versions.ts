@@ -7,7 +7,8 @@ import type { Analysis, Source } from "./engine.ts";
 import type { Element } from "./extract.ts";
 import os from "node:os";
 import { upgradeText } from "./upgrade.ts";
-import { analyzeProject, commit, dirOf, git, gitRaw, listShared, lock, onPushRejected, parseRef, pushLater, readProject, readShared, refOf, refOfDir, repoConfig, sources, UserError } from "./projects.ts";
+import { embeddable, embedStakeholders, sameRelations } from "./modernize.ts";
+import { analyzeProject, commit, dirOf, git, gitRaw, listFiles, listShared, lock, onPushRejected, parseRef, pushLater, readProject, readShared, refOf, refOfDir, repoConfig, sources, UserError } from "./projects.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
@@ -201,13 +202,7 @@ async function mergeFile(ours: string, base: string, theirs: string): Promise<st
  * 只在物件庫裡多一筆提交，不動對方的分支，也不動任何工作目錄。
  */
 async function upgradedCommit(dir: string, sha: string): Promise<string> {
-  const names = (await git(dir, "-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", sha, "model/")).split("\n").filter((n) => /^model\/[^/]+\.sysml$/.test(n));
-  const changed: [string, string][] = [];
-  for (const n of names) {
-    const text = await gitRaw(dir, ["show", `${sha}:${n}`]);
-    const next = upgradeText(text);
-    if (next !== text) changed.push([n, next]);
-  }
+  const changed = [...(await modernAt(dir, sha))].filter(([, [before, after]]) => before !== after).map(([n, [, after]]): [string, string] => [n, after]);
   if (changed.length === 0) return sha;
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "jri-upgrade-"));
   try {
@@ -220,18 +215,66 @@ async function upgradedCommit(dir: string, sha: string): Promise<string> {
       await gitRaw(dir, ["update-index", "--cacheinfo", `100644,${blob},${n}`], env);
     }
     const tree = (await gitRaw(dir, ["write-tree"], env)).trim();
-    return (await gitRaw(dir, [...who("JRI MBSE"), "commit-tree", tree, "-p", sha, "-m", "衍生、細化、驗證方法改用 SysML v2 標準庫的寫法"])).trim();
+    return (await gitRaw(dir, [...who("JRI MBSE"), "commit-tree", tree, "-p", sha, "-m", UPGRADE_MESSAGE])).trim();
   } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
+}
+
+// ───────── 把模型轉成目前的寫法（F-36、F-37）─────────
+const UPGRADE_MESSAGE = "模型改用 SysML v2 標準庫與內建的寫法";
+
+/**
+ * 依解析結果把利害關係人與參與者改成內建的 stakeholder／actor（F-37）。fixed：元模型庫與共用元件庫；texts：專案的模型檔。
+ * 改完重新解析，只要元素或關係和原本有任何不同就放棄，回傳原本的文字。
+ */
+async function embedChecked(fixed: Source[], texts: Map<string, string>, shared: string[]): Promise<Map<string, string>> {
+  const all = (m: Map<string, string>): Source[] => [...fixed, ...[...m].map(([n, t]): Source => [n, t])];
+  const a = await analyze(all(texts), shared);
+  if (!a.ok || embeddable(a, texts.keys()).length === 0) return texts;
+  let changed: Map<string, string>;
+  try { changed = embedStakeholders(texts, a); } catch { return texts; }
+  const next = new Map([...texts, ...changed]);
+  const b = await analyze(all(next), shared);
+  return b.ok && sameRelations(a, b) ? next : texts;
+}
+
+const fixedSources = async (shared: string[]): Promise<Source[]> => {
+  const list: Source[] = [["JRI.sysml", await fs.readFile(LIBRARY, "utf8")]];
+  for (const f of shared) list.push([f, await readShared(f)]);
+  return list;
+};
+
+/** 某個版本的模型檔轉成目前寫法後的內容：路徑 → [原本的內容, 轉換後的內容]。只在記憶體裡算，不動版本紀錄。 */
+async function modernAt(dir: string, sha: string): Promise<Map<string, [before: string, after: string]>> {
+  const names = (await git(dir, "-c", "core.quotepath=false", "ls-tree", "--name-only", sha, "model/")).split("\n").map((n) => n.trim()).filter((n) => MODEL_FILE.test(n));
+  const shared = await listShared();
+  const raw = new Map<string, string>();
+  for (const n of names) raw.set(n, await gitRaw(dir, ["show", `${sha}:${n}`]));
+  const texts = new Map(names.map((n) => [path.posix.basename(n), upgradeText(raw.get(n) as string)]));
+  const next = await embedChecked(await fixedSources(shared), texts, shared);
+  return new Map(names.map((n) => [n, [raw.get(n) as string, next.get(path.posix.basename(n)) as string]]));
+}
+
+/** 把工作目錄裡的模型檔轉成目前的寫法並寫回。模型檔因此有未提交的變更時回傳 true。呼叫的人要自己排隊（lock）。 */
+async function modernizeWorktree(ref: string): Promise<boolean> {
+  const dir = dirOf(ref);
+  const list = await sources(ref); // 文字層的舊寫法（F-36）在這裡轉換並寫回
+  const shared = await listShared();
+  const own = new Set(await listFiles(ref));
+  const texts = new Map(list.filter(([n]) => own.has(n)).map(([n, t]) => [n, t]));
+  const next = await embedChecked(list.filter(([n]) => !own.has(n)), texts, shared);
+  for (const [n, t] of next) if (t !== texts.get(n)) await fs.writeFile(path.join(dir, "model", n), t, "utf8");
+  return !!(await git(dir, "status", "--porcelain", "--", "model"));
 }
 
 async function mergeInto(ref: string, sha: string, author: string, message: string, prefer: "ours" | "theirs", conflict: string): Promise<void> {
   const dir = dirOf(ref);
   await repoConfig(dir);
-  await sources(ref).catch(() => []); // 這一邊若還有舊寫法，先轉換（寫回檔案），下面會一起提交
+  await modernizeWorktree(ref).catch(() => false); // 這一邊若還是舊寫法，先轉換（寫回檔案），下面會一起提交
   sha = await upgradedCommit(dir, sha);
   if (await git(dir, "status", "--porcelain")) await commit(dir, author, "合併前儲存未提交的變更");
   const abort = () => git(dir, "merge", "--abort").catch(() => "");
   const auto: string[] = [];
+  let modernBase: Map<string, [string, string]> | undefined;
   try {
     await git(dir, ...who(author), "-c", "merge.conflictStyle=diff3", "merge", "--no-ff", "--no-commit", sha);
   } catch {
@@ -240,9 +283,10 @@ async function mergeInto(ref: string, sha: string, author: string, message: stri
     if (files.length === 0) await stop();
     for (const f of files) {
       if (MODEL_FILE.test(f)) {
-        // 三邊都先轉成標準庫的寫法再合併一次：共同的上一版若還是舊寫法，兩邊做的相同轉換會被當成各自的修改而互相衝突（F-36）
+        // 三邊都先轉成目前的寫法再合併一次：共同的上一版若還是舊寫法，兩邊做的相同轉換會被當成各自的修改而互相衝突（F-36、F-37）
         const side = (n: number) => gitRaw(dir, ["show", `:${n}:${f}`]).then(upgradeText, () => null);
-        const [base, ours, theirs] = [await side(1), await side(2), await side(3)];
+        modernBase ??= await git(dir, "merge-base", "HEAD", "MERGE_HEAD").then((b) => modernAt(dir, b.split("\n")[0])).catch(() => new Map());
+        const [base, ours, theirs] = [modernBase.get(f)?.[1] ?? await side(1), await side(2), await side(3)];
         const merged = base === null || ours === null || theirs === null ? null : await mergeFile(ours, base, theirs);
         const r = merged === null ? null : /^<{7} /m.test(merged) ? resolveConflicts(merged) : { text: merged, resolved: 0 };
         if (!r) { await stop(f); continue; }
@@ -329,20 +373,24 @@ onPushRejected((dir) => {
 });
 
 /**
- * 模型檔若還是舊寫法，轉成標準庫的寫法並單獨提交一筆（F-36）。
+ * 模型檔若還是舊寫法，轉成目前的寫法並單獨提交一筆（F-36、F-37）。
  * 不和使用者的下一次儲存混在一起，版本紀錄才看得出這一筆是工具做的轉換。
  */
 async function commitUpgrade(ref: string): Promise<void> {
   const dir = dirOf(ref), model = path.join(dir, "model");
   const names = (await fs.readdir(model).catch(() => [] as string[])).filter((n) => n.endsWith(".sysml"));
   const legacy = async (n: string) => { const t = await fs.readFile(path.join(model, n), "utf8").catch(() => ""); return upgradeText(t) !== t; };
-  if (!(await Promise.all(names.map(legacy))).some(Boolean)) return;
+  // 先不排隊看一眼需不需要轉換；大多數時候不需要，不必為此擋住別人的修改
+  if (!(await Promise.all(names.map(legacy))).some(Boolean)) {
+    const a = await analyzeProject(ref);
+    if (!a.ok || embeddable(a, await listFiles(ref)).length === 0) return;
+  }
   const release = await lock(ref);
   try {
-    await sources(ref); // 轉換並寫回檔案
+    if (!(await modernizeWorktree(ref))) return;
     await git(dir, "add", "--", "model");
     if (await git(dir, "diff", "--cached", "--name-only", "--", "model")) {
-      await git(dir, ...who("JRI MBSE"), "commit", "-m", "衍生、細化、驗證方法改用 SysML v2 標準庫的寫法", "--", "model");
+      await git(dir, ...who("JRI MBSE"), "commit", "-m", UPGRADE_MESSAGE, "--", "model");
       pushLater(dir);
     }
   } finally { release(); }
