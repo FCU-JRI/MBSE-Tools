@@ -58,8 +58,9 @@ part <'STK-001'> '競賽主辦方' : Stakeholder { :>> role = "規則與評分";
 
 requirement <'EXP-001'> '安全發射與回收' : Expectation {
     doc /* 火箭的發射與回收全程不得危及人員與場地。 */
+    subject;
+    stakeholder :> '競賽主辦方';
 }
-#trace dependency from '安全發射與回收' to '競賽主辦方';
 
 requirement <'REQ-SYS-001'> '遠地點高度' : SystemRequirement {
     doc /* 火箭應到達 3000 m ± 150 m 的遠地點高度。 */
@@ -72,7 +73,10 @@ requirement <'REQ-SYS-001'> '遠地點高度' : SystemRequirement {
 
 | 關係 | 寫法 |
 |---|---|
-| 追溯 | `#trace dependency from 下層 to 上層;` |
+| 誰的期望 | 在期望的主體內 `subject;` 之後寫 `stakeholder :> 利害關係人;`（`subject;` 一定要在前面，只寫一次） |
+| 誰參與使用案例 | 在使用案例的主體內 `subject;` 之後寫 `actor :> 利害關係人;` |
+| 使用案例包含 | 在使用案例的主體內 `include 另一個使用案例;` |
+| 其他追溯 | `#trace dependency from 下層 to 上層;` |
 | 衍生 | `#derivation connection { end #derive ::> 下層; end #original ::> 上層; }` |
 | 細化 | `#refinement dependency from 量度 to 目的;` |
 | 滿足 | `satisfy 需求 by 元件;`，或寫在定義的主體內 `satisfy 需求;` |

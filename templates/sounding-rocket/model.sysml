@@ -14,8 +14,9 @@ package Project {
 
         requirement <'EXP-001'> '安全發射與回收' : Expectation {
             doc /* 火箭的發射與回收全程不得危及人員與場地。 */
+            subject;
+            stakeholder :> Project::Stakeholders::'指導老師';
         }
-        #trace dependency from '安全發射與回收' to '指導老師';
     }
 
     // ───────── 需要、目標、目的 ─────────
@@ -85,11 +86,12 @@ package Project {
     package UseCases {
         use case <'UC-001'> '執行發射' : UseCase {
             doc /* 發射團隊依發射程序完成架設、點火與發射。 */
+            subject;
+            actor :> Project::Stakeholders::'指導老師';
         }
         use case <'UC-002'> '尋回火箭' : UseCase {
             doc /* 回收團隊依落點預測與定位訊號尋回火箭。 */
         }
-        #trace dependency from '執行發射' to Stakeholders::'指導老師';
     }
 
     // ───────── 需求 ─────────

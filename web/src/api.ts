@@ -4,7 +4,8 @@ export interface Element {
   /** 註解（Comment）所說明的元素 */
   about?: string[];
 }
-export interface Relation { kind: string; from: string; to: string; line: number | null }
+/** form：追溯到利害關係人時用的內建寫法（需求的 stakeholder、使用案例的 actor）；用 #trace 相依的沒有這個欄位 */
+export interface Relation { kind: string; from: string; to: string; line: number | null; form?: "stakeholder" | "actor" }
 export interface Diagnostic { severity: string; message: string; file: string; line: number; column: number }
 export interface Analysis { ok: boolean; diagnostics: Diagnostic[]; elements: Element[]; relations: Relation[]; satisfaction: { requirement: string; subject: string; status: string }[] }
 export interface Check { id: string; label: string; hint: string; manual: boolean; pass: boolean; detail: string; missing: { id: string; name: string }[] }

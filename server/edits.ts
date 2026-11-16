@@ -112,6 +112,17 @@ export function insertInto(content: string, elements: Element[], rootPackage: st
   return lines.join("\n");
 }
 
+/** 元素是不是這一行最後一個結束的東西（同一行後面還有別的內容就不是）。 */
+function endsLine(last: string, target: Element): boolean {
+  return !target.loc || target.loc.endLine !== target.endLine || Buffer.from(last, "utf8").subarray(Math.max(0, target.loc.endCol - 1)).toString("utf8").trim() === "";
+}
+/** 元素結尾那一行是不是 insertInside 處理得了的形狀。 */
+export function canInsertInside(content: string, target: Element): boolean {
+  if (!target.endLine) return false;
+  const last = content.split("\n")[target.endLine - 1] ?? "";
+  return /^\s*\}\s*$/.test(last) || (/[;}]\s*$/.test(last) && endsLine(last, target));
+}
+
 /** 在某個元素的主體內插入一行；元素若以分號結尾（沒有主體）就先展開成大括號。 */
 export function insertInside(content: string, target: Element, make: (indent: string) => string): string {
   if (!target.endLine) throw new UserError("找不到元素在檔案中的位置。");
@@ -124,6 +135,10 @@ export function insertInside(content: string, target: Element, make: (indent: st
     lines.splice(i, 0, body);
   } else if (/;\s*$/.test(last)) {
     lines[i] = last.replace(/;\s*$/, " {");
+    lines.splice(i + 1, 0, body, `${startIndent}}`);
+  } else if (/\}\s*$/.test(last) && endsLine(last, target)) {
+    // 主體和結尾的大括號寫在同一行（例如 requirement x { doc /* … */ }）：把大括號移到新的一行
+    lines[i] = last.replace(/\s*\}\s*$/, "");
     lines.splice(i + 1, 0, body, `${startIndent}}`);
   } else {
     throw new UserError("這個元素的寫法無法自動插入，請到「原始碼」分頁手動修改。");
