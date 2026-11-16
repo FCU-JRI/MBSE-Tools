@@ -178,8 +178,10 @@ app.get("/api/projects/:id", wrap(async (req, res) => res.json(await view(pid(re
 
 app.get("/api/projects/:id/files", wrap(async (req, res) => res.json(await store.listFiles(pid(req)))));
 
-app.get("/api/projects/:id/files/:file", wrap(async (req, res) => {
-  res.json({ content: await store.readFile(pid(req), String(req.params.file)) });
+// 模型檔可以在子資料夾裡（F-70），網址上是 files/資料夾/檔名
+const fileParam = (req: Request) => { const f = req.params.file as string | string[]; return Array.isArray(f) ? f.join("/") : String(f); };
+app.get("/api/projects/:id/files/*file", wrap(async (req, res) => {
+  res.json({ content: await store.readFile(pid(req), fileParam(req)) });
 }));
 
 // 只檢查、不儲存：原始碼編輯器即時顯示錯誤用
@@ -188,8 +190,8 @@ app.post("/api/projects/:id/validate", wrap(async (req, res) => {
   res.json({ ok: a.ok, diagnostics: a.diagnostics });
 }));
 
-app.put("/api/projects/:id/files/:file", wrap(async (req, res) => {
-  const r = await store.saveFile(pid(req), String(req.params.file), String(req.body.content ?? ""), author(req), String(req.body.message ?? ""));
+app.put("/api/projects/:id/files/*file", wrap(async (req, res) => {
+  const r = await store.saveFile(pid(req), fileParam(req), String(req.body.content ?? ""), author(req), String(req.body.message ?? ""));
   res.status(r.saved ? 200 : 422).json({ saved: r.saved, commit: r.commit, diagnostics: r.analysis.diagnostics });
 }));
 

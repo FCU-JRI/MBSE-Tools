@@ -1158,3 +1158,147 @@ test("主機名稱不符的請求被拒絕；修改會排隊；版面可以只�
   assert.equal((await call(`${I}/api/projects/ghost-zz/elements/delete`, "POST", { id: "x" })).status, 400);
   assert.equal((await call(`${I}/api/projects`)).data.some((p: any) => p.id === "ghost-zz"), false);
 });
+
+// ───────── 多資料夾的模型檔（F-70）─────────
+const MF = `${I}/api/projects/mf`;
+const mfPkg = (name: string, body: string) => `package ${name} {\n    private import JRI::*;\n${body}}\n`;
+const mfPart = (id: string, name: string) => `    part def <'${id}'> '${name}' :> Component;\n`;
+
+test("多資料夾：子資料夾裡的模型檔會解析，檔名是相對路徑；不同資料夾的同名檔互不覆蓋（F-70）", async () => {
+  assert.equal((await call(`${I}/api/projects`, "POST", { id: "mf", name: "多資料夾測試", kind: "annual", template: "blank" })).status, 200);
+  const dir = path.join(home, "projects", "mf");
+  const put = async (url: string, content: string) => { const r = await call(`${MF}/files/${url}`, "PUT", { content }); assert.equal(r.status, 200, `${url} ${JSON.stringify(r.data).slice(0, 300)}`); };
+  // 網址上的斜線直接寫或編碼過都可以；資料夾名稱可以是中文
+  await put("structure/avionics.sysml", mfPkg("Avionics", mfPart("CMP-801", "合成飛控板")));
+  await put(encodeURIComponent("structure/深層/recovery.sysml"), mfPkg("Recovery", mfPart("CMP-802", "合成開傘器")));
+  await put("a/parts.sysml", mfPkg("PartsA", mfPart("CMP-803", "合成零件甲")));
+  await put("b/parts.sysml", mfPkg("PartsB", mfPart("CMP-804", "合成零件乙")));
+
+  assert.deepEqual((await call(`${MF}/files`)).data, ["a/parts.sysml", "b/parts.sysml", "model.sysml", "structure/avionics.sysml", "structure/深層/recovery.sysml"]);
+  let view = (await call(MF)).data;
+  assert.equal(view.analysis.ok, true, JSON.stringify(view.analysis.diagnostics).slice(0, 300));
+  const el = (name: string) => view.analysis.elements.find((e: any) => e.name === name);
+  assert.equal(el("合成飛控板").file, "structure/avionics.sysml");
+  assert.equal(el("合成開傘器").file, "structure/深層/recovery.sysml");
+  assert.equal(el("合成零件甲").file, "a/parts.sysml");
+  assert.equal(el("合成零件乙").file, "b/parts.sysml");
+  assert.equal(el("合成零件甲").category, "Component");
+
+  // 檔案在磁碟上的位置與版本紀錄
+  assert.match(await fs.readFile(path.join(dir, "model", "structure", "深層", "recovery.sysml"), "utf8"), /合成開傘器/);
+  assert.deepEqual(gitIn(dir, "-c", "core.quotepath=false", "ls-files", "model").trim().split("\n"), ["model/a/parts.sysml", "model/b/parts.sysml", "model/model.sysml", "model/structure/avionics.sysml", "model/structure/深層/recovery.sysml"]);
+  assert.equal(gitIn(dir, "status", "--porcelain", "--", "model"), "");
+
+  // 讀檔；修改元素會寫回它所在的那個檔，同名的另一個檔不受影響
+  assert.match((await call(`${MF}/files/a/parts.sysml`)).data.content, /合成零件甲/);
+  const r = await call(`${MF}/elements`, "PATCH", { id: el("合成零件乙").id, doc: "寫回子資料夾。" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.match((await call(`${MF}/files/b/parts.sysml`)).data.content, /寫回子資料夾/);
+  assert.doesNotMatch((await call(`${MF}/files/a/parts.sysml`)).data.content, /寫回子資料夾/);
+
+  // 錯誤訊息上的檔名也是相對路徑；有錯誤的內容不會存進去
+  const bad = await call(`${MF}/files/a/parts.sysml`, "PUT", { content: "package PartsA { part def }\n" });
+  assert.equal(bad.status, 422);
+  assert.ok(bad.data.diagnostics.some((d: any) => d.severity === "error" && d.file === "a/parts.sysml"), JSON.stringify(bad.data.diagnostics).slice(0, 300));
+  assert.match((await call(`${MF}/files/a/parts.sysml`)).data.content, /合成零件甲/);
+});
+
+test("多資料夾：指到 model/ 外面的路徑與符號連結一律拒絕（F-70）", async (t) => {
+  const dir = path.join(home, "projects", "mf");
+  const nine = "a/b/c/d/e/f/g/h/x.sysml";
+  const bad = ["..%2Fx.sysml", "a%2F..%2F..%2Fx.sysml", "%2Ftmp%2Fx.sysml", "a%5Cx.sysml", ".git%2Fx.sysml", "a%2F.hidden%2Fx.sysml", "a%2F%2Fx.sysml", nine, "a/x.txt", "a%20b/x.sysml", "a/..sysml"];
+  for (const b of bad) {
+    assert.equal((await call(`${MF}/files/${b}`)).status, 400, `讀 ${b}`);
+    assert.equal((await call(`${MF}/files/${b}`, "PUT", { content: mfPkg("Escape", "") })).status, 400, `寫 ${b}`);
+  }
+  for (const p of [path.join(dir, "x.sysml"), path.join(home, "projects", "x.sysml"), path.join(dir, "model", "a", "b")]) assert.equal(await fs.stat(p).then(() => true, () => false), false, `不應該出現 ${p}`);
+  // 路徑合法但檔案不存在：說明找不到，不是伺服器錯誤
+  const missing = await call(`${MF}/files/a/none.sysml`);
+  assert.equal(missing.status, 400);
+  assert.match(missing.data.error, /找不到檔案 a\/none\.sysml/);
+  // 八層是上限，剛好八層可以
+  assert.equal((await call(`${MF}/files/a/b/c/d/e/f/g/x.sysml`, "PUT", { content: mfPkg("Deep", "") })).status, 200);
+
+  // 符號連結：連到專案外面的資料夾與檔案
+  const outside = path.join(home, "outside");
+  await fs.mkdir(outside, { recursive: true });
+  await fs.writeFile(path.join(outside, "secret.sysml"), "package Leak { part def LeakedPart; }\n", "utf8");
+  const links = [path.join(dir, "model", "link"), path.join(dir, "model", "ln.sysml")];
+  try {
+    await fs.symlink(outside, links[0], "dir");
+    await fs.symlink(path.join(outside, "secret.sysml"), links[1], "file");
+  } catch (e) {
+    t.diagnostic(`這台電腦不能建立符號連結（${(e as Error).message}），符號連結的檢查略過`);
+    return;
+  }
+  try {
+    const files = (await call(`${MF}/files`)).data as string[];
+    assert.equal(files.some((f) => f.startsWith("link/") || f === "ln.sysml"), false, files.join(","));
+    assert.equal((await call(MF)).data.analysis.elements.some((e: any) => e.name === "LeakedPart"), false);
+    assert.equal((await call(`${MF}/files/link/secret.sysml`)).status, 400);
+    assert.equal((await call(`${MF}/files/ln.sysml`)).status, 400);
+    assert.equal((await call(`${MF}/files/link/new.sysml`, "PUT", { content: mfPkg("Escape", "") })).status, 400);
+    assert.equal((await call(`${MF}/files/ln.sysml`, "PUT", { content: mfPkg("Escape", "") })).status, 400);
+    assert.equal(await fs.stat(path.join(outside, "new.sysml")).then(() => true, () => false), false);
+    assert.equal(await fs.readFile(path.join(outside, "secret.sysml"), "utf8"), "package Leak { part def LeakedPart; }\n");
+  } finally { for (const l of links) await fs.rm(l, { force: true }); }
+});
+
+test("多資料夾：歷史版本、分支審查、合併衝突的自動解決、舊寫法的轉換都涵蓋子資料夾（F-70）", async () => {
+  const dir = path.join(home, "projects", "mf");
+  const added = (changes: any[], key: string) => changes.some((c: any) => c.type === "added" && c.key === key);
+
+  // 歷史版本：從建立專案的那一筆比到現在，子資料夾與同名檔裡的元素都看得到
+  const first = gitIn(dir, "rev-list", "--max-parents=0", "HEAD").trim();
+  let r = await call(`${MF}/compare?from=${first}&to=HEAD`);
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  for (const k of ["CMP-801", "CMP-802", "CMP-803", "CMP-804"]) assert.ok(added(r.data.changes, k), `比較結果缺少 ${k}`);
+
+  // 分支審查：分支在子資料夾新增的檔案會被解析；壞掉的會被標示
+  const write = async (rel: string, content: string) => { const f = path.join(dir, "model", ...rel.split("/")); await fs.mkdir(path.dirname(f), { recursive: true }); await fs.writeFile(f, content, "utf8"); };
+  const commitOn = async (branch: string, rel: string, content: string, message: string) => {
+    if (branch !== "main") gitIn(dir, "checkout", "-q", "-b", branch);
+    await write(rel, content);
+    gitIn(dir, "add", "-A", "model");
+    gitIn(dir, "commit", "-qm", message);
+    gitIn(dir, "checkout", "-q", "main");
+  };
+  await commitOn("feature/sub-add", "c/extra.sysml", mfPkg("ExtraC", mfPart("CMP-805", "合成零件丙")), "分支：子資料夾新增檔案");
+  await commitOn("feature/sub-broken", "c/bad.sysml", "package Oops { part def }\n", "分支：子資料夾裡壞掉的檔案");
+  const list = (await call(`${MF}/branches`)).data;
+  const good = list.find((b: any) => b.name === "feature/sub-add"), broken = list.find((b: any) => b.name === "feature/sub-broken");
+  assert.equal(good.ok, true, good.firstError);
+  assert.equal(broken.ok, false);
+  assert.match(broken.firstError, /c\/bad\.sysml/);
+  const d = (await call(`${MF}/branches/diff?name=feature/sub-add`)).data;
+  assert.match(d.diff, /model\/c\/extra\.sysml/);
+  assert.ok(added(d.changes, "CMP-805"));
+  r = await call(`${MF}/branches/merge`, "POST", { name: "feature/sub-add" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(r.data.analysis.elements.find((e: any) => e.shortName === "CMP-805").file, "c/extra.sysml");
+
+  // 合併衝突（F-34）：衝突的檔案在子資料夾裡
+  const L1 = mfPart("CMP-811", "合成件一"), L2 = mfPart("CMP-812", "合成件二"), L3 = mfPart("CMP-813", "合成件三");
+  const base = mfPkg("ListD", L1 + L2 + L3), file = path.join(dir, "model", "d", "list.sysml");
+  await commitOn("main", "d/list.sysml", base, "main：子資料夾的清單");
+  await commitOn("feature/d-superset", "d/list.sysml", base.replace(L1 + L2, ""), "分支：刪掉兩個");
+  await commitOn("feature/d-rewrite", "d/list.sysml", base.replace(L1, mfPart("CMP-811", "合成件一改")), "分支：改寫第一個");
+  await commitOn("main", "d/list.sysml", base.replace(L1, ""), "main：刪掉第一個");
+  r = await call(`${MF}/branches/merge`, "POST", { name: "feature/d-rewrite" });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /衝突.*model\/d\/list\.sysml/);
+  assert.equal(await fs.readFile(file, "utf8"), base.replace(L1, ""));
+  r = await call(`${MF}/branches/merge`, "POST", { name: "feature/d-superset" });
+  assert.equal(r.status, 200, JSON.stringify(r.data).slice(0, 300));
+  assert.equal(await fs.readFile(file, "utf8"), base.replace(L1 + L2, ""));
+  assert.match(gitIn(dir, "log", "-1", "--format=%B"), /自動解決的模型衝突.*d\/list\.sysml 1 段/);
+
+  // 舊寫法（F-36）：子資料夾裡的檔案開啟專案時一樣會轉換，並單獨提交
+  const legacy = "package LegacyE {\n    private import JRI::*;\n    requirement <'NEED-901'> '合成需要' : Need;\n    requirement <'GOAL-901'> '合成目標' : Goal;\n    #refine dependency from '合成目標' to '合成需要';\n}\n";
+  await commitOn("main", "e/legacy.sysml", legacy, "main：子資料夾裡的舊寫法");
+  const view = (await call(MF)).data;
+  assert.equal(view.analysis.ok, true, JSON.stringify(view.analysis.diagnostics).slice(0, 300));
+  assert.equal(await fs.readFile(path.join(dir, "model", "e", "legacy.sysml"), "utf8"), legacy.replace("#refine dependency", "#refinement dependency"));
+  assert.equal(gitIn(dir, "log", "-1", "--format=%an｜%s").trim(), "JRI MBSE｜模型改用 SysML v2 標準庫與內建的寫法");
+  assert.equal(gitIn(dir, "status", "--porcelain", "--", "model"), "");
+});
