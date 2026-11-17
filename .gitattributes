@@ -1,3 +1,1 @@
 * text=auto eol=lf
-# 第三方的參考模型逐位元組保留，不轉換換行字元
-reference/** -text

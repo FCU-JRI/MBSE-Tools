@@ -2,11 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api.ts";
 import type { Diagnostic } from "./api.ts";
 
-/** 模型檔的相對路徑（可以有子資料夾，F-70）放進網址：每一段各自編碼，斜線保留。 */
-const filePath = (file: string) => file.split("/").map(encodeURIComponent).join("/");
-
 /** 專家模式：直接編輯 SysML v2 原始碼，輸入時即時檢查，有錯誤不能儲存。 */
-export function SourceTab({ id, onSaved, readOnly, at }: { id: string; onSaved: () => void; readOnly?: boolean; at?: { file: string; line: number } | null }) {
+export function SourceTab({ id, onSaved, readOnly }: { id: string; onSaved: () => void; readOnly?: boolean }) {
   const [files, setFiles] = useState<string[]>([]);
   const [file, setFile] = useState("model.sysml");
   const [content, setContent] = useState("");
@@ -17,21 +14,12 @@ export function SourceTab({ id, onSaved, readOnly, at }: { id: string; onSaved: 
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
 
-  // 專案不一定有 model.sysml（例如模型全放在子資料夾）；沒有就開第一個檔。清單回來之前先不讀檔，免得去讀一個不存在的檔
-  const [listed, setListed] = useState(false);
+  useEffect(() => { api<string[]>(`/projects/${id}/files`).then(setFiles).catch(() => setFiles(["model.sysml"])); }, [id]);
   useEffect(() => {
-    api<string[]>(`/projects/${id}/files`).then((list) => { setFiles(list); setFile((cur) => (list.length === 0 || list.includes(cur) ? cur : list[0])); }).catch(() => setFiles(["model.sysml"])).finally(() => setListed(true));
-  }, [id]);
-  useEffect(() => {
-    if (!listed) return;
-    api<{ content: string }>(`/projects/${id}/files/${filePath(file)}`)
-      .then((r) => { setContent(r.content); setSaved(r.content); setDiags([]); setLoaded(file); })
+    api<{ content: string }>(`/projects/${id}/files/${encodeURIComponent(file)}`)
+      .then((r) => { setContent(r.content); setSaved(r.content); setDiags([]); })
       .catch((e) => setStatus({ ok: false, text: e.message }));
-  }, [id, file, listed]);
-  // 從別的分頁指定要看的位置（F-75）：切到那個檔，內容載入後捲到那一行並選起來
-  const [loaded, setLoaded] = useState("");
-  useEffect(() => { if (at && listed) setFile(at.file); }, [at, listed]);
-  useEffect(() => { if (at && loaded === at.file && content === saved) goto(at.line); }, [at, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, file]);
 
   // 停止輸入 0.6 秒後檢查
   useEffect(() => {
@@ -52,7 +40,7 @@ export function SourceTab({ id, onSaved, readOnly, at }: { id: string; onSaved: 
   const save = async () => {
     setStatus(null);
     try {
-      const r = await api<{ saved: boolean; commit: string }>(`/projects/${id}/files/${filePath(file)}`, "PUT", { content, message });
+      const r = await api<{ saved: boolean; commit: string }>(`/projects/${id}/files/${encodeURIComponent(file)}`, "PUT", { content, message });
       setSaved(content); setMessage(""); setStatus({ ok: true, text: `已儲存（版本 ${r.commit}）。` });
       onSaved();
     } catch (e) {

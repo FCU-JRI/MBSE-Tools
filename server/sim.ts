@@ -22,9 +22,7 @@ export interface SimInputs {
 }
 
 export interface SimOutput { key: string; zh: string; value: number; unit: string }
-export interface SimResult { at: string; by: string; commit: string; inputsHash: string; engine: string; outputs: SimOutput[]; trajectory: [number, number][]; warnings: string[];
-  /** P7：隨時間的序列（t、高度、速度、加速度、穩定裕度…），給模擬圖用；舊的結果沒有 */
-  series?: Record<string, number[]> }
+export interface SimResult { at: string; by: string; commit: string; inputsHash: string; engine: string; outputs: SimOutput[]; trajectory: [number, number][]; warnings: string[] }
 export interface Binding { output: string; element: string; attribute: string }
 export interface SimFile { inputs: SimInputs; result: SimResult | null; bindings: Binding[] }
 
@@ -107,8 +105,7 @@ export function parseThrust(text: string): [number, number][] {
 // ───────── OpenRocket .ork ─────────
 
 const ORK_MAX = 50 * 1024 * 1024;
-/** 讀 .ork（zip、gzip 或純 XML）的 XML 內容。P7 匯回也用這個。 */
-export async function orkXml(buf: Buffer): Promise<string> {
+async function orkXml(buf: Buffer): Promise<string> {
   if (buf[0] === 0x50 && buf[1] === 0x4b) {
     const zip = await JSZip.loadAsync(buf);
     const entry = zip.file("rocket.ork") ?? Object.values(zip.files).find((f) => !f.dir && /\.ork$|\.xml$/i.test(f.name));
@@ -294,12 +291,11 @@ export async function runSim(id: string, author: string): Promise<SimFile> {
   });
   const line = stdout.trim().split(/\r?\n/).filter((l) => l.startsWith("{")).pop();
   if (!line) throw new UserError("模擬沒有回傳結果。");
-  const r = JSON.parse(line) as { engine: string; outputs: SimOutput[]; trajectory: [number, number][]; warnings: string[]; series?: Record<string, number[]> };
+  const r = JSON.parse(line) as { engine: string; outputs: SimOutput[]; trajectory: [number, number][]; warnings: string[] };
   s.inputs = inputs;
   s.result = {
     at: new Date().toISOString(), by: author, commit: await git(dirOf(id), "rev-parse", "--short", "HEAD"),
     inputsHash: createHash("sha256").update(JSON.stringify(inputs)).digest("hex").slice(0, 12), engine: r.engine, outputs: r.outputs, trajectory: r.trajectory, warnings: r.warnings ?? [],
-    ...(r.series ? { series: r.series } : {}),
   };
   await writeSim(id, s);
   await commit(dirOf(id), author, `執行飛行模擬（${r.engine}）`);
