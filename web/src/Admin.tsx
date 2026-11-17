@@ -11,8 +11,6 @@ interface Cfg { publicUrl: string; clientId: string; hasSecret: boolean; autoRep
 const blank: Member = { login: "", name: "", rank: "C-II", subsystems: [], admin: false };
 
 /** 管理頁：成員與職級、唯讀連結、GitHub 登入設定。 */
-interface Ref { id: string; zh: string; name: string; source: string; commit: string; license: string; files: number; installed: boolean; problems: string[] }
-
 export function Admin() {
   const [members, setMembers] = useState<Member[]>([]);
   const [ranks, setRanks] = useState<{ id: string; zh: string }[]>([]);
@@ -26,7 +24,6 @@ export function Admin() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [sharedFiles, setSharedFiles] = useState<{ file: string; content: string }[]>([]);
   const [lib, setLib] = useState({ file: "shared-avionics.sysml", content: "" });
-  const [refs, setRefs] = useState<Ref[]>([]);
 
   const run = async (fn: () => Promise<void>, done?: string) => {
     setMsg(null);
@@ -40,7 +37,6 @@ export function Admin() {
       const ps = await api<Project[]>("/projects");
       setProjects(ps); setShare((s) => ({ ...s, project: ps[0]?.id ?? "" }));
       setCfg(await api<Cfg>("/admin/config"));
-      setRefs(await api<Ref[]>("/admin/references"));
       const sh = (await api<{ files: { file: string; content: string }[] }>("/shared")).files;
       setSharedFiles(sh);
       if (sh[0]) setLib(sh[0]);
@@ -148,18 +144,6 @@ export function Admin() {
           </div>
           <button className="tbtn primary">儲存設定</button>
         </form>
-      </section>
-
-      <section className="section">
-        <div className="section-head"><h2 className="section-title">參考專案</h2><span className="label">{refs.filter((r) => r.installed).length} / {refs.length}</span></div>
-        <p className="body muted" style={{ marginBottom: 12 }}>第三方的標準 SysML v2 模型，原封不動建成唯讀的專案，給成員對照建模方式。檔案放在工具的 reference 資料夾，建立時逐一核對，和清單不符就不建立。</p>
-        {refs.map((r) => (
-          <div key={r.id} className="row" style={{ alignItems: "center", marginBottom: 8 }}>
-            <span className="body" style={{ flex: 1, maxWidth: "none" }}><b>{r.zh}</b>　{r.name}，{r.files} 個檔案，提交 <span className="data">{r.commit.slice(0, 7)}</span>，授權 {r.license}　<a href={r.source} target="_blank" rel="noreferrer">來源</a></span>
-            {r.problems.length > 0 ? <span className="tag danger" title={r.problems.join("\n")}>檔案不符 {r.problems.length}</span> : r.installed ? <span className="tag done">已建立・內容相符</span> : null}
-            {!r.installed && <button className="tbtn primary" disabled={r.problems.length > 0} onClick={() => run(async () => { await api(`/admin/references/${r.id}/install`, "POST", {}); setRefs(await api<Ref[]>("/admin/references")); setProjects(await api<Project[]>("/projects")); }, "已建立參考專案。")}>建立</button>}
-          </div>
-        ))}
       </section>
 
       <section className="section">

@@ -8,7 +8,7 @@ import { ROOT_PACKAGE, shutdown } from "./engine.ts";
 import { evaluateGates, GATES } from "./gates.ts";
 import { CATEGORIES, PILLARS, RELATION_LABELS } from "./metamodel.ts";
 import * as store from "./projects.ts";
-import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, setSourceText, snippetFor, addPartText } from "./edits.ts";
+import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setRawAttrText, setShortNameText, setSourceText, snippetFor } from "./edits.ts";
 import { exportWorkbook } from "./export.ts";
 import type { Element } from "./extract.ts";
 import * as auth from "./auth.ts";
@@ -18,16 +18,7 @@ import * as sim from "./sim.ts";
 import { evaluateProcess, stepOfCategory } from "./process.ts";
 import { buildReport, renderDocx, renderHtml } from "./report.ts";
 import { paramLines, paramWord } from "./modernize.ts";
-import * as reference from "./reference.ts";
 import type { User } from "./auth.ts";
-// METHOD.md 實作：各期的路由（docs/IMPL-PLAN.md）
-import { mount as mountP1 } from "./method/p1.ts";
-import { mount as mountP2 } from "./method/p2.ts";
-import { mount as mountP3 } from "./method/p3.ts";
-import { mount as mountP4 } from "./method/p4.ts";
-import { mount as mountP5 } from "./method/p5.ts";
-import { mount as mountP6 } from "./method/p6.ts";
-import { mount as mountP7 } from "./method/p7.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAIN_FILE = "model.sysml";
@@ -101,16 +92,6 @@ auth.mountAuthRoutes(app);
 app.use("/api", auth.authenticate);
 app.use("/api/projects/:id", auth.projectGuard);
 
-// 唯讀的專案（F-72）：任何身分都不能改內容，也不開分支。封存只是從清單移除，管理員仍可操作
-app.use("/api/projects/:id", (req, res, next) => {
-  const ref = String(req.params.id), branch = ref.includes("@");
-  if (!branch && (req.method === "GET" || req.method === "HEAD" || /\/(validate|archive)$/.test(req.path))) return next();
-  store.readProject(ref.split("@")[0]).then((p) => {
-    if (p.readOnly) { res.status(403).json({ error: branch ? "唯讀的專案不能開分支。" : "這是唯讀的專案，不能修改。" }); return; }
-    next();
-  }, () => next());
-});
-
 // 分支（F-33）：參照是「代號@分支」，第一次開啟時建立它的工作目錄。載入整個專案時，main 和分支都順便跟上 GitHub 上的新提交。
 app.use("/api/projects/:id", (req, _res, next) => {
   versions.openBranch(String(req.params.id), req.method === "GET" && req.path === "/").then(() => next(), next);
@@ -152,10 +133,6 @@ app.get("/api/admin/config", admin, wrap(async (_req, res) => {
   res.json({ publicUrl: c.publicUrl, clientId: c.github.clientId, hasSecret: !!c.github.clientSecret, tailscaleAdmins: c.tailscaleAdmins, autoRepo: c.autoRepo });
 }));
 app.post("/api/admin/config", admin, wrap(async (req, res) => { await auth.updateConfig(req.body ?? {}); res.json({ saved: true }); }));
-
-// 參考專案（F-73）：放在 reference/ 的第三方模型，原封不動建成唯讀的專案
-app.get("/api/admin/references", admin, wrap(async (_req, res) => res.json(await reference.listReferences())));
-app.post("/api/admin/references/:ref/install", admin, wrap(async (req, res) => res.json(await reference.installReference(String(req.params.ref), author(req)))));
 
 // 共用元件庫（跨專案，以航電為主）
 app.get("/api/shared", wrap(async (_req, res) => {
@@ -201,10 +178,8 @@ app.get("/api/projects/:id", wrap(async (req, res) => res.json(await view(pid(re
 
 app.get("/api/projects/:id/files", wrap(async (req, res) => res.json(await store.listFiles(pid(req)))));
 
-// 模型檔可以在子資料夾裡（F-70），網址上是 files/資料夾/檔名
-const fileParam = (req: Request) => { const f = req.params.file as string | string[]; return Array.isArray(f) ? f.join("/") : String(f); };
-app.get("/api/projects/:id/files/*file", wrap(async (req, res) => {
-  res.json({ content: await store.readFile(pid(req), fileParam(req)) });
+app.get("/api/projects/:id/files/:file", wrap(async (req, res) => {
+  res.json({ content: await store.readFile(pid(req), String(req.params.file)) });
 }));
 
 // 只檢查、不儲存：原始碼編輯器即時顯示錯誤用
@@ -213,8 +188,8 @@ app.post("/api/projects/:id/validate", wrap(async (req, res) => {
   res.json({ ok: a.ok, diagnostics: a.diagnostics });
 }));
 
-app.put("/api/projects/:id/files/*file", wrap(async (req, res) => {
-  const r = await store.saveFile(pid(req), fileParam(req), String(req.body.content ?? ""), author(req), String(req.body.message ?? ""));
+app.put("/api/projects/:id/files/:file", wrap(async (req, res) => {
+  const r = await store.saveFile(pid(req), String(req.params.file), String(req.body.content ?? ""), author(req), String(req.body.message ?? ""));
   res.status(r.saved ? 200 : 422).json({ saved: r.saved, commit: r.commit, diagnostics: r.analysis.diagnostics });
 }));
 
@@ -289,7 +264,7 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
     let target = to;
     if (/Definition$/.test(to.kind)) {
       const usage = before.elements.find((e) => e.kind === "PartUsage" && e.typeIds.includes(to.id));
-      if (!usage) throw new store.UserError(`「${to.name}」還沒有放進系統的結構，無法分配。請先到 Structure 的套件內容圖把它加為某個系統的零件。`);
+      if (!usage) throw new store.UserError(`「${to.name}」還沒有放進系統的結構，無法分配。請先到結構分解圖把它加為某個系統的零件。`);
       target = usage;
     }
     // 零件若定義在某個系統定義裡，從外面無法直接引用，所以把分配寫進那個定義的主體
@@ -327,23 +302,6 @@ app.post("/api/projects/:id/relations", wrap(async (req, res) => {
   }
   const zh = RELATION_LABELS[kind]?.zh ?? ({ compose: "組成", connect: "連接", succession: "之後是", transition: "轉換到" } as Record<string, string>)[kind] ?? kind;
   const r = await store.saveFile(id, file, next, author(req), `新增關係：${from.name} ${zh} ${to.name}`);
-  if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
-  res.json({ saved: true, ...(await view(id)) });
-}));
-
-// 分解圖上的「加入零件」（階段 3b）：可跨套件，型別在別的套件時自動補 private import
-app.post("/api/projects/:id/parts", wrap(async (req, res) => {
-  const id = pid(req);
-  const before = await store.analyzeProject(id);
-  if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正後再新增。");
-  const owner = before.elements.find((e) => e.id === req.body.owner);
-  const type = before.elements.find((e) => e.id === req.body.type);
-  if (!owner || !type) throw new store.UserError("找不到要加入的定義。");
-  if (owner.kind !== "PartDefinition" || type.kind !== "PartDefinition") throw new store.UserError("只能在零件定義（part def）裡加入以零件定義為型別的零件。");
-  if (owner.id === type.id) throw new store.UserError("不能把元素放進自己裡面。");
-  const file = editable(owner).file;
-  const out = addPartText(await store.readFile(id, file), before.elements, before.imports ?? [], owner, type, String(req.body.name ?? ""));
-  const r = await store.saveFile(id, file, out.content, author(req), `新增零件：${owner.name} 加入 ${String(req.body.name ?? "").trim()} : ${type.name}${out.imported ? "（補匯入）" : ""}`);
   if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
   res.json({ saved: true, ...(await view(id)) });
 }));
@@ -750,16 +708,6 @@ if (fs.existsSync(dist)) {
   app.use(express.static(dist, { setHeaders: (res, file) => { if (file.endsWith(".html")) noCache(res as Response); } }));
   app.get(/^(?!\/api\/).*/, (_req, res) => { noCache(res); res.sendFile(path.join(dist, "index.html")); });
 }
-
-// METHOD.md 實作：各期的路由掛在統一的錯誤處理之前
-const methodCtx = { wrap, pid, author, view, store };
-mountP1(app, methodCtx);
-mountP2(app, methodCtx);
-mountP3(app, methodCtx);
-mountP4(app, methodCtx);
-mountP5(app, methodCtx);
-mountP6(app, methodCtx);
-mountP7(app, methodCtx);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof store.UserError) return res.status(400).json({ error: err.message });

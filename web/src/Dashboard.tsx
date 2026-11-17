@@ -111,7 +111,7 @@ export function Dashboard({ view, go }: { view: View; go: Go }) {
           <Bar label="有驗證" done={reqs.filter((e) => has(e, "in", "verify")).length} total={reqs.length} onClick={() => go("deliver", "req")} />
           <div className="dash-stats">
             <div><span className="label">計算判定</span><span className="data">{a.satisfaction.filter((s) => s.status === "holds").length} PASS {fails > 0 && <span className="tag danger">{fails} FAIL</span>}</span></div>
-            <div><span className="label">模型元素</span><span className="data">{a.elements.length}</span></div>
+            <div><span className="label">模型元素</span><span className="data">{a.elements.filter((e) => e.category).length}</span></div>
           </div>
         </section>
 

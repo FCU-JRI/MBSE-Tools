@@ -2,11 +2,8 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api } from "./api.ts";
 import type { Category, Element, Meta, View } from "./api.ts";
-import { isPackage, label, LINK_ZH, listOf, stereotype } from "./model.ts";
+import { label, listOf, stereotype } from "./model.ts";
 import type { GEdge } from "./model.ts";
-// [P1] 需求的共同屬性與必填的驗證方法
-import { emptyReqForm, RequirementFields, toInput } from "./method/P1Requirements.tsx";
-import { REQ_CATEGORIES } from "../../server/method/p1-req.ts";
 
 export type Selection =
   | { type: "element"; id: string }
@@ -17,40 +14,31 @@ export type Selection =
 const METHODS: Record<string, string> = { test: "測試", analyze: "分析", inspect: "檢查", demo: "展示" };
 export const methodZh = (v: string | undefined) => METHODS[(v ?? "").split("::").pop() ?? ""] ?? "";
 
-interface Props { readOnly?: boolean; view: View; meta: Meta; sel: Selection; setSel: (s: Selection) => void; onChanged: (v: View) => void;
-  /** 跳到「原始碼」分頁的某個檔案與行 */
-  onSource?: (file: string, line: number) => void }
+interface Props { readOnly?: boolean; view: View; meta: Meta; sel: Selection; setSel: (s: Selection) => void; onChanged: (v: View) => void }
 
 /** 右側欄：選到元素時編輯它，否則新增。整個畫面唯一的主要按鈕在這裡。 */
 export function Inspector(p: Props) {
   if (!p.view.analysis.ok) return <div className="section"><div className="section-head"><h2 className="section-title">屬性</h2></div><p className="caption">模型有錯誤，修正後才能編輯。</p></div>;
-  const a = p.view.analysis;
-  const find = (id: string) => a.elements.find((e) => e.id === id) ?? (a.unnamed ?? []).find((e) => e.id === id);
   if (p.readOnly) {
     const sel = p.sel;
-    return <ReadPanel {...p} el={sel.type === "element" ? find(sel.id) : undefined} />;
+    const el = sel.type === "element" ? p.view.analysis.elements.find((e) => e.id === sel.id) : undefined;
+    return <ReadPanel {...p} el={el} />;
   }
   if (p.sel.type === "edge") return <EdgePanel {...p} edge={p.sel.edge} />;
   if (p.sel.type === "element") {
-    const el = find(p.sel.id);
-    // 表單目前只會改 JRI 類別的元素、套件與註解；其餘的元素（屬性、沒有名字的使用等）先唯讀顯示，要改到「原始碼」分頁
-    if (el) return el.shared || el.unnamed || !(el.category || isPackage(el) || el.kind === "Comment") ? <ReadPanel {...p} el={el} /> : <EditPanel key={el.id} {...p} el={el} />;
+    const sel = p.sel;
+    const el = p.view.analysis.elements.find((e) => e.id === sel.id);
+    if (el) return el.shared ? <ReadPanel {...p} el={el} /> : <EditPanel key={el.id} {...p} el={el} />;
   }
   const s = p.sel.type === "new" ? p.sel : { category: "SystemRequirement", parentId: null };
   return <NewPanel key={`${s.category}:${s.parentId}`} {...p} category={s.category} parentId={s.parentId} />;
 }
 
 /** 唯讀：只顯示內容與關係。 */
-function ReadPanel({ view, meta, setSel, el, readOnly, onSource }: Props & { el: Element | undefined }) {
-  if (!el) return <div className="section"><div className="section-head"><h2 className="section-title">屬性</h2></div><p className="caption">點選樹、圖或表中的項目查看內容。</p></div>;
+function ReadPanel({ view, meta, setSel, el }: Props & { el: Element | undefined }) {
+  if (!el) return <div className="section"><div className="section-head"><h2 className="section-title">屬性</h2></div><p className="caption">點選圖或表中的項目查看內容。</p></div>;
   const cat = meta.categories.find((c) => c.id === el.category);
-  const byId = new Map([...view.analysis.elements, ...(view.analysis.unnamed ?? [])].map((e) => [e.id, e]));
-  const fields = new Set((cat?.fields ?? []).map((f) => f.name));
-  // 通用的關係（F-75）：特化、由誰定義、子集、重定義、參照、執行。對象在標準庫時只有名稱，不能點
-  const links = [
-    ...(view.analysis.links ?? []).filter((l) => l.from === el.id && l.to !== el.id).map((l) => ({ zh: LINK_ZH[l.kind] ?? l.kind, o: l.to ? byId.get(l.to) : undefined, name: l.toName })),
-    ...(view.analysis.links ?? []).filter((l) => l.to === el.id && l.from !== el.id).map((l) => ({ zh: `被${(LINK_ZH[l.kind] ?? l.kind).replace("由…定義", "用來定義")}`, o: byId.get(l.from), name: byId.get(l.from)?.name ?? "" })),
-  ];
+  const byId = new Map(view.analysis.elements.map((e) => [e.id, e]));
   const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
   const list = [
     ...rels.filter((r) => r.from === el.id).map((r) => ({ zh: meta.relations[r.kind]?.zh ?? r.kind, o: byId.get(r.to) })),
@@ -59,24 +47,14 @@ function ReadPanel({ view, meta, setSel, el, readOnly, onSource }: Props & { el:
   return (
     <>
       <div className="section">
-        <div className="section-head"><h2 className="section-title">屬性</h2><span className="label">{cat?.zh ?? (el.keyword ? `«${el.keyword}»` : stereotype(el))}</span></div>
-        {el.shared && <p className="caption" style={{ marginBottom: 12 }}>來自共用元件庫，專案內不能修改。可以在自訂圖把它拉進自己的系統。</p>}
-        {!el.shared && !readOnly && <p className="caption" style={{ marginBottom: 12 }}>這類元素目前只能到「原始碼」分頁修改。</p>}
+        <div className="section-head"><h2 className="section-title">屬性</h2><span className="label">{cat?.zh ?? stereotype(el)}</span></div>
+        {el.shared && <p className="caption" style={{ marginBottom: 12 }}>來自共用元件庫，專案內不能修改。可以在結構分解圖把它拉進自己的系統。</p>}
         <div className="field"><span className="label">編號</span><span className="data">{el.shortName ?? "—"}</span></div>
         <div className="field"><span className="label">名稱</span><span className="heading">{el.name}</span></div>
         {el.doc && <div className="field"><span className="label">{cat?.keyword === "requirement" ? "內容" : "說明"}</span><p className="body">{el.doc}</p></div>}
         {(cat?.fields ?? []).filter((f) => el.attrs[f.name]).map((f) => <div className="field" key={f.name}><span className="label">{f.zh}</span><span className="body">{el.attrs[f.name]}</span></div>)}
-        {el.attrs.kind && cat && <div className="field"><span className="label">驗證方法</span><span className="data">{methodZh(el.attrs.kind)}</span></div>}
-        {Object.entries(el.attrs).filter(([k]) => !fields.has(k) && !(k === "kind" && cat)).map(([k, v]) => <div className="field" key={k}><span className="label" style={{ textTransform: "none" }}>{k}</span><span className="data">{v}</span></div>)}
-        <div className="field"><span className="label">所在</span><span className="caption">{el.qualifiedName}</span></div>
-        {el.file && <div className="field"><span className="label">原始碼</span>
-          {onSource && el.line ? <button className="tbtn" style={{ textTransform: "none", letterSpacing: 0 }} onClick={() => onSource(el.file, el.line as number)}>{el.file}:{el.line}</button> : <span className="caption">{el.file}{el.line ? `:${el.line}` : ""}</span>}</div>}
+        {el.attrs.kind && <div className="field"><span className="label">驗證方法</span><span className="data">{methodZh(el.attrs.kind)}</span></div>}
       </div>
-      {links.length > 0 && <div className="section">
-        <div className="section-head"><h2 className="section-title">型別與特化</h2><span className="label">{links.length}</span></div>
-        {links.map((x, i) => <div className="rel" key={i}><span className="label">{x.zh}</span>
-          {x.o ? <button className="tbtn rn" style={{ textTransform: "none", letterSpacing: 0, fontSize: 13, justifyContent: "flex-start" }} onClick={() => setSel({ type: "element", id: (x.o as Element).id })}>{label(x.o)}</button> : <span className="body">{x.name || "—"}</span>}</div>)}
-      </div>}
       <div className="section">
         <div className="section-head"><h2 className="section-title">關係</h2><span className="label">{list.length}</span></div>
         {list.map((x, i) => <div className="rel" key={i}><span className="label">{x.zh}</span>
@@ -122,10 +100,8 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
   const [method, setMethod] = useState("test");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [reqForm, setReqForm] = useState(emptyReqForm); // [P1]
-  const isReq = REQ_CATEGORIES.includes(cat.id); // [P1]
   const isVer = cat.keyword === "verification";
-  const reqs = listOf(view.analysis.elements, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  const reqs = listOf(view.analysis.elements, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
   const parent = parentId ? view.analysis.elements.find((e) => e.id === parentId) : undefined;
 
   const submit = async (ev: FormEvent) => {
@@ -133,11 +109,11 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
     setBusy(true); setMsg(null);
     try {
       const before = new Set(view.analysis.elements.map((e) => e.id));
-      const v = await api<View>(`/projects/${view.project.id}/${isReq ? "requirements" : "elements"}`, "POST", { category: cat.id, name, doc, attrs, source: src.doc ? src : undefined, parentId: parentId ?? undefined, ...(isVer ? { verifies: verifies || undefined, method } : {}), ...(isReq ? toInput(reqForm) : {}) });
+      const v = await api<View>(`/projects/${view.project.id}/elements`, "POST", { category: cat.id, name, doc, attrs, source: src.doc ? src : undefined, parentId: parentId ?? undefined, ...(isVer ? { verifies: verifies || undefined, method } : {}) });
       onChanged(v);
       const created = v.analysis.elements.find((e) => !before.has(e.id) && e.name === name.trim());
       if (created) setSel({ type: "element", id: created.id });
-      else { setMsg({ ok: true, text: `已新增「${name}」。` }); setName(""); setDoc(""); setAttrs({}); setReqForm(emptyReqForm()); }
+      else { setMsg({ ok: true, text: `已新增「${name}」。` }); setName(""); setDoc(""); setAttrs({}); }
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
     finally { setBusy(false); }
   };
@@ -161,7 +137,6 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
       </label>
       <Fields cat={cat} attrs={attrs} setAttrs={setAttrs} />
       <SourceFields view={view} doc={src.doc} section={src.ref} onChange={(d, r) => setSrc({ doc: d, ref: r })} />
-      {isReq && <RequirementFields category={cat.id} value={reqForm} onChange={setReqForm} />}
       {isVer && <>
         <label className="field"><span className="label">要驗證的需求</span>
           <select className="input" value={verifies} onChange={(e) => setVerifies(e.target.value)}>

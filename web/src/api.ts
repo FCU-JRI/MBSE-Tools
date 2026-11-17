@@ -3,32 +3,15 @@ export interface Element {
   owner: string | null; doc: string; types: string[]; typeIds: string[]; file: string; shared: boolean; attrs: Record<string, string>; tags: string[]; line: number | null;
   /** 註解（Comment）所說明的元素 */
   about?: string[];
-  /** 關鍵字（part def、perform action…）、樹上的上層、是不是沒有名字的使用（F-71） */
-  keyword?: string; parent?: string | null; unnamed?: true;
 }
-/** 通用的關係（F-71）。to 是 null 時對象在標準庫或沒有列出來，名稱在 toName */
-export interface Link { kind: "specialize" | "type" | "subset" | "redefine" | "reference" | "perform"; from: string; to: string | null; toName: string; file: string; line: number | null }
-/** 匯入（階段 3b）。member：匯入單一成員（A::B）或命名空間的內容（A::*、A::**）；to 是 null 時對象在標準庫或沒有列出來，名稱在 toName */
-export interface Import { from: string; to: string | null; toName: string; member: boolean; recursive: boolean; private: boolean; file: string; line: number | null }
 /** form：追溯到利害關係人時用的內建寫法（需求的 stakeholder、使用案例的 actor）；用 #trace 相依的沒有這個欄位 */
 export interface Relation { kind: string; from: string; to: string; line: number | null; form?: "stakeholder" | "actor" }
 export interface Diagnostic { severity: string; message: string; file: string; line: number; column: number }
-export interface Analysis { ok: boolean; diagnostics: Diagnostic[]; elements: Element[]; relations: Relation[]; satisfaction: { requirement: string; subject: string; status: string }[];
-  /** 沒有名字但有意義的使用，與通用的關係（F-71）。模型有錯誤時是空的 */
-  unnamed: Element[]; links: Link[];
-  /** 匯入（階段 3b）；舊的伺服器沒有這個欄位 */
-  imports?: Import[];
-  /** 階段 4：轉換的觸發條件（F-78）、起點（F-78）、連結與介面的端點（F-80）；舊的伺服器沒有這些欄位 */
-  transitions?: Transition[]; entries?: Entry[]; connectors?: Connector[] }
-export interface Transition { from: string; to: string; trigger: string; guard: string; effect: string; file: string; line: number | null }
-export interface Entry { owner: string; to: string }
-export interface Connector { kind: "connection" | "interface"; id: string | null; name: string; type: string; fromChain: string[]; toChain: string[]; fromPath: string; toPath: string; file: string; line: number | null }
+export interface Analysis { ok: boolean; diagnostics: Diagnostic[]; elements: Element[]; relations: Relation[]; satisfaction: { requirement: string; subject: string; status: string }[] }
 export interface Check { id: string; label: string; hint: string; manual: boolean; pass: boolean; detail: string; missing: { id: string; name: string }[] }
 export interface Gate { id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean; checks: Check[]; done: number; total: number }
 export interface Signoff { gate: string; subsystem: string | null; decision: "APPROVE" | "DENY"; by: string; role: string; comment: string; at: string; commit: string }
-export interface Project { id: string; name: string; kind: "annual" | "small"; template?: "blank" | "sample" | "guided"; createdAt: string; gates: string[]; manual: Record<string, boolean>; signoffs: Signoff[];
-  /** 唯讀、原封不動、參考專案的來源（F-72、F-73） */
-  readOnly?: boolean; pristine?: boolean; reference?: { name: string; source: string; commit: string; license: string } }
+export interface Project { id: string; name: string; kind: "annual" | "small"; template?: "blank" | "sample" | "guided"; createdAt: string; gates: string[]; manual: Record<string, boolean>; signoffs: Signoff[] }
 export interface Doc { id: string; title: string; type: string; revision: string; url: string; note: string }
 export interface Step {
   id: string; zh: string; nasa: string; question: string; why: string; example: string; categories: string[];
@@ -74,8 +57,7 @@ export async function api<T>(path: string, method = "GET", body?: Record<string,
 
 /** 圖上的標註：註解、外框、文字。只是說明，不進模型。 */
 export interface Annotation { id: string; type: "note" | "frame" | "text"; x: number; y: number; w: number; h: number; text: string }
-/** views（P2）：分析圖（view:<id>）放了哪些模型項目；舊的資料沒有這個欄位 */
-export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]>; views?: Record<string, string[]> }
+export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]> }
 export type Layout = Record<string, Record<string, { x: number; y: number; w?: number; h?: number }>>;
 
 export interface Me {
