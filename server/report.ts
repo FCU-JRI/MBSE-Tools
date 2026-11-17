@@ -20,11 +20,7 @@ const METHOD: Record<string, string> = { "VerificationMethodKind::test": "測試
 const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
 
 function diagramSvg(_title: string, a: Analysis, id: string): string | null {
-  const defs = diagramsOf(a as any);
-  // 結構的圖（F-76）：節點最多的那張分解圖，也就是從系統往下展開的那一張；沒有分解圖時用零件定義最多的套件內容圖
-  // 同一類有多張時（階段 4 起動作、狀態機的圖也涵蓋一般的定義），先用 JRI 類別的那一張（任務、模式），和原本的報告相同
-  const jri = (d: { context: string | null }) => a.elements.find((e) => e.id === d.context)?.category != null;
-  const def = id === "structure" ? structureDiagram(defs, a) : defs.find((d) => d.id === id) ?? defs.find((d) => d.kind === id && jri(d)) ?? defs.find((d) => d.kind === id);
+  const def = diagramsOf(a as any).find((d) => d.id === id || d.kind === id);
   if (!def) return null;
   const g = buildGraph(def, a as any);
   if (g.nodes.length === 0) return null;
@@ -36,12 +32,6 @@ function diagramSvg(_title: string, a: Analysis, id: string): string | null {
   dagre.layout(dg);
   const placed = g.nodes.map((n) => { const p = dg.node(n.id); return { g: n, x: p.x - n.width / 2, y: p.y - n.height / 2 }; });
   return toSvg(frameLabel(def), placed, g.edges);
-}
-
-function structureDiagram(defs: ReturnType<typeof diagramsOf>, a: Analysis) {
-  const best = (kind: string, score: (g: ReturnType<typeof buildGraph>) => number) => defs.filter((d) => d.kind === kind)
-    .map((d) => ({ d, n: score(buildGraph(d, a as any)) })).filter((x) => x.n > 0).sort((x, y) => y.n - x.n)[0]?.d;
-  return best("decomp", (g) => g.nodes.length) ?? best("pkg", (g) => g.nodes.filter((n) => n.el?.kind === "PartDefinition").length);
 }
 
 export function buildReport(project: Project, a: Analysis, gates: GateStatus[], plan: Pm, sim: SimFile, gateId: string, commit: string): Report {
@@ -69,7 +59,7 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
   add("2.3　使用案例", [], { head: ["編號", "名稱", "說明", "參與者"], rows: of("UseCase").map((e) => [e.shortName ?? "", e.name, e.doc, outs(e, "trace")]) }, { svg: diagramSvg(project.name, a, "uc") ?? undefined });
 
   chapter("3　系統架構");
-  add("3.1　結構分解", [], { head: ["類別", "編號", "名稱", "說明", "屬性"], rows: of("System", "Subsystem", "Component", "ExternalEntity").map((e) => [zh(e), e.shortName ?? "", e.name, e.doc, a.elements.filter((x) => x.owner === e.id && x.kind === "AttributeUsage").map((x) => x.name + (x.tags.includes("TPM") ? "（TPM）" : "")).join("、")]) }, { svg: diagramSvg(project.name, a, "structure") ?? undefined });
+  add("3.1　結構分解", [], { head: ["類別", "編號", "名稱", "說明", "屬性"], rows: of("System", "Subsystem", "Component", "ExternalEntity").map((e) => [zh(e), e.shortName ?? "", e.name, e.doc, a.elements.filter((x) => x.owner === e.id && x.kind === "AttributeUsage").map((x) => x.name + (x.tags.includes("TPM") ? "（TPM）" : "")).join("、")]) }, { svg: diagramSvg(project.name, a, "bdd") ?? undefined });
   add("3.2　任務階段與功能", [], { head: ["類別", "編號", "名稱", "下一步", "分配給"], rows: of("MissionPhase", "Function").map((e) => [zh(e), e.shortName ?? "", e.name, outs(e, "succession"), outs(e, "allocate")]) }, { svg: diagramSvg(project.name, a, "act") ?? undefined });
   const stm = diagramSvg(project.name, a, "stm");
   if (stm) S.push({ heading: "3.3　模式與狀態", level: 2, paragraphs: [], svg: stm });

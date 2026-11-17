@@ -38,51 +38,12 @@ export interface Project {
   highPower?: boolean; // 高功率（H 級以上）：TRR／FRR 只有指導老師能核可
   manual: Record<string, boolean>;
   signoffs: Signoff[];
-  /** 唯讀（F-72）：任何身分都不能改這個專案的內容 */
-  readOnly?: boolean;
-  /** 原封不動（F-72）：載入只讀檔，不加入 JRI.sysml 與共用元件庫，不轉換舊寫法，不寫入任何檔案 */
-  pristine?: boolean;
-  /** 參考專案的來源（F-73） */
-  reference?: { name: string; source: string; commit: string; license: string };
 }
 
 export class UserError extends Error {}
 
 const ID = /^[a-z0-9][a-z0-9-]{1,40}$/;
 const FILE = /^[A-Za-z0-9_\-一-鿿]+\.sysml$/;
-const FOLDER = /^[A-Za-z0-9_\-一-鿿]+$/;
-const MAX_DEPTH = 8;
-
-/**
- * 模型檔的相對路徑（F-70）：`model/` 底下，可以有子資料夾，一律用正斜線。
- * 每一段只收英數、底線、連字號與中文字，所以 `..`、絕對路徑、反斜線、以點開頭的名稱都過不了。
- */
-export function isModelPath(file: string): boolean {
-  const parts = file.split("/");
-  return parts.length <= MAX_DEPTH && FILE.test(parts[parts.length - 1]) && parts.slice(0, -1).every((p) => FOLDER.test(p));
-}
-
-/** 模型檔在磁碟上的位置。路徑上有符號連結、因而指到 `model/` 外面的一律拒絕。 */
-async function modelFile(id: string, file: string): Promise<string> {
-  if (!isModelPath(file)) throw new UserError("檔名不合法。");
-  const model = path.join(dirOf(id), "model");
-  const full = path.join(model, ...file.split("/"));
-  // 檔案還不存在（新檔）時，檢查已經存在的那一段上層
-  let probe = full;
-  for (;;) {
-    const real = await fs.realpath(probe).catch(() => null);
-    if (real !== null) {
-      const base = await fs.realpath(model).catch(() => null);
-      const rest = path.relative(probe, full);
-      const target = rest ? path.join(real, rest) : real;
-      if (base === null || target !== path.join(base, ...file.split("/"))) throw new UserError("檔名不合法。");
-      return full;
-    }
-    const up = path.dirname(probe);
-    if (up === probe) throw new UserError("檔名不合法。");
-    probe = up;
-  }
-}
 
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,120}$/;
 const BRANCH_DIR = path.join(HOME_DIR, "branches");
@@ -303,26 +264,14 @@ export async function createProject(input: { id: string; name: string; kind: "an
   return project;
 }
 
-/** 專案的模型檔，含子資料夾裡的（F-70），以相對於 `model/` 的路徑表示。符號連結與以點開頭的資料夾不列。 */
 export async function listFiles(id: string): Promise<string[]> {
-  const out: string[] = [];
-  const walk = async (dir: string, prefix: string, depth: number): Promise<void> => {
-    for (const d of await fs.readdir(dir, { withFileTypes: true })) {
-      const rel = prefix + d.name;
-      if (d.isDirectory()) { if (depth < MAX_DEPTH && !d.name.startsWith(".")) await walk(path.join(dir, d.name), `${rel}/`, depth + 1); }
-      else if (d.isFile() && d.name.endsWith(".sysml")) out.push(rel);
-    }
-  };
-  await walk(path.join(dirOf(id), "model"), "", 1);
-  // 元模型庫與共用元件庫的檔名保留給工具自己用
-  return out.filter((n) => !SHARED_FILE.test(n) && n !== "JRI.sysml").sort();
+  const names = await fs.readdir(path.join(dirOf(id), "model"));
+  return names.filter((n) => n.endsWith(".sysml") && !SHARED_FILE.test(n) && n !== "JRI.sysml").sort();
 }
 
 export async function readFile(id: string, file: string): Promise<string> {
-  return fs.readFile(await modelFile(id, file), "utf8").catch((e: NodeJS.ErrnoException) => {
-    if (e.code === "ENOENT" || e.code === "EISDIR") throw new UserError(`找不到檔案 ${file}。`);
-    throw e;
-  });
+  if (!FILE.test(file)) throw new UserError("檔名不合法。");
+  return fs.readFile(path.join(dirOf(id), "model", file), "utf8");
 }
 
 const SHARED_DIR = path.join(HOME_DIR, "shared");
@@ -350,13 +299,7 @@ export async function saveShared(file: string, content: string): Promise<{ saved
 
 export async function sources(id: string, override?: { file: string; content: string }): Promise<Source[]> {
   const dir = dirOf(id);
-  const project = await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
-  if (project.pristine) {
-    // 原封不動的專案（F-72）：只讀模型檔，其餘什麼都不做
-    const own = await listFiles(id);
-    if (override && !own.includes(override.file)) own.push(override.file);
-    return Promise.all(own.map(async (f): Promise<Source> => [f, override?.file === f ? override.content : await fs.readFile(path.join(dir, "model", f), "utf8")]));
-  }
+  await readProject(id); // 專案不存在就到此為止，不要在下面替它建出空資料夾
 // 元模型庫以工具內的版本為準；專案內的副本（給 Claude 與離線閱讀用）不同時就更新，隨下一次儲存提交
   const lib = await fs.readFile(LIBRARY, "utf8");
   const copy = path.join(dir, "lib", "JRI.sysml");
@@ -383,19 +326,17 @@ export async function sources(id: string, override?: { file: string; content: st
 }
 
 export async function analyzeProject(id: string, override?: { file: string; content: string }): Promise<Analysis> {
-  return analyze(await sources(id, override), (await readProject(id)).pristine ? [] : await listShared());
+  return analyze(await sources(id, override), await listShared());
 }
 
 /** 儲存前先解析；有錯誤就不寫入，回傳診斷讓使用者修正。 */
 export async function saveFile(id: string, file: string, content: string, author: string, message: string): Promise<{ saved: boolean; analysis: Analysis; commit?: string }> {
-  if (SHARED_FILE.test(file) || file === "JRI.sysml") throw new UserError("檔名不合法。");
-  const target = await modelFile(id, file);
+  if (!FILE.test(file) || SHARED_FILE.test(file) || file === "JRI.sysml") throw new UserError("檔名不合法。");
   content = upgradeText(content); // 手寫的舊寫法照樣收，存成標準庫的寫法
   const analysis = await analyzeProject(id, { file, content });
   if (!analysis.ok) return { saved: false, analysis };
   const dir = dirOf(id);
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, content, "utf8");
+  await fs.writeFile(path.join(dir, "model", file), content, "utf8");
   const sha = await commit(dir, author, message || `更新 ${file}`);
   return { saved: true, analysis, commit: sha };
 }
@@ -454,8 +395,7 @@ export async function remapIds(id: string, pairs: [string, string][], qnames: [s
   for (const [d, nodes] of Object.entries(layout)) nextLayout[diagram(d)] = Object.fromEntries(Object.entries(nodes).map(([n, p]) => [node(n), p]));
   await fs.writeFile(path.join(dirOf(id), "layout.json"), JSON.stringify(nextLayout, null, 1) + "\n", "utf8");
   const dg = await readDiagrams(id);
-  const next: Diagrams = { custom: dg.custom.map((c) => ({ ...c, members: c.members.map(node) })), notes: Object.fromEntries(Object.entries(dg.notes).map(([d, list]) => [diagram(d), list])),
-    ...(dg.views ? { views: Object.fromEntries(Object.entries(dg.views).map(([v, list]) => [v, list.map(node)])) } : {}) };
+  const next: Diagrams = { custom: dg.custom.map((c) => ({ ...c, members: c.members.map(node) })), notes: Object.fromEntries(Object.entries(dg.notes).map(([d, list]) => [diagram(d), list])) };
   await fs.writeFile(path.join(dirOf(id), "diagrams.json"), JSON.stringify(next, null, 1) + "\n", "utf8");
 }
 
@@ -481,8 +421,7 @@ export async function writeLayout(id: string, layout: Layout): Promise<void> {
 
 /** 自訂圖與圖上的標註。自訂圖只記錄「放了哪些模型項目」；標註（註解、外框、文字）只是說明，不進模型。 */
 export interface Annotation { id: string; type: "note" | "frame" | "text"; x: number; y: number; w: number; h: number; text: string }
-/** views（P2）：分析圖（view:<登記的 id>）放了哪些模型項目，和自訂圖的 members 相同 */
-export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]>; views?: Record<string, string[]> }
+export interface Diagrams { custom: { id: string; title: string; members: string[] }[]; notes: Record<string, Annotation[]> }
 
 export async function readDiagrams(id: string): Promise<Diagrams> {
   const raw = await fs.readFile(path.join(dirOf(id), "diagrams.json"), "utf8").catch(() => "{}");
@@ -490,7 +429,7 @@ export async function readDiagrams(id: string): Promise<Diagrams> {
 }
 
 function cleanDiagrams(input: unknown): Diagrams {
-  const src = (input ?? {}) as { custom?: unknown; notes?: unknown; views?: unknown };
+  const src = (input ?? {}) as { custom?: unknown; notes?: unknown };
   const str = (v: unknown, max: number) => String(v ?? "").slice(0, max);
   const num = (v: unknown, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(Number(v) || 0)));
   const out: Diagrams = { custom: [], notes: {} };
@@ -515,14 +454,6 @@ function cleanDiagrams(input: unknown): Diagrams {
         clean.push({ id: nid, type: n.type, x: num(n.x, -100000, 100000), y: num(n.y, -100000, 100000), w: num(n.w, 48, 4000), h: num(n.h, 24, 4000), text: str(n.text, 500) });
       }
       if (clean.length > 0) out.notes[diagram] = clean;
-    }
-  }
-  // 分析圖（P2）的成員：沒有任何成員的不存，舊的資料原封不動
-  if (src.views && typeof src.views === "object") {
-    for (const [vid, list] of Object.entries(src.views as Record<string, unknown>).slice(0, 50)) {
-      if (!/^view:[A-Za-z0-9_-]{1,40}$/.test(vid) || !Array.isArray(list)) continue;
-      const members = [...new Set<string>(list.filter((m: unknown): m is string => typeof m === "string" && m.length <= 400))].slice(0, 500);
-      if (members.length) (out.views ??= {})[vid] = members;
     }
   }
   return out;
@@ -612,11 +543,7 @@ export async function stepHistory(id: string, author: string, step: -1 | 1): Pro
   await writeLayout(id, layout);
   const ids = new Set(a.elements.map((e) => e.id));
   const was = new Map((await old<Partial<Diagrams>>("diagrams.json", {})).custom?.map((c) => [c.id, c.members ?? []]) ?? []);
-  // 分析圖（P2）的成員也一樣補回來
-  const wasViews = (await old<Partial<Diagrams>>("diagrams.json", {})).views ?? {};
-  const views = { ...(before.diagrams.views ?? {}) };
-  for (const [v, list] of Object.entries(wasViews)) if (Array.isArray(list)) { const cur = views[v] ?? []; const add = list.filter((m) => ids.has(m) && !cur.includes(m)); if (add.length) views[v] = [...cur, ...add]; }
-  await writeDiagrams(id, { ...before.diagrams, custom: before.diagrams.custom.map((c) => ({ ...c, members: [...c.members, ...(was.get(c.id) ?? []).filter((m) => ids.has(m) && !c.members.includes(m))] })), views });
+  await writeDiagrams(id, { ...before.diagrams, custom: before.diagrams.custom.map((c) => ({ ...c, members: [...c.members, ...(was.get(c.id) ?? []).filter((m) => ids.has(m) && !c.members.includes(m))] })) });
   await commit(dir, author, `${step < 0 ? "復原" : "重做"}：${subject}`.slice(0, 200));
   await fs.writeFile(await histFile(dir), JSON.stringify({ tip: await lastModelCommit(dir), snaps: h.snaps, pos: to }), "utf8");
 }
