@@ -118,6 +118,8 @@ app.get("/api/me", wrap(async (req, res) => {
 const admin = auth.need(auth.can.admin, "只有總工程師以上或管理員可以操作。");
 app.get("/api/admin/members", admin, wrap(async (_req, res) => res.json({ members: await auth.listMembers(), ranks: auth.RANKS.map((r) => ({ id: r, zh: auth.RANK_ZH[r] })) })));
 app.post("/api/admin/members", admin, wrap(async (req, res) => res.json({ members: await auth.saveMember(req.body ?? {}) })));
+// 批次加入成員（F-20a）：dryRun 只回傳每一行的結果，不寫入
+app.post("/api/admin/members/batch", admin, wrap(async (req, res) => res.json(await auth.importMembers(String(req.body?.text ?? ""), String(req.body?.rank ?? ""), req.body?.dryRun === false))));
 app.post("/api/admin/members/delete", admin, wrap(async (req, res) => res.json({ members: await auth.removeMember(String(req.body?.email || req.body?.login || "")) })));
 app.get("/api/admin/requests", admin, wrap(async (_req, res) => res.json({ requests: await auth.listRequests() })));
 app.post("/api/admin/requests/delete", admin, wrap(async (req, res) => res.json({ requests: await auth.dropRequest(String(req.body?.email ?? "")) })));
