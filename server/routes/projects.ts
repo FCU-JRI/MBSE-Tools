@@ -39,6 +39,13 @@ export function mount(app: Express): void {
 
   app.get("/api/projects/:id", wrap(async (req, res) => res.json(await view(pid(req)))));
 
+  // 專案設定：名稱、類型、節點。代號（儲存庫名稱）不能改。
+  app.patch("/api/projects/:id", auth.need(auth.can.confirm, "修改專案設定需要責任工程師以上的權限。"), wrap(async (req, res) => {
+    const b = req.body ?? {};
+    await store.updateProject(pid(req), { name: b.name, kind: b.kind, gates: b.gates, author: author(req) });
+    res.json(await view(pid(req)));
+  }));
+
   app.get("/api/projects/:id/files", wrap(async (req, res) => res.json(await store.listFiles(pid(req)))));
 
   app.get("/api/projects/:id/files/:file", wrap(async (req, res) => {

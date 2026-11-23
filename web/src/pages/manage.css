@@ -7,3 +7,32 @@
 .path-step.cur .path-dot { border-color: var(--ink); border-width: var(--stroke-bold); top: -6px; }
 .path-step .meter { flex: none; margin: var(--space-1) 0; }
 .manage-gates { max-width: 40rem; }
+
+/* 指標 */
+.mg-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6); padding: var(--space-4) 0 var(--space-6); }
+.mg-metric { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; border-top: var(--stroke-hair) solid var(--line); padding-top: var(--space-3); }
+.mg-big { font-family: var(--font-grotesk); font-size: 28px; font-weight: 700; line-height: 1.15; }
+.mg-big.bad, .caption.bad, .mg-cost-table tr.over td { color: var(--danger); }
+@media (max-width: 760px) { .mg-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* 審查節點卡 */
+.mg-cards { display: flex; gap: var(--space-4); overflow-x: auto; padding-bottom: var(--space-3); }
+.mg-card { flex: 0 0 200px; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: var(--stroke-hair) solid var(--line); min-width: 0; }
+.mg-card.ok { border-color: var(--ink); }
+.mg-card.cur { border-color: var(--line-strong); box-shadow: var(--glow-ink); }
+.mg-card-main { display: flex; flex-direction: column; gap: var(--space-1); align-items: flex-start; text-align: left; border: 0; background: none; padding: 0; cursor: pointer; color: inherit; font: inherit; min-width: 0; width: 100%; }
+.mg-card-main[aria-expanded="true"] .heading { text-decoration: underline; }
+.mg-card .meter { align-self: stretch; flex: none; }
+.mg-detail { margin-top: var(--space-4); border-top: var(--stroke-hair) solid var(--line); }
+
+/* 成本圓環 */
+.mg-cost { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--space-8); align-items: center; margin-bottom: var(--space-4); }
+.mg-ring { width: 240px; height: 240px; }
+.mg-seg { cursor: pointer; transition: opacity 0.15s; }
+.mg-seg:focus-visible { outline: none; stroke-width: 28; }
+.mg-cost-table tr.total td { border-top: var(--stroke-hair) solid var(--line-strong); font-weight: 700; }
+@media (max-width: 760px) { .mg-cost { grid-template-columns: 1fr; justify-items: center; } }
+
+/* 專案設定 */
+.mg-gate-pick { border: 0; padding: 0; margin: var(--space-3) 0; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); }
+.mg-gate-pick legend { width: 100%; margin-bottom: var(--space-2); }
