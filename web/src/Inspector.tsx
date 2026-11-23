@@ -233,6 +233,14 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
         <p className="caption">{meta.relations[relKind]?.help}</p>
         <div><button className="tbtn primary" disabled={!relTo || busy} onClick={async () => { if (await call(() => api(`/projects/${pid}/relations`, "POST", { kind: relKind, from: el.id, to: relTo }))) setRelTo(""); }}>加入關係</button></div>
       </div>
+
+      {/* 新增：右欄最下方一顆按鈕，按了才出現表單 */}
+      <div className="section inspector-new">
+        <div className="tbtn-row">
+          <button className="tbtn primary" onClick={() => setSel({ type: "new", category: el.category ?? "SystemRequirement", parentId: null })}>＋ 新增{cat?.zh ?? ""}</button>
+          {["PartDefinition", "ActionUsage", "StateUsage"].includes(el.kind) && <button className="tbtn" onClick={() => setSel({ type: "new", category: el.category ?? "SystemRequirement", parentId: el.id })}>＋ 在「{el.name}」底下新增</button>}
+        </div>
+      </div>
     </>
   );
 }

@@ -19,6 +19,8 @@ export function mount(app: Express): void {
     await store.writeLayout(pid(req), all);
     res.json({ saved: true });
   }));
+  // 分析圖的骨架：這個專案有哪幾張分析圖（舊專案回傳 views: null）
+  app.get("/api/projects/:id/analysis-views", wrap(async (req, res) => { await store.readProject(pid(req)); res.json(await store.readSkeleton(pid(req))); }));
   app.get("/api/projects/:id/diagrams", wrap(async (req, res) => res.json(await store.readDiagrams(pid(req)))));
   app.put("/api/projects/:id/diagrams", wrap(async (req, res) => res.json(await store.writeDiagrams(pid(req), req.body?.diagrams))));
 }
