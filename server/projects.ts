@@ -266,6 +266,35 @@ export async function createProject(input: { id: string; name: string; kind: "an
   return project;
 }
 
+/** 改專案名稱、類型、節點。代號是儲存庫名稱，不能改。已有簽核紀錄的節點不能移除（紀錄不刪）。 */
+export async function updateProject(ref: string, input: { name?: unknown; kind?: unknown; gates?: unknown; author: string }): Promise<Project> {
+  const p = await readProject(ref);
+  const name = input.name === undefined ? p.name : String(input.name).trim().slice(0, 80);
+  if (!name) throw new UserError("請填專案名稱。");
+  const kind = input.kind === undefined ? p.kind : input.kind;
+  if (kind !== "annual" && kind !== "small") throw new UserError("專案類型只能是年度專案或小型專案。");
+  const all = GATES.map((g) => g.id);
+  let gates: string[];
+  if (kind === "annual") gates = all;
+  else {
+    const want = input.gates === undefined ? p.gates : input.gates;
+    if (!Array.isArray(want)) throw new UserError("節點格式不正確。");
+    const bad = want.find((g) => !all.includes(String(g)));
+    if (bad !== undefined) throw new UserError(`沒有「${String(bad)}」這個節點。`);
+    gates = all.filter((g) => want.includes(g));
+  }
+  if (gates.length === 0) throw new UserError("至少要保留一個節點。");
+  const dropped = p.gates.filter((g) => !gates.includes(g));
+  const locked = dropped.filter((g) => p.signoffs.some((s) => s.gate === g));
+  if (locked.length > 0) throw new UserError(`節點 ${locked.map((g) => g.toUpperCase()).join("、")} 已有簽核紀錄，不能移除。`);
+  if (name === p.name && kind === p.kind && gates.join() === p.gates.join()) return p;
+  const next: Project = { ...p, name, kind, gates };
+  await writeProject(ref, next);
+  const parts = [name !== p.name && `名稱 → ${name}`, kind !== p.kind && `類型 → ${kind === "annual" ? "年度專案" : "小型專案"}`, gates.join() !== p.gates.join() && `節點 → ${gates.join("、")}`].filter(Boolean);
+  await commit(dirOf(ref), input.author, `更新專案設定：${parts.join("；")}`);
+  return next;
+}
+
 export async function listFiles(id: string): Promise<string[]> {
   const names = await fs.readdir(path.join(dirOf(id), "model"));
   return names.filter((n) => n.endsWith(".sysml") && !SHARED_FILE.test(n) && n !== "JRI.sysml").sort();

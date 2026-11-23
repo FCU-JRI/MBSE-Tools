@@ -3,11 +3,12 @@ import type { FormEvent } from "react";
 import { api } from "./api.ts";
 import type { Me, Meta, View } from "./api.ts";
 import { listOf } from "./model.ts";
+import { CostRing } from "./pages/manage/CostRing.tsx";
 
-interface Task { id: string; title: string; priority: string; re: string; start: string; end: string; deps: string[]; gate: string; links: string[]; subsystem: string; done: boolean }
-interface Cost { id: string; subsystem: string; item: string; planned: number; actual: number; status: string; note: string }
-interface Person { id: string; name: string; rank: string; subsystem: string; duty: string }
-interface Pm { tasks: Task[]; costs: Cost[]; people: Person[]; priorities?: { id: string; zh: string; level: number }[]; myLevel?: number }
+export interface Task { id: string; title: string; priority: string; re: string; start: string; end: string; deps: string[]; gate: string; links: string[]; subsystem: string; done: boolean }
+export interface Cost { id: string; subsystem: string; item: string; planned: number; actual: number; status: string; note: string }
+export interface Person { id: string; name: string; rank: string; subsystem: string; duty: string }
+export interface Pm { tasks: Task[]; costs: Cost[]; people: Person[]; priorities?: { id: string; zh: string; level: number }[]; myLevel?: number }
 
 const today = () => new Date().toISOString().slice(0, 10);
 const day = (s: string) => Math.round(new Date(s + "T00:00:00Z").getTime() / 86400_000);
@@ -53,13 +54,14 @@ function Gantt({ tasks, onPick }: { tasks: Task[]; onPick: (t: Task) => void }) 
 }
 
 /** 時程、成本、人員。優先級的設定權限依 AEAS 職級。 */
-export function PlanView({ view, meta, user }: { view: View; meta: Meta; user: Me }) {
+export function PlanView({ view, meta, user, onPm }: { view: View; meta: Meta; user: Me; onPm?: (pm: Pm) => void }) {
   const id = view.project.id;
   const [pm, setPm] = useState<Pm | null>(null);
   const [extra, setExtra] = useState<{ priorities: { id: string; zh: string; level: number }[]; myLevel: number }>({ priorities: [], myLevel: 0 });
   const [task, setTask] = useState<Task>(blankTask);
   const [cost, setCost] = useState<Cost>(blankCost);
   const [person, setPerson] = useState<Person>(blankPerson);
+  const [subFilter, setSubFilter] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const ro = !user.caps.edit;
   const subsystems = listOf(view.analysis.elements, "Subsystem").map((s) => s.name);
@@ -69,9 +71,10 @@ export function PlanView({ view, meta, user }: { view: View; meta: Meta; user: M
   const save = (kind: "tasks" | "costs" | "people", body: object, reset: () => void) => (ev: FormEvent) => { ev.preventDefault(); run(async () => { setPm(await api<Pm>(`/projects/${id}/pm/${kind}`, "POST", { ...body })); reset(); }); };
   const del = (kind: "tasks" | "costs" | "people", itemId: string, reset: () => void) => run(async () => { setPm(await api<Pm>(`/projects/${id}/pm/${kind}/delete`, "POST", { id: itemId })); reset(); });
 
+  useEffect(() => { if (pm) onPm?.(pm); }, [pm]);
   if (!pm) return <p className="label">讀取中</p>;
   const planned = pm.costs.reduce((s, c) => s + c.planned, 0), actual = pm.costs.reduce((s, c) => s + c.actual, 0);
-  const groups = [...new Set(pm.costs.map((c) => c.subsystem || "未分類"))];
+  const shownCosts = subFilter ? pm.costs.filter((c) => (c.subsystem || "未分類") === subFilter) : pm.costs;
   const sub = (v: string, on: (v: string) => void) => (
     <label className="field"><span className="label">次系統</span><input className="input" list="jri-subsystems" value={v} onChange={(e) => on(e.target.value)} /></label>
   );
@@ -129,45 +132,6 @@ export function PlanView({ view, meta, user }: { view: View; meta: Meta; user: M
       </section>
 
       <section className="section">
-        <div className="section-head"><h2 className="section-title">成本</h2><span className="label">實支 {nt(actual)} / 預算 {nt(planned)}</span></div>
-        {groups.map((g) => {
-          const items = pm.costs.filter((c) => (c.subsystem || "未分類") === g);
-          const p = items.reduce((s, c) => s + c.planned, 0), a = items.reduce((s, c) => s + c.actual, 0);
-          return (
-            <div key={g} style={{ display: "grid", gridTemplateColumns: "10rem 1fr 12rem", gap: 12, alignItems: "center", minHeight: 28 }}>
-              <span className="body">{g}</span>
-              <span className="meter"><span style={{ width: `${p ? Math.min(100, (a / p) * 100) : 0}%` }} /></span>
-              <span className="data" style={{ textAlign: "right" }}>{nt(a)} / {nt(p)} {a > p && <span className="tag danger">OVER</span>}</span>
-            </div>
-          );
-        })}
-        {pm.costs.length > 0 && (
-          <table style={{ margin: "12px 0 16px" }}>
-            <thead><tr><th>編號</th><th>次系統</th><th>項目</th><th style={{ textAlign: "right" }}>預算</th><th style={{ textAlign: "right" }}>實支</th><th>狀態</th><th>備註</th></tr></thead>
-            <tbody>{pm.costs.map((c) => (
-              <tr key={c.id} className="rowbtn" aria-selected={cost.id === c.id} onClick={() => setCost(c)} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") setCost(c); }}>
-                <td className="id">{c.id}</td><td>{c.subsystem}</td><td>{c.item}</td><td className="id" style={{ textAlign: "right" }}>{nt(c.planned)}</td><td className="id" style={{ textAlign: "right" }}>{nt(c.actual)}</td><td>{c.status}</td><td>{c.note}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        )}
-        {!ro && (
-          <form onSubmit={save("costs", cost, () => setCost(blankCost()))}>
-            <div className="row">
-              <label className="field" style={{ flex: 3 }}><span className="label">{cost.id ? `修改項目 ${cost.id}` : "新增採購或支出項目"}</span><input className="input" required value={cost.item} onChange={(e) => setCost({ ...cost, item: e.target.value })} /></label>
-              {sub(cost.subsystem, (v) => setCost({ ...cost, subsystem: v }))}
-              <label className="field"><span className="label">預算（元）</span><input className="input" inputMode="numeric" value={cost.planned || ""} onChange={(e) => setCost({ ...cost, planned: Number(e.target.value) || 0 })} /></label>
-              <label className="field"><span className="label">實支（元）</span><input className="input" inputMode="numeric" value={cost.actual || ""} onChange={(e) => setCost({ ...cost, actual: Number(e.target.value) || 0 })} /></label>
-              <label className="field"><span className="label">狀態</span><select className="input" value={cost.status} onChange={(e) => setCost({ ...cost, status: e.target.value })}>{["規劃中", "已請購", "已下單", "已到貨", "已核銷"].map((s) => <option key={s}>{s}</option>)}</select></label>
-            </div>
-            <div className="row"><label className="field"><span className="label">備註</span><input className="input" value={cost.note} onChange={(e) => setCost({ ...cost, note: e.target.value })} /></label></div>
-            <div className="tbtn-row"><button className="tbtn primary">{cost.id ? "更新項目" : "新增項目"}</button>
-              {cost.id && <><button type="button" className="tbtn" onClick={() => setCost(blankCost())}>取消</button><button type="button" className="tbtn" onClick={() => del("costs", cost.id, () => setCost(blankCost()))}>刪除</button></>}</div>
-          </form>
-        )}
-      </section>
-
-      <section className="section">
         <div className="section-head"><h2 className="section-title">人員</h2><span className="label">{pm.people.length}</span></div>
         {pm.people.length > 0 && (
           <table style={{ marginBottom: 16 }}>
@@ -195,6 +159,36 @@ export function PlanView({ view, meta, user }: { view: View; meta: Meta; user: M
           </form>
         )}
       </section>
+      <section className="section">
+        <div className="section-head"><h2 className="section-title">成本</h2><span className="label">實支 {nt(actual)} / 預算 {nt(planned)}</span></div>
+        <CostRing costs={pm.costs} selected={subFilter} onSelect={setSubFilter} />
+        {subFilter && <p className="caption" style={{ margin: "8px 0 0" }}>只看「{subFilter}」的明細　<button type="button" className="tbtn" onClick={() => setSubFilter(null)}>顯示全部</button></p>}
+        {shownCosts.length > 0 && (
+          <table style={{ margin: "12px 0 16px" }}>
+            <thead><tr><th>編號</th><th>次系統</th><th>項目</th><th style={{ textAlign: "right" }}>預算</th><th style={{ textAlign: "right" }}>實支</th><th>狀態</th><th>備註</th></tr></thead>
+            <tbody>{shownCosts.map((c) => (
+              <tr key={c.id} className="rowbtn" aria-selected={cost.id === c.id} onClick={() => setCost(c)} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") setCost(c); }}>
+                <td className="id">{c.id}</td><td>{c.subsystem}</td><td>{c.item}</td><td className="id" style={{ textAlign: "right" }}>{nt(c.planned)}</td><td className="id" style={{ textAlign: "right" }}>{nt(c.actual)}</td><td>{c.status}</td><td>{c.note}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+        {!ro && (
+          <form onSubmit={save("costs", cost, () => setCost(blankCost()))}>
+            <div className="row">
+              <label className="field" style={{ flex: 3 }}><span className="label">{cost.id ? `修改項目 ${cost.id}` : "新增採購或支出項目"}</span><input className="input" required value={cost.item} onChange={(e) => setCost({ ...cost, item: e.target.value })} /></label>
+              {sub(cost.subsystem, (v) => setCost({ ...cost, subsystem: v }))}
+              <label className="field"><span className="label">預算（元）</span><input className="input" inputMode="numeric" value={cost.planned || ""} onChange={(e) => setCost({ ...cost, planned: Number(e.target.value) || 0 })} /></label>
+              <label className="field"><span className="label">實支（元）</span><input className="input" inputMode="numeric" value={cost.actual || ""} onChange={(e) => setCost({ ...cost, actual: Number(e.target.value) || 0 })} /></label>
+              <label className="field"><span className="label">狀態</span><select className="input" value={cost.status} onChange={(e) => setCost({ ...cost, status: e.target.value })}>{["規劃中", "已請購", "已下單", "已到貨", "已核銷"].map((s) => <option key={s}>{s}</option>)}</select></label>
+            </div>
+            <div className="row"><label className="field"><span className="label">備註</span><input className="input" value={cost.note} onChange={(e) => setCost({ ...cost, note: e.target.value })} /></label></div>
+            <div className="tbtn-row"><button className="tbtn primary">{cost.id ? "更新項目" : "新增項目"}</button>
+              {cost.id && <><button type="button" className="tbtn" onClick={() => setCost(blankCost())}>取消</button><button type="button" className="tbtn" onClick={() => del("costs", cost.id, () => setCost(blankCost()))}>刪除</button></>}</div>
+          </form>
+        )}
+      </section>
+
     </>
   );
 }

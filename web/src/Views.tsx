@@ -67,7 +67,7 @@ export function TraceView({ view, selectedId, onSelect }: { view: View; selected
   );
 }
 
-export function GatesView({ user, view, gateId, setView, onSelect }: { user: Me; view: View; gateId: string; setView: (v: View) => void; onSelect: (id: string) => void }) {
+export function GatesView({ user, view, gateId, setView, onSelect, nested }: { user: Me; view: View; gateId: string; setView: (v: View) => void; onSelect: (id: string) => void; nested?: boolean }) {
   const gate = view.gates.find((g) => g.id === gateId) ?? view.gates[0];
   const [error, setError] = useState("");
   if (!gate) return <p className="body">這個專案沒有設定節點。</p>;
@@ -78,7 +78,7 @@ export function GatesView({ user, view, gateId, setView, onSelect }: { user: Me;
   return (
     <>
       <section className="section">
-        <div className="section-head"><h1 className="section-title">{gate.zh}</h1><span className="label">{gate.en} · {gate.done} / {gate.total}</span></div>
+        <div className="section-head">{nested ? <h3 className="section-title">{gate.zh}</h3> : <h1 className="section-title">{gate.zh}</h1>}<span className="label">{gate.en} · {gate.done} / {gate.total}</span></div>
         <p className="body">{gate.purpose}</p>
         <div className="tbtn-row" style={{ margin: "8px 0" }}>
           <span className="label">審查報告</span>
