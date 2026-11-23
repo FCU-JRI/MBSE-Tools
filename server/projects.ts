@@ -260,10 +260,27 @@ export async function createProject(input: { id: string; name: string; kind: "an
   await fs.copyFile(path.join(TEMPLATE_DIR, "CLAUDE.md"), path.join(dir, "CLAUDE.md")).catch(() => {});
   const project: Project = { id: input.id, name: input.name.trim(), kind: input.kind, template, createdAt: new Date().toISOString(), gates, manual: {}, signoffs: [] };
   await writeProject(input.id, project);
+  await writeSkeleton(dir);
   await git(dir, "init", "-b", "main");
   await repoConfig(dir);
   await commit(dir, input.author, `建立專案：${project.name}`);
   return project;
+}
+
+/**
+ * 分析圖的骨架（METHOD.md 第 3 節的 10 張圖）：新專案建立時寫入，記錄這個專案有哪幾張分析圖。
+ * 圖裡放了什麼仍存在 diagrams.json（第一次在圖上修改時才寫入）。舊專案沒有這個檔案，畫面照全部 10 張顯示，不會替它補寫。
+ */
+export const ANALYSIS_VIEWS = ["stakeholders", "mission", "profile", "allocation", "schematic", "interfaces", "subreq", "verification", "trade", "risk"];
+async function writeSkeleton(dir: string): Promise<void> {
+  await fs.writeFile(path.join(dir, "analysis.json"), JSON.stringify({ views: ANALYSIS_VIEWS }, null, 1) + "\n", "utf8");
+}
+export async function readSkeleton(id: string): Promise<{ views: string[] | null }> {
+  const raw = await fs.readFile(path.join(dirOf(id), "analysis.json"), "utf8").catch(() => "");
+  try {
+    const v = JSON.parse(raw)?.views;
+    return { views: Array.isArray(v) ? v.filter((x: unknown) => typeof x === "string" && ANALYSIS_VIEWS.includes(x)) : null };
+  } catch { return { views: null }; }
 }
 
 export async function listFiles(id: string): Promise<string[]> {
