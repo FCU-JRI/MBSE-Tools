@@ -4,13 +4,19 @@ import { TableView } from "../Views.tsx";
 import { Chain, Docs, Fmea, ReqMatrix } from "../Deliverables.tsx";
 import { listOf } from "../model.ts";
 import { Columns, SelectionPane } from "../layout.tsx";
+import { Formulas } from "./tables/Formulas.tsx";
+import { Params, VerifyMatrix } from "./tables/Derived.tsx";
 import type { PageProps, TableGroup } from "../workspace.ts";
 import "./tables.css";
 
-/** 左欄的分組。模型元素清單依支柱列出各類別。 */
+/** 左欄的分組。每一項都有模型資料可列；沒有資料來源的表（風險登錄、N²、方案比較、發射前檢查表）不放空殼。
+ *  作業與風險裡的類別清單直接連到該類別的表。模型元素清單依支柱列出全部類別。 */
 const GROUPS: { zh: string; items: [TableGroup, string][] }[] = [
-  { zh: "需求與驗證", items: [["req", "需求矩陣"]] },
-  { zh: "風險", items: [["fmea", "FMEA 表"]] },
+  { zh: "需求與驗證", items: [["req", "需求矩陣"], ["verify", "驗證矩陣"]] },
+  { zh: "風險", items: [["fmea", "FMEA 表"], ["cat:SafetyFactor", "安全係數"], ["cat:Anomaly", "異常報告"]] },
+  { zh: "設計", items: [["params", "設計參數表"]] },
+  { zh: "作業", items: [["cat:SOP", "標準作業程序"], ["cat:QCRecord", "加工 QC 紀錄"], ["cat:RosterEntry", "名冊"]] },
+  { zh: "公式", items: [["formula", "constraint 與 calc"]] },
   { zh: "參考資料", items: [["docs", "來源文件"]] },
 ];
 
@@ -32,7 +38,7 @@ export function TablesPage(p: PageProps) {
         <div className="section" key={g.zh}>
           <div className="section-head"><h2 className="section-title">{g.zh}</h2></div>
           <ul className="tree">{g.items.map(([t, zh]) => (
-            <li key={t}><button className="tree-row" aria-current={table === t} onClick={() => setTable(t)}><span className="tn">{zh}</span>{t === "req" && <span className="tc">{listOf(els, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP").length}</span>}{t === "fmea" && <span className="tc">{listOf(els, "Risk").length}</span>}{t === "docs" && <span className="tc">{view.docs.length}</span>}</button></li>
+            <li key={t}><button className="tree-row" aria-current={table === t} onClick={() => setTable(t)}><span className="tn">{zh}</span>{t.startsWith("cat:") && <span className="tc">{listOf(els, t.slice(4)).length}</span>}{t === "verify" && <span className="tc">{listOf(els, "VerificationEvent", "ValidationEvent").length}</span>}{t === "req" && <span className="tc">{listOf(els, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP").length}</span>}{t === "fmea" && <span className="tc">{listOf(els, "Risk").length}</span>}{t === "docs" && <span className="tc">{view.docs.length}</span>}</button></li>
           ))}</ul>
         </div>
       ))}
@@ -52,12 +58,6 @@ export function TablesPage(p: PageProps) {
 
   return (
     <Columns left={left} right={p.sel ? <SelectionPane {...p} toModel /> : undefined}>
-      <div className="deliver-bar">
-        <span className="heading">{title}</span>
-        <span style={{ flex: 1 }} />
-        <a className={`tbtn ${view.analysis.ok ? "" : "disabled"}`} href={view.analysis.ok ? `/api/projects/${view.project.id}/export.xlsx` : undefined}>匯出 Excel</a>
-        <button className="tbtn" onClick={() => window.print()}>列印／PDF</button>
-      </div>
       <div className="center-scroll printable">
         <p className="print-title">{view.project.name}　{title}</p>
         {table === "req" && <>
@@ -67,7 +67,10 @@ export function TablesPage(p: PageProps) {
             <Chain {...tp} />
           </section>
         </>}
+        {table === "verify" && <VerifyMatrix {...tp} />}
         {table === "fmea" && <Fmea {...tp} />}
+        {table === "params" && <Params {...tp} />}
+        {table === "formula" && <Formulas view={view} selectedId={selectedId} onSelect={onSelect} />}
         {table === "docs" && <Docs {...tp} />}
         {catId && <TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={onSelect} />}
       </div>
