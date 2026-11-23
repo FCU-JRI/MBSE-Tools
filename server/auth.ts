@@ -168,6 +168,65 @@ export async function saveMember(m: Partial<Member> & { previous?: string }): Pr
   await dropRequest(email);
   return rest;
 }
+// ───────── 批次加入成員（F-20a）：管理員貼上名單，一次加入 ─────────
+/** 一行的處理結果。add：會加入；exists：已在名單，不改；error：格式不對，不加入。 */
+export interface BatchRow { line: number; text: string; status: "add" | "exists" | "error"; reason?: string; member?: Member }
+export const BATCH_LIMIT = 200;
+/** 批次加入不能給的職級：總工程師以上自動是管理員，要一個一個加，才不會貼錯一行就多一位管理員。 */
+const BATCH_MAX_LEVEL = 6;
+
+/** 職級可以寫代號（C-III）或中文（組員）；中文對到不只一個職級（組員是 C-III 與 C-II）就要寫代號。 */
+function rankOf(v: string): Rank | null {
+  const s = v.trim();
+  const byId = RANKS.find((r) => r.toLowerCase() === s.toLowerCase());
+  if (byId) return byId;
+  const byZh = RANKS.filter((r) => RANK_ZH[r] === s);
+  return byZh.length === 1 ? byZh[0] : null;
+}
+
+/**
+ * 解析貼上的名單，一行一位：email、姓名、職級、次系統、GitHub 帳號，用逗號或 Tab 分隔（試算表直接複製也行）。
+ * 只有 email 必填；職級空白時用 defaultRank，次系統之間用頓號或分號。已在名單的人不動，避免蓋掉原本的職級與權限。
+ * 批次加入的人一律不是管理員。apply 為 true 才寫入；有任何一行格式不對就整批不寫入。
+ */
+export async function importMembers(text: string, defaultRank: string, apply: boolean): Promise<{ rows: BatchRow[]; added: number; members: Member[] }> {
+  const fallback = rankOf(String(defaultRank ?? ""));
+  if (!fallback || LEVEL[fallback] > BATCH_MAX_LEVEL) throw new AuthError(400, "預設職級不正確，或高於批次加入允許的職級（營運長）。");
+  const lines = String(text ?? "").split(/\r?\n/).map((s, i) => ({ line: i + 1, text: s.trim() })).filter((l) => l.text && !l.text.startsWith("#"));
+  if (lines.length === 0) throw new AuthError(400, "名單是空的。");
+  if (lines.length > BATCH_LIMIT) throw new AuthError(400, `一次最多 ${BATCH_LIMIT} 行，這次有 ${lines.length} 行。`);
+  const all = await listMembers();
+  const seen = new Map<string, number>(), seenGithub = new Map<string, number>();
+  const rows: BatchRow[] = lines.map(({ line, text: raw }) => {
+    const f = raw.split(raw.includes("\t") ? "\t" : /[,，]/).map((s) => s.trim());
+    const [emailRaw = "", name = "", rankRaw = "", subs = "", githubRaw = ""] = f;
+    const email = norm(emailRaw), github = norm(githubRaw.replace(/^@/, "")) || undefined;
+    const bad = (reason: string): BatchRow => ({ line, text: raw, status: "error", reason });
+    if (f.length > 5) return bad("欄位太多（最多五欄：email、姓名、職級、次系統、GitHub 帳號）。");
+    if (!EMAIL.test(email)) return bad("email 格式不正確。");
+    if (seen.has(email)) return bad(`和第 ${seen.get(email)} 行的 email 重複。`);
+    seen.set(email, line);
+    const rank = rankRaw ? rankOf(rankRaw) : fallback;
+    if (!rank) return bad(`看不懂職級「${rankRaw}」，請寫代號，例如 C-III。`);
+    if (LEVEL[rank] > BATCH_MAX_LEVEL) return bad(`${RANK_ZH[rank]}（${rank}）會自動成為管理員，請在上面的表單一個一個加。`);
+    if (github && !GITHUB_LOGIN.test(github)) return bad("GitHub 帳號格式不正確。");
+    if (github && seenGithub.has(github)) return bad(`和第 ${seenGithub.get(github)} 行的 GitHub 帳號重複。`);
+    if (github) seenGithub.set(github, line);
+    if (all.some((x) => x.email === email)) return { line, text: raw, status: "exists" };
+    if (github && all.some((x) => x.github === github)) return bad(`GitHub 帳號 ${github} 已經屬於另一位成員。`);
+    const member: Member = { email, github, name: name.slice(0, 60) || email.split("@")[0], rank, subsystems: subs.split(/[、;；]/).map((s) => s.trim()).filter(Boolean), admin: false };
+    return { line, text: raw, status: "add", member };
+  });
+  const adds = rows.filter((r) => r.status === "add").map((r) => r.member as Member);
+  if (!apply || rows.some((r) => r.status === "error") || adds.length === 0) return { rows, added: 0, members: all };
+  const next = sortMembers([...all, ...adds]);
+  await writeJson(USERS_FILE, next);
+  const emails = new Set(adds.map((m) => m.email));
+  const reqs = await listRequests();
+  if (reqs.some((q) => emails.has(q.email))) await writeJson(REQUESTS_FILE, reqs.filter((q) => !emails.has(q.email)));
+  return { rows, added: adds.length, members: next };
+}
+
 /** 移除成員：key 是 email，舊格式則是 GitHub 帳號。 */
 export async function removeMember(key: string): Promise<Member[]> {
   const k = norm(key);

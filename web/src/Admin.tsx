@@ -5,6 +5,7 @@ import type { Project } from "./api.ts";
 
 interface Member { email: string; github?: string; name: string; rank: string; subsystems: string[]; admin: boolean; tailscale?: string }
 interface JoinRequest { email: string; name: string; requestedAt: string }
+interface BatchRow { line: number; text: string; status: "add" | "exists" | "error"; reason?: string; member?: Member }
 /** previous：修改前的主鍵（email，舊資料則是 GitHub 帳號），改 email 時用來換掉舊的那筆 */
 type MemberForm = Member & { previous?: string };
 interface Share { id: string; project: string; label: string; createdBy: string; createdAt: string; expiresAt: string }
@@ -24,6 +25,8 @@ export function Admin() {
   const [secret, setSecret] = useState("");
   const [googleSecret, setGoogleSecret] = useState("");
   const [form, setForm] = useState<MemberForm>(blank);
+  const [batch, setBatch] = useState({ text: "", rank: "C-II" });
+  const [preview, setPreview] = useState<BatchRow[] | null>(null);
   const [share, setShare] = useState({ project: "", label: "", days: "14" });
   const [link, setLink] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -54,6 +57,14 @@ export function Admin() {
     setMembers((await api<{ members: Member[] }>("/admin/members", "POST", { ...form })).members); setForm(blank);
     setRequests((await api<{ requests: JoinRequest[] }>("/admin/requests")).requests); // 核准後申請會自動消失
   }, "已儲存成員。"); };
+  // 批次加入：先預覽每一行的結果，確認後才寫入；有任何一行不對就整批不寫入
+  const previewBatch = (ev: FormEvent) => { ev.preventDefault(); run(async () => setPreview((await api<{ rows: BatchRow[] }>("/admin/members/batch", "POST", { ...batch, dryRun: true })).rows)); };
+  const applyBatch = () => run(async () => {
+    const r = await api<{ rows: BatchRow[]; added: number; members: Member[] }>("/admin/members/batch", "POST", { ...batch, dryRun: false });
+    setMembers(r.members);
+    if (r.added > 0) { setPreview(null); setBatch({ ...batch, text: "" }); setRequests((await api<{ requests: JoinRequest[] }>("/admin/requests")).requests); }
+    else setPreview(r.rows);
+  }, "已批次加入成員。");
   const dismissRequest = (email: string) => run(async () => setRequests((await api<{ requests: JoinRequest[] }>("/admin/requests/delete", "POST", { email })).requests));
   const makeShare = (ev: FormEvent) => {
     ev.preventDefault();
@@ -115,6 +126,35 @@ export function Admin() {
           <div className="tbtn-row"><label className="check"><input type="checkbox" checked={form.admin} onChange={(e) => setForm({ ...form, admin: e.target.checked })} /><span className="caption">管理員（可管理成員與連結）</span></label>
             <button className="tbtn primary">儲存成員</button></div>
         </form>
+
+        <h3 className="label" style={{ margin: "20px 0 8px" }}>批次加入</h3>
+        <p className="body muted" style={{ marginBottom: 8 }}>一行一位：email、姓名、職級、次系統、GitHub 帳號，用逗號或 Tab 分隔，可以直接從試算表複製。只有 email 必填；職級空白時用下面的預設職級，次系統之間用頓號。已在名單的人不會被改動。批次加入的人都不是管理員，總工程師以上的職級請用上面的表單一個一個加。</p>
+        <form onSubmit={previewBatch}>
+          <textarea className="input" rows={6} style={{ width: "100%", fontFamily: "var(--mono, monospace)" }} placeholder={"a@example.com, 王小明, C-III, 結構、航電\nb@example.com, 李小華"} value={batch.text} onChange={(e) => { setBatch({ ...batch, text: e.target.value }); setPreview(null); }} />
+          <div className="tbtn-row" style={{ marginTop: 8 }}>
+            <label className="field"><span className="label">預設職級</span><select className="input" value={batch.rank} onChange={(e) => { setBatch({ ...batch, rank: e.target.value }); setPreview(null); }}>{ranks.filter((r) => !["F-VIII", "R-VIII", "D-VII"].includes(r.id)).map((r) => <option key={r.id} value={r.id}>{r.zh} [{r.id}]</option>)}</select></label>
+            <button className="tbtn">預覽</button>
+          </div>
+        </form>
+        {preview && (() => {
+          const adds = preview.filter((r) => r.status === "add").length, errs = preview.filter((r) => r.status === "error").length;
+          return <>
+            <table style={{ margin: "12px 0" }}>
+              <thead><tr><th>行</th><th>結果</th><th>email</th><th>姓名</th><th>職級</th><th>次系統</th><th>GitHub</th></tr></thead>
+              <tbody>{preview.map((r) => (
+                <tr key={r.line}><td className="id">{r.line}</td>
+                  <td>{r.status === "add" ? "加入" : r.status === "exists" ? <span className="faint">已在名單，不改</span> : <span className="tag">{r.reason}</span>}</td>
+                  {r.member ? <><td className="id">{r.member.email}</td><td>{r.member.name}</td><td>{rankZh(r.member.rank)} <span className="faint">[{r.member.rank}]</span></td><td>{r.member.subsystems.join("、") || "—"}</td><td className="id">{r.member.github || "—"}</td></>
+                    : <td colSpan={5} className="id faint">{r.text}</td>}
+                </tr>))}</tbody>
+            </table>
+            <div className="tbtn-row">
+              {errs > 0 ? <span className="caption">有 {errs} 行要修正，修正後重新預覽才能加入。</span>
+                : adds > 0 ? <button className="tbtn primary" onClick={applyBatch}>加入 {adds} 位成員</button>
+                : <span className="caption">沒有要加入的人。</span>}
+            </div>
+          </>;
+        })()}
       </section>
 
       <section className="section">
