@@ -74,7 +74,7 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
         <section className="section">
           <div className="section-head"><h2 className="section-title">這個分支</h2><span className="label">{branch.name}</span></div>
           <p className="body" style={{ marginBottom: 8 }}>比 main 多 {branch.ahead} 筆提交，main 有 {branch.behind} 筆更新還沒進來。</p>
-          <p className="body muted" style={{ marginBottom: 12 }}>要把這個分支併入 main，請回到 main 的「版本」頁，由責任工程師以上審查合併。main 有更新時先合併進來，之後比較不會衝突。</p>
+          <p className="body muted" style={{ marginBottom: 12 }}>要把這個分支併入 main，請回到 main，按右上的版本按鈕，由責任工程師以上審查合併。main 有更新時先合併進來，之後比較不會衝突。</p>
           <div className="tbtn-row">
             {user.caps.edit && <button className="tbtn primary" disabled={branch.behind === 0} onClick={update}>合併 main 的更新</button>}
             <button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main</button>

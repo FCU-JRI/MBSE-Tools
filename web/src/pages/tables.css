@@ -1,0 +1,5 @@
+/* 表格：上方工具列與各表（原「產出物」） */
+.deliver-bar { display: flex; align-items: center; gap: var(--space-6); padding: 0 var(--space-6); border-bottom: var(--stroke-hair) solid var(--line); flex-wrap: wrap; }
+.deliver-bar .seg button { height: 44px; }
+.fmea-top { display: flex; gap: var(--space-8); align-items: flex-start; margin-bottom: var(--space-4); flex-wrap: wrap; }
+.fmea-top > .stack { max-width: 34rem; }

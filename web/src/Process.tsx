@@ -18,7 +18,7 @@ export function ProcessView({ view, meta, user, onChanged, onOpen }: Props) {
   // 完成一步後自動前進到下一步
   useEffect(() => { if (current && steps.find((s) => s.id === stepId)?.state === "done" && stepId === prevOf(steps, current.id)) setStepId(current.id); }, [current, stepId, steps]);
   const step = steps.find((s) => s.id === stepId) ?? steps[0];
-  if (!step) return <p className="body">模型有錯誤，請先到「原始碼」修正。</p>;
+  if (!step) return <p className="body">模型有錯誤，請先到模型頁的「原始碼」修正。</p>;
   const done = steps.filter((s) => s.state === "done").length;
   const guided = view.project.template === "guided";
 

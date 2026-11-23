@@ -171,7 +171,7 @@ export const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 export interface AutoRepo { enabled: boolean; owner: string; visibility: "public" | "private" }
 const errText = (e: unknown) => String((e as { stderr?: string }).stderr || (e as Error).message).split("\n").map((s) => s.trim()).filter(Boolean).slice(-2).join(" ").slice(0, 300);
 
-/** 在 GitHub 建立 擁有者/專案代號 並設為推送目標。失敗不丟例外，錯誤記在同步狀態，「版本」頁會顯示。 */
+/** 在 GitHub 建立 擁有者/專案代號 並設為推送目標。失敗不丟例外，錯誤記在同步狀態，版本畫面會顯示。 */
 export async function createRepo(id: string, description: string, opt: AutoRepo): Promise<SyncState> {
   const dir = dirOf(mainOnly(id, "儲存庫設定"));
   await readProject(id);

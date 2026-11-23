@@ -1,22 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, baseOf, getAuthor, setAuthor } from "./api.ts";
-import type { Diagrams, Me, Meta, MeResponse, Project, View } from "./api.ts";
+import type { Me, Meta, MeResponse, View } from "./api.ts";
 import { Admin } from "./Admin.tsx";
-import { diagramsOf, label, listOf } from "./model.ts";
-import type { DiagramDef } from "./model.ts";
-import { Diagram } from "./Diagram.tsx";
-import { Inspector } from "./Inspector.tsx";
 import type { Selection } from "./Inspector.tsx";
-import { GatesView, TableView } from "./Views.tsx";
-import { Dashboard } from "./Dashboard.tsx";
-import { ProcessView } from "./Process.tsx";
-import { Deliverables } from "./Deliverables.tsx";
-import type { DeliverTab } from "./Deliverables.tsx";
-import { VersionsView } from "./Versions.tsx";
-import { PlanView } from "./Plan.tsx";
-import { SimView } from "./Sim.tsx";
-import { SourceTab } from "./SourceTab.tsx";
+import { PAGES } from "./workspace.ts";
+import type { Page, PageProps, Spot, TableGroup } from "./workspace.ts";
+import { Login, Welcome } from "./pages/Login.tsx";
+import { ProjectsPage } from "./pages/Projects.tsx";
+import { HomePage } from "./pages/Home.tsx";
+import { ProcessPage } from "./pages/Process.tsx";
+import { ModelPage } from "./pages/Model.tsx";
+import { TablesPage } from "./pages/Tables.tsx";
+import { AnalysisPage } from "./pages/Analysis.tsx";
+import { ManagePage } from "./pages/Manage.tsx";
+import { VersionsPage } from "./pages/Versions.tsx";
+
+// 這個檔只負責導覽：登入、專案列表與專案工作區之間的切換，以及工作區上方的分頁列。各頁內容在 pages/*.tsx。
 
 export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -56,7 +55,7 @@ export function App() {
         {user.caps.admin && <nav className="seg" role="tablist"><button role="tab" aria-selected={page === "home"} onClick={() => setPage("home")}>專案</button><button role="tab" aria-selected={page === "admin"} onClick={() => setPage("admin")}>管理</button></nav>}
         {who}
       </header>
-      {page === "admin" && user.caps.admin ? <Admin /> : <Home meta={meta} user={user} onOpen={open} />}
+      {page === "admin" && user.caps.admin ? <Admin /> : <ProjectsPage meta={meta} user={user} onOpen={open} />}
     </div>
   );
 }
@@ -67,134 +66,10 @@ function rememberProject(id: string | null): void { try { if (id) localStorage.s
 function seenWelcome(): boolean { try { return sessionStorage.getItem("jri.welcome") === "1"; } catch { return true; } }
 function markWelcome(): void { try { sessionStorage.setItem("jri.welcome", "1"); } catch { /* 略過 */ } }
 
-/** 進站的歡迎畫面：一條線長出來，名字淡入，約兩秒後進入首頁。點一下或按任意鍵可跳過；每次開瀏覽器只出現一次。 */
-function Welcome({ name, role, onDone }: { name: string; role: string; onDone: () => void }) {
-  useEffect(() => {
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const t = setTimeout(onDone, reduce ? 900 : 2300);
-    const key = () => onDone();
-    window.addEventListener("keydown", key);
-    return () => { clearTimeout(t); window.removeEventListener("keydown", key); };
-  }, [onDone]);
-  const d = new Date();
-  const stamp = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][d.getDay()]}`;
-  return (
-    <button className="welcome" onClick={onDone} aria-label="進入">
-      <span className="welcome-brand">JRI MBSE</span>
-      <span className="welcome-line" aria-hidden="true" />
-      <span className="welcome-hello">歡迎，{name}</span>
-      <span className="label welcome-meta">{role} · {stamp}</span>
-    </button>
-  );
-}
-
-function Login({ google, github }: { google: boolean; github: boolean }) {
-  return (
-    <div className="shell enter">
-      <header className="topbar"><span className="brand">JRI MBSE</span><span className="label">噴射推進研究社</span></header>
-      <main className="page login" style={{ width: "100%", maxWidth: 480 }}>
-        <p className="welcome-brand" style={{ marginBottom: 8 }}>JRI MBSE</p>
-        <span className="welcome-line" aria-hidden="true" style={{ display: "block", marginBottom: 32 }} />
-        <section className="section">
-          <div className="section-head"><h1 className="section-title">登入</h1></div>
-          <p className="body" style={{ marginBottom: 16 }}>JRI 成員請用 Google 帳號登入。第一次登入會送出加入申請，總工程師核准後就能使用。</p>
-          <div className="tbtn-row">
-            {google ? <a className="btn" href="/auth/google">用 Google 登入</a> : <p className="msg"><span className="tag">未設定</span>Google 登入尚未設定，請聯絡管理員。</p>}
-            {github && <a className="tbtn" href="/auth/github">改用 GitHub 登入</a>}
-          </div>
-          <p className="caption" style={{ marginTop: 24 }}>外部審查委員請直接開啟收到的唯讀連結。</p>
-        </section>
-      </main>
-    </div>
-  );
-}
-
-const TEMPLATES: { id: "blank" | "sample" | "guided"; zh: string; help: string }[] = [
-  { id: "guided", zh: "流程範本專案", help: "從利害關係人開始，一步一個問題帶你完成分析。前一步沒完成不能跳到下一步。建議新專案使用。" },
-  { id: "sample", zh: "範本專案", help: "附一份探空火箭的示範內容，可以對照著修改。適合想先看完整範例的人。" },
-  { id: "blank", zh: "空白專案", help: "從空的模型開始，順序自己決定。適合已經熟悉方法的人。" },
-];
-
-function Home({ meta, user, onOpen }: { meta: Meta; user: Me; onOpen: (id: string) => void }) {
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const [form, setForm] = useState({ id: "", name: "", kind: "annual" as "annual" | "small", gates: ["mdr", "cdr", "trr"], template: "guided" as "blank" | "sample" | "guided" });
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [removing, setRemoving] = useState<Project | null>(null);
-  const [confirmText, setConfirmText] = useState("");
-  const archive = async (ev: FormEvent) => {
-    ev.preventDefault();
-    if (!removing) return;
-    setError("");
-    try {
-      await api(`/projects/${removing.id}/archive`, "POST", { confirm: confirmText });
-      setProjects((ps) => (ps ?? []).filter((p) => p.id !== removing.id));
-      setRemoving(null); setConfirmText("");
-    } catch (e) { setError((e as Error).message); }
-  };
-  useEffect(() => { api<Project[]>("/projects").then(setProjects).catch((e) => setError(e.message)); }, []);
-  const create = async (ev: FormEvent) => {
-    ev.preventDefault(); setBusy(true); setError("");
-    try { onOpen((await api<Project>("/projects", "POST", form)).id); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  };
-  return (
-    <main className="page home" style={{ width: "100%" }}>
-      <section className="section">
-        <div className="section-head"><h1 className="section-title">專案</h1><span className="label">{projects?.length ?? 0}</span></div>
-        {projects === null ? <p className="label">載入中</p> : projects.length === 0 ? <p className="body muted">{user.caps.createProject ? "還沒有專案。在右側建立第一個。" : "還沒有可以開啟的專案。"}</p> : projects.map((p) => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <button className="proj" onClick={() => onOpen(p.id)}>
-              <span className="heading" style={{ flex: 1 }}>{p.name}</span>
-              <span className="label">{p.kind === "annual" ? "年度計畫" : "小型專案"}</span>
-              <span className="label">{p.gates.length} 節點</span>
-              <span className="label">{p.id}</span>
-            </button>
-            {user.caps.admin && <button className="tbtn" onClick={() => { setRemoving(p); setConfirmText(""); setError(""); }}>刪除</button>}
-          </div>
-        ))}
-        {removing && (
-          <form onSubmit={archive} style={{ marginTop: 24 }}>
-            <div className="section-head"><h2 className="section-title">刪除專案</h2><span className="tag danger">DELETE</span></div>
-            <p className="body" style={{ marginBottom: 12 }}>「{removing.name}」會從列表移除，所有人都無法再開啟。資料會移到這台電腦的封存資料夾，需要時可以請管理員還原。</p>
-            <label className="field"><span className="label">輸入專案名稱「{removing.name}」確認</span><input className="input" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoFocus /></label>
-            <div className="tbtn-row"><button className="tbtn primary" disabled={confirmText.trim() !== removing.name}>確定刪除</button><button type="button" className="tbtn" onClick={() => setRemoving(null)}>取消</button></div>
-          </form>
-        )}
-      </section>
-      {user.caps.createProject && <form className="section" onSubmit={create}>
-        <div className="section-head"><h2 className="section-title">建立專案</h2></div>
-        <label className="field"><span className="label">名稱</span><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="2027 年度探空火箭" /></label>
-        <label className="field"><span className="label">代號</span><input className="input" required value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value.toLowerCase() })} placeholder="sr-2027" pattern="[a-z0-9][a-z0-9\-]{1,40}" /></label>
-        <p className="caption" style={{ marginBottom: 12 }}>小寫英數與連字號，會成為儲存庫名稱，之後不能改。</p>
-        <fieldset className="choices">
-          <legend className="label">建立方式</legend>
-          {TEMPLATES.map((t) => (
-            <label key={t.id} className={`choice ${form.template === t.id ? "on" : ""}`}>
-              <input type="radio" name="template" checked={form.template === t.id} onChange={() => setForm({ ...form, template: t.id })} />
-              <span><span className="heading">{t.zh}</span><span className="caption">{t.help}</span></span>
-            </label>
-          ))}
-        </fieldset>
-        <label className="field"><span className="label">類型</span>
-          <select className="input" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as "annual" | "small" })}>
-            <option value="annual">年度計畫（全部節點）</option><option value="small">小型專案（自選節點）</option>
-          </select>
-        </label>
-        {form.kind === "small" && meta.gates.map((g) => (
-          <label key={g.id} className="check">
-            <input type="checkbox" checked={form.gates.includes(g.id)} onChange={(e) => setForm({ ...form, gates: e.target.checked ? [...form.gates, g.id] : form.gates.filter((x) => x !== g.id) })} />
-            <span>{g.zh}</span>
-          </label>
-        ))}
-        {error && <p className="msg"><span className="tag danger">ERR</span>{error}</p>}
-        <div style={{ marginTop: 12 }}><button className="btn" disabled={busy}>{busy ? "建立中" : "建立"}</button></div>
-      </form>}
-    </main>
-  );
-}
-
-type Mode = "home" | "process" | "diagram" | "table" | "deliver" | "gates" | "plan" | "sim" | "source" | "history";
-const MODES: [Mode, string][] = [["home", "首頁"], ["process", "流程"], ["diagram", "圖"], ["table", "表"], ["deliver", "產出物"], ["gates", "節點"], ["plan", "時程"], ["sim", "模擬"], ["source", "原始碼"], ["history", "版本"]];
+/** 每一頁的元件。 */
+const VIEWS: Record<Page, (p: PageProps) => React.ReactNode> = {
+  home: HomePage, process: ProcessPage, model: ModelPage, tables: TablesPage, analysis: AnalysisPage, manage: ManagePage, versions: VersionsPage,
+};
 
 /** id 是專案參照：main 或某個分支。分支和 main 用同一個畫面，所有分頁都能看、能改（F-33）。 */
 function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: Meta; user: Me; onHome: () => void; onOpen: (ref: string) => void; who: React.ReactNode }) {
@@ -202,55 +77,29 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [mode, setMode] = useState<Mode>("home");
-  const [deliverTab, setDeliverTab] = useState<DeliverTab>("req");
-  const [diagramId, setDiagramId] = useState("bdd");
-  const [catId, setCatId] = useState("SystemRequirement");
-  const [gateId, setGateId] = useState<string | null>(null);
-  const [sel, setSel] = useState<Selection>({ type: "new", category: "SystemRequirement", parentId: null });
-  const [panes, setPanes] = useState(loadPanes);
-  const setPane = (p: Partial<Panes>) => setPanes((cur) => { const next = { ...cur, ...p }; savePanes(next); return next; });
+  const [page, setPage] = useState<Page>("home");
+  const [sel, setSel] = useState<Selection | null>(null);
+  const [spot, setSpotState] = useState<Spot>({ diagramId: "bdd", table: "req", gateId: null, source: false });
+  const setSpot = useCallback((s: Partial<Spot>) => setSpotState((cur) => ({ ...cur, ...s })), []);
   const reload = useCallback(() => api<View>(`/projects/${id}`).then(setView).catch((e) => setError(e.message)), [id]);
   useEffect(() => { reload(); }, [reload]);
-  // 流程範本專案在流程走完之前，開啟時直接進入流程
-  const [autoMode, setAutoMode] = useState(false);
-  useEffect(() => {
-    if (!view || autoMode) return;
-    setAutoMode(true);
-    if (view.project.template === "guided" && view.process.some((s) => s.state !== "done")) setMode("process");
-  }, [view, autoMode]);
 
-  // 自訂圖與標註。畫面先更新，稍後一次存檔，避免每打一個字就送出一次
-  const [extra, setExtra] = useState<Diagrams>({ custom: [], notes: {} });
-  const extraTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => { api<Diagrams>(`/projects/${id}/diagrams`).then(setExtra).catch(() => {}); }, [id]);
-  const saveExtra = useCallback((next: Diagrams) => {
-    setExtra(next);
-    if (readOnly) return;
-    if (extraTimer.current) clearTimeout(extraTimer.current);
-    extraTimer.current = setTimeout(() => { api(`/projects/${id}/diagrams`, "PUT", { diagrams: next }).catch((e) => setNotice((e as Error).message)); }, 400);
-  }, [id, readOnly]);
-  const addDiagram = (title: string) => {
-    const did = `custom:${Date.now().toString(36)}`;
-    saveExtra({ ...extra, custom: [...extra.custom, { id: did, title: title.trim().slice(0, 60) || "自訂圖", members: [] }] });
-    setDiagramId(did); setMode("diagram");
-  };
-  const diagrams = useMemo(() => (view ? diagramsOf(view.analysis, extra) : []), [view, extra]);
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><div className="tbtn-row">{id !== baseOf(id) && <button className="tbtn primary" onClick={() => onOpen(baseOf(id))}>回到 main</button>}<button className={`tbtn ${id === baseOf(id) ? "primary" : ""}`} onClick={onHome}>回專案列表</button></div></div>;
   if (!view) return <div className="page"><p className="label">載入模型中</p></div>;
 
-  const def: DiagramDef = diagrams.find((d) => d.id === diagramId) ?? diagrams[0];
   const errors = view.analysis.diagnostics.filter((d) => d.severity === "error");
-  const selectedId = sel.type === "element" ? sel.id : null;
-  const selectElement = (eid: string | null) => setSel(eid ? { type: "element", id: eid } : { type: "new", category: catId, parentId: null });
-  const showSide = mode === "diagram" || mode === "table" || mode === "deliver" || mode === "gates";
-  const showTree = mode !== "home" && mode !== "process";
-  // 首頁各區塊點了之後前往對應的頁面
-  const go = (m: string, arg?: string) => {
-    if (m === "gates" && arg) setGateId(arg);
-    if (m === "deliver" && arg) setDeliverTab(arg as DeliverTab);
-    setMode(m as Mode);
+  const go = (to: Page, arg?: string) => {
+    if (to === "manage" && arg) setSpot({ gateId: arg });
+    if (to === "tables" && arg) setSpot({ table: arg as TableGroup });
+    if (to === "model" && arg === "source") setSpot({ source: true });
+    // 只有模型、表格、專案管理頁有右欄；換到其他頁時清掉選取
+    if (to !== "model" && to !== "tables" && to !== "manage") setSel(null);
+    setPage(to);
   };
+  // 點上方分頁是換一件事做，右欄的選取不帶過去；頁內的「在模型中開啟」等跳轉才保留選取
+  const switchTab = (to: Page) => { setSel(null); go(to); };
+  const props: PageProps = { id, view, meta, user, readOnly, setView, reload, onNotice: setNotice, sel, setSel, spot, setSpot, go, onOpenRef: onOpen };
+  const Current = VIEWS[page];
 
   return (
     <div className="shell">
@@ -258,141 +107,35 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
         <button className="brand" onClick={onHome}>JRI MBSE</button>
         {readOnly && <span className="tag">唯讀</span>}
         <span className="label crumb">{view.project.name}</span>
-        <nav className="seg" role="tablist">{MODES.map(([m, zh]) => <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}>{zh}</button>)}</nav>
+        <nav className="seg" role="tablist">{PAGES.map(([m, zh]) => <button key={m} role="tab" aria-selected={page === m} onClick={() => switchTab(m)}>{zh}</button>)}</nav>
         <span className="grow" />
-        <a className={`tbtn ${view.analysis.ok ? "" : "disabled"}`} href={view.analysis.ok ? `/api/projects/${id}/export.xlsx` : undefined}>匯出 Excel</a>
+        <VersionButton id={id} view={view} active={page === "versions"} onClick={() => switchTab("versions")} />
         {who}
       </header>
-      <div className="work">
-        {showTree && <aside className="side left" style={{ width: panes.leftOpen ? panes.left : 0 }} hidden={!panes.leftOpen}>
-          <Tree view={view} meta={meta} diagrams={diagrams} onAddDiagram={readOnly ? undefined : addDiagram} mode={mode} diagramId={def.id} catId={catId} gateId={gateId} selectedId={selectedId}
-            onDiagram={(d) => { setDiagramId(d); setMode("diagram"); }}
-            onCategory={(c) => { setCatId(c); setMode("table"); setSel({ type: "new", category: c, parentId: null }); }}
-            onElement={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); if (mode !== "diagram" && mode !== "table") setMode("table"); }}
-            onGate={(g) => { setGateId(g); setMode("gates"); }} />
-        </aside>}
-        {showTree && <Resizer side="left" open={panes.leftOpen} width={panes.left} onWidth={(w) => setPane({ left: w })} onToggle={() => setPane({ leftOpen: !panes.leftOpen })} />}
-        <section className="center">
-          {view.branch && <div className="banner"><span className="tag warn">分支</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>正在{readOnly ? "瀏覽" : "編輯"}分支 <b>{view.branch.name}</b>。{readOnly ? "這裡的內容還沒有合併進 main。" : "這裡的修改只存在這個分支，合併後才會進入 main。"}</span><button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main</button></div>}
-          {view.warning && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ maxWidth: "none" }}>{view.warning}</span></div>}
-          {errors.length > 0 && mode !== "source" && (
-            <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => setMode("source")}>到原始碼修正</button></div>
-          )}
-          {notice && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ flex: 1 }}>{notice}</span><button className="tbtn" onClick={() => setNotice("")}>關閉</button></div>}
-          {mode === "diagram" && <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
-            onSelectEdge={(e) => e && setSel({ type: "edge", edge: e })} onNew={(c, parentId) => setSel({ type: "new", category: c, parentId })}
-            onChanged={(v) => { setView(v); setNotice(""); }} onError={setNotice} />}
-          {mode === "table" && <div className="center-scroll"><TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={selectElement} /></div>}
-          {mode === "home" && <div className="center-scroll enter"><Dashboard view={view} go={go} /></div>}
-          {mode === "process" && <div className="center-scroll"><ProcessView view={view} meta={meta} user={user} onChanged={setView} onOpen={(eid, c) => { if (c) setCatId(c); setSel({ type: "element", id: eid }); setMode("table"); }} /></div>}
-          {mode === "deliver" && <Deliverables view={view} meta={meta} user={user} tab={deliverTab} setTab={setDeliverTab} selectedId={selectedId} onSelect={(eid) => setSel({ type: "element", id: eid })} onChanged={setView} />}
-          {mode === "gates" && <div className="center-scroll"><GatesView user={user} view={view} gateId={gateId ?? view.gates[0]?.id ?? ""} setView={setView} onSelect={(eid) => setSel({ type: "element", id: eid })} /></div>}
-          {mode === "plan" && <div className="center-scroll"><PlanView view={view} meta={meta} user={user} /></div>}
-          {mode === "sim" && <div className="center-scroll"><SimView view={view} user={user} onChanged={setView} /></div>}
-          {mode === "source" && <div className="center-scroll" style={{ display: "flex", flexDirection: "column" }}><SourceTab id={id} onSaved={reload} readOnly={readOnly} /></div>}
-          {mode === "history" && <div className="center-scroll"><VersionsView id={id} user={user} branch={view.branch ?? null} onOpen={onOpen} onChanged={(v) => { setView(v); api<Diagrams>(`/projects/${id}/diagrams`).then(setExtra).catch(() => {}); }} /></div>}
-        </section>
-        {showSide && <Resizer side="right" open={panes.rightOpen} width={panes.right} onWidth={(w) => setPane({ right: w })} onToggle={() => setPane({ rightOpen: !panes.rightOpen })} />}
-        {showSide && <aside className="side right" style={{ width: panes.rightOpen ? panes.right : 0 }} hidden={!panes.rightOpen}><Inspector readOnly={readOnly} view={view} meta={meta} sel={sel} setSel={setSel} onChanged={setView} /></aside>}
+      <div className="ws-main">
+        {view.branch && <div className="banner"><span className="tag warn">分支</span><span className="body" style={{ flex: 1, maxWidth: "none" }}>正在{readOnly ? "瀏覽" : "編輯"}分支 <b>{view.branch.name}</b>。{readOnly ? "這裡的內容還沒有合併進 main。" : "這裡的修改只存在這個分支，合併後才會進入 main。"}</span><button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main</button></div>}
+        {view.warning && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ maxWidth: "none" }}>{view.warning}</span></div>}
+        {errors.length > 0 && !(page === "model" && spot.source) && (
+          <div className="banner"><span className="tag danger">ERR</span><span className="body">模型有 {errors.length} 個錯誤，圖表暫時無法更新。</span><button className="tbtn primary" onClick={() => go("model", "source")}>到原始碼修正</button></div>
+        )}
+        {notice && <div className="banner"><span className="tag danger">ERR</span><span className="body" style={{ flex: 1 }}>{notice}</span><button className="tbtn" onClick={() => setNotice("")}>關閉</button></div>}
+        <Current {...props} />
       </div>
     </div>
   );
 }
 
-interface Panes { left: number; right: number; leftOpen: boolean; rightOpen: boolean }
-const DEFAULT_PANES: Panes = { left: 272, right: 320, leftOpen: true, rightOpen: true };
-// 側邊欄寬度是每個人自己的偏好，存在瀏覽器；讀不到就用預設值
-function loadPanes(): Panes {
-  try { return { ...DEFAULT_PANES, ...JSON.parse(localStorage.getItem("jri.panes") ?? "{}") }; } catch { return DEFAULT_PANES; }
-}
-function savePanes(p: Panes): void { try { localStorage.setItem("jri.panes", JSON.stringify(p)); } catch { /* 無法儲存時只在本次有效 */ } }
-
-/** 側邊欄與中間區域之間的分隔條：拖曳調整寬度，按鈕收合或展開；也可用方向鍵調整。 */
-function Resizer({ side, open, width, onWidth, onToggle }: { side: "left" | "right"; open: boolean; width: number; onWidth: (w: number) => void; onToggle: () => void }) {
-  const clamp = (w: number) => Math.min(640, Math.max(180, Math.round(w)));
-  const start = (ev: React.PointerEvent<HTMLDivElement>) => {
-    if (!open || (ev.target as HTMLElement).closest("button")) return;
-    ev.preventDefault();
-    const x0 = ev.clientX, w0 = width;
-    const el = ev.currentTarget;
-    el.setPointerCapture(ev.pointerId);
-    const move = (e: PointerEvent) => onWidth(clamp(w0 + (side === "left" ? e.clientX - x0 : x0 - e.clientX)));
-    const stop = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", stop); el.removeEventListener("pointercancel", stop); };
-    el.addEventListener("pointermove", move); el.addEventListener("pointerup", stop); el.addEventListener("pointercancel", stop);
-  };
-  const key = (e: React.KeyboardEvent) => {
-    if (!open) return;
-    const d = e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0;
-    if (d) { e.preventDefault(); onWidth(clamp(width + (side === "left" ? d : -d))); }
-  };
-  const zh = side === "left" ? "左側欄" : "右側欄";
-  const arrow = (side === "left") === open ? "‹" : "›";
-  return (
-    <div className={`resizer ${side} ${open ? "" : "closed"}`} role="separator" aria-orientation="vertical" aria-label={`調整${zh}寬度`} aria-valuenow={open ? width : 0} aria-valuemin={180} aria-valuemax={640} tabIndex={0} onPointerDown={start} onKeyDown={key}>
-      <button className="resizer-toggle" onClick={onToggle} aria-label={open ? `收合${zh}` : `展開${zh}`} title={open ? `收合${zh}` : `展開${zh}`}>{arrow}</button>
-    </div>
-  );
-}
-
-interface TreeProps {
-  view: View; meta: Meta; diagrams: DiagramDef[]; mode: Mode; diagramId: string; catId: string; gateId: string | null; selectedId: string | null;
-  onDiagram: (id: string) => void; onAddDiagram?: (title: string) => void; onCategory: (id: string) => void; onElement: (id: string, category: string | null) => void; onGate: (id: string) => void;
-}
-
-/** 左側欄：圖、模型樹、節點進度。 */
-function Tree({ view, meta, diagrams, onAddDiagram, mode, diagramId, catId, gateId, selectedId, onDiagram, onCategory, onElement, onGate }: TreeProps) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ requirements: true, structure: true });
-  const els = view.analysis.elements;
-  const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
-  const [naming, setNaming] = useState(false);
-  const finish = (v: string) => { setNaming(false); if (v.trim()) onAddDiagram?.(v); };
-  return (
-    <>
-      <div className="section">
-        <div className="section-head"><h2 className="section-title">圖</h2><span className="label">{diagrams.length}</span></div>
-        <ul className="tree">{diagrams.map((d) => (
-          <li key={d.id}><button className="tree-row" aria-current={mode === "diagram" && d.id === diagramId} onClick={() => onDiagram(d.id)}>
-            <span className="tid">{d.code}</span><span className="tn">{d.title}</span>
-          </button></li>
-        ))}</ul>
-        {onAddDiagram && (naming
-          ? <input className="input" autoFocus placeholder="圖的名稱，例如：任務總覽" maxLength={60} aria-label="新自訂圖的名稱"
-              onKeyDown={(e) => { if (e.key === "Enter") finish((e.target as HTMLInputElement).value); if (e.key === "Escape") setNaming(false); }} onBlur={(e) => finish(e.target.value)} />
-          : <button className="tbtn" onClick={() => setNaming(true)} title="自己決定放哪些項目的圖，任何類別都能放在一起">＋ 新增自訂圖</button>)}
-      </div>
-      <div className="section">
-        <div className="section-head"><h2 className="section-title">模型</h2><span className="label">{els.filter((e) => e.category).length}</span></div>
-        <ul className="tree">{Object.entries(meta.pillars).map(([pid, pzh]) => (
-          <li key={pid}>
-            <button className="tree-row" aria-expanded={!!open[pid]} onClick={() => toggle(pid)}><span className="tw">{open[pid] ? "−" : "+"}</span><span className="tn" style={{ fontWeight: 500 }}>{pzh}</span></button>
-            {open[pid] && <ul>{meta.categories.filter((c) => c.pillar === pid).map((c) => {
-              const items = listOf(els, c.id);
-              const k = `c:${c.id}`;
-              return (
-                <li key={c.id}>
-                  <div style={{ display: "flex" }}>
-                    <button className="tree-row" style={{ width: 18 }} aria-label={open[k] ? "收合" : "展開"} aria-expanded={!!open[k]} onClick={() => toggle(k)} disabled={items.length === 0}><span className="tw">{items.length ? (open[k] ? "−" : "+") : ""}</span></button>
-                    <button className="tree-row" aria-current={mode === "table" && c.id === catId && !selectedId} onClick={() => onCategory(c.id)}><span className="tn">{c.zh}</span><span className="tc">{items.length}</span></button>
-                  </div>
-                  {open[k] && <ul>{items.map((e) => (
-                    <li key={e.id}><button className="tree-row" aria-current={e.id === selectedId} onClick={() => onElement(e.id, c.id)} title={label(e)}>
-                      <span className="tn">{e.name}</span>{e.shared && <span className="tid">共用</span>}{e.shortName && <span className="tid">{e.shortName}</span>}
-                    </button></li>
-                  ))}</ul>}
-                </li>
-              );
-            })}</ul>}
-          </li>
-        ))}</ul>
-      </div>
-      <div className="section">
-        <div className="section-head"><h2 className="section-title">節點</h2></div>
-        <ul className="tree">{view.gates.map((g) => (
-          <li key={g.id}><button className="tree-row gate-row" aria-current={mode === "gates" && g.id === (gateId ?? view.gates[0]?.id)} onClick={() => onGate(g.id)}>
-            <span className="tn">{g.zh}</span><span className="meter"><span style={{ width: `${g.total ? (g.done / g.total) * 100 : 0}%` }} /></span><span className="tc">{g.done} / {g.total}</span>
-          </button></li>
-        ))}</ul>
-      </div>
-    </>
-  );
+/** 右上的版本按鈕：顯示目前在哪個分支與還沒合併的數量，點開是版本畫面。 */
+function VersionButton({ id, view, active, onClick }: { id: string; view: View; active: boolean; onClick: () => void }) {
+  const [pending, setPending] = useState<number | null>(null);
+  const onBranch = !!view.branch;
+  // 在 main 上時，數一下有幾個分支有還沒合併的修改；讀不到就不顯示數字
+  useEffect(() => {
+    if (onBranch) return;
+    api<{ ahead: number }[]>(`/projects/${id}/branches`).then((b) => setPending(b.filter((x) => x.ahead > 0).length)).catch(() => setPending(null));
+  }, [id, onBranch]);
+  const name = view.branch?.name ?? "main";
+  const count = onBranch ? view.branch!.ahead : pending;
+  const note = count === null ? "" : onBranch ? ` · ${count} 項未合併` : ` · ${count} 個分支待審`;
+  return <button className="tbtn version-btn" aria-pressed={active} onClick={onClick} title="版本：分支、審查、合併、基線">{name}{note} ▾</button>;
 }

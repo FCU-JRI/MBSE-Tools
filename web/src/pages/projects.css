@@ -1,0 +1,10 @@
+/* 建立專案的三種方式：以髮絲線分隔的選項，不用卡片 */
+.choices { border: 0; padding: 0; margin: 0 0 var(--space-4); }
+.choices legend { padding: 0; margin-bottom: var(--space-1); }
+.choice { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; margin: 0; border-top: var(--stroke-hair) solid var(--line); cursor: pointer; color: var(--ink-muted); }
+.choice.on { color: var(--ink); box-shadow: inset var(--stroke-bold) 0 0 var(--ink); padding-left: var(--space-3); }
+.choice input { appearance: none; margin: 4px 0 0; width: 14px; height: 14px; border: var(--stroke-hair) solid var(--line-strong); background: var(--bg); display: grid; place-items: center; flex: none; cursor: pointer; }
+.choice input:checked { border-color: var(--ink); }
+.choice input:checked::after { content: ""; width: 6px; height: 6px; background: var(--ink); box-shadow: var(--glow-ink); }
+.choice > span { display: flex; flex-direction: column; gap: 2px; }
+.choice .heading { font-size: 14px; line-height: 20px; }

@@ -72,7 +72,7 @@ function Msg({ m }: { m: { ok: boolean; text: string } | null }) {
 
 /** 出處：選一份已登記的文件，再填章節。 */
 function SourceFields({ view, doc, section, onChange }: { view: View; doc: string; section: string; onChange: (doc: string, ref: string) => void }) {
-  if (view.docs.length === 0) return <p className="caption" style={{ marginBottom: 12 }}>到「產出物 → 來源文件」登記文件後，這裡可以標註出處。</p>;
+  if (view.docs.length === 0) return <p className="caption" style={{ marginBottom: 12 }}>到「表格 → 來源文件」登記文件後，這裡可以標註出處。</p>;
   return (
     <div className="row">
       <label className="field" style={{ flex: 2 }}><span className="label">出處</span>

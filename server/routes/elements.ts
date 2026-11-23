@@ -14,7 +14,7 @@ export function mount(app: Express): void {
   app.post("/api/projects/:id/elements", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
-    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正後再新增。");
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正後再新增。");
     const cat = CATEGORIES.find((c) => c.id === req.body.category);
     if (!cat) throw new store.UserError("未知的元素類別。");
     // 流程範本專案：前面的步驟沒完成，不能新增後面步驟的項目
@@ -44,7 +44,7 @@ export function mount(app: Express): void {
   app.post("/api/projects/:id/relations", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
-    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正後再新增。");
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正後再新增。");
     const from = before.elements.find((e) => e.id === req.body.from);
     const to = before.elements.find((e) => e.id === req.body.to);
     if (!from || !to) throw new store.UserError("找不到要連結的元素。");
@@ -87,7 +87,7 @@ export function mount(app: Express): void {
       // 零件若定義在某個系統定義裡，從外面無法直接引用，所以把分配寫進那個定義的主體
       const host = byId.get(target.owner ?? "");
       if (host && /Definition$/.test(host.kind)) {
-        if (editable(host).file !== file) throw new store.UserError("功能與分配對象在不同檔案，請到「原始碼」分頁建立分配。");
+        if (editable(host).file !== file) throw new store.UserError("功能與分配對象在不同檔案，請到模型頁的「原始碼」建立分配。");
         next = insertInside(content, host, (indent) => `${indent}allocate ${featureRef(from)} to ${quote(target.name)};
   `);
       } else {
@@ -127,7 +127,7 @@ export function mount(app: Express): void {
   app.post("/api/projects/:id/relations/delete", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
-    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const rel = before.relations.find((r) => r.kind === req.body.kind && r.from === req.body.from && r.to === req.body.to);
     if (!rel?.loc) throw new store.UserError("找不到這條關係。");
     if (!(await store.listFiles(id)).includes(rel.file)) throw new store.UserError("這條關係在共用元件庫裡，不能在專案內修改。");
@@ -144,7 +144,7 @@ export function mount(app: Express): void {
   app.patch("/api/projects/:id/elements", wrap(async (req, res) => {
     const id = pid(req);
     let a = await store.analyzeProject(id);
-    if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const target = a.elements.find((e) => e.id === req.body.id);
     if (!target) throw new store.UserError("找不到這個元素。");
     const file = editable(target).file;
@@ -171,7 +171,7 @@ export function mount(app: Express): void {
       a = await store.analyzeProject(id, { file, content });
       if (!a.ok) return res.status(422).json({ saved: false, diagnostics: a.diagnostics });
       const again = findAgain(a.elements, el);
-      if (!again) throw new store.UserError("修改後找不到這個元素，未儲存。請到「原始碼」分頁修改。");
+      if (!again) throw new store.UserError("修改後找不到這個元素，未儲存。請到模型頁的「原始碼」修改。");
       el = again;
     }
     if (newId) {
@@ -193,7 +193,7 @@ export function mount(app: Express): void {
   app.post("/api/projects/:id/elements/delete", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
-    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const el = before.elements.find((e) => e.id === req.body.id);
     if (!el) throw new store.UserError("找不到這個元素。");
     const file = editable(el).file;
@@ -214,7 +214,7 @@ export function mount(app: Express): void {
   app.post("/api/projects/:id/packages", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
-    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const file = rootFile(before);
     const root = before.elements.find((e) => e.kind === "Package" && e.qualifiedName === ROOT_PACKAGE);
     if (!root) throw new store.UserError(`模型中找不到根套件 ${ROOT_PACKAGE}。`);
@@ -231,7 +231,7 @@ export function mount(app: Express): void {
   app.post("/api/projects/:id/elements/move", wrap(async (req, res) => {
     const id = pid(req);
     let a = await store.analyzeProject(id);
-    if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 200) : [];
     let pkgId: string | null = req.body?.packageId ? String(req.body.packageId) : null;
     const pairs: [string, string][] = [], qnames: [string, string][] = [];
@@ -256,9 +256,9 @@ export function mount(app: Express): void {
       if (pkgId) {
         let pkg = find(pkgId);
         if (!isUserPackage(pkg)) throw new store.UserError("找不到這個套件。");
-        if (pkg.file !== file) throw new store.UserError("套件和項目在不同檔案，請到「原始碼」分頁處理。");
+        if (pkg.file !== file) throw new store.UserError("套件和項目在不同檔案，請到模型頁的「原始碼」處理。");
         if (el.owner === pkg.id || el.id === pkg.id) continue;
-        if (el.kind === "Package") throw new store.UserError("目前不支援把套件放進另一個套件，請到「原始碼」分頁處理。");
+        if (el.kind === "Package") throw new store.UserError("目前不支援把套件放進另一個套件，請到模型頁的「原始碼」處理。");
         // 項目原本所在的命名空間：若它已在某個使用者套件裡，取那個套件的上層
         const home = isUserPackage(owner) ? find(owner.owner) : owner;
         if (!home) throw new store.UserError("找不到項目所在的套件。");
@@ -305,7 +305,7 @@ export function mount(app: Express): void {
   app.post("/api/projects/:id/comments", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
-    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const about = req.body?.aboutId ? before.elements.find((e) => e.id === req.body.aboutId) : undefined;
     const host = (about ? before.elements.find((e) => e.id === about.owner) : undefined) ?? before.elements.find((e) => e.kind === "Package" && e.qualifiedName === ROOT_PACKAGE);
     if (!host) throw new store.UserError(`模型中找不到根套件 ${ROOT_PACKAGE}。`);
@@ -325,7 +325,7 @@ export function mount(app: Express): void {
   app.patch("/api/projects/:id/comments", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
-    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const el = before.elements.find((e) => e.id === req.body?.id && e.kind === "Comment");
     if (!el) throw new store.UserError("找不到這則註解。");
     const file = editable(el).file;

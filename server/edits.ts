@@ -141,7 +141,7 @@ export function insertInside(content: string, target: Element, make: (indent: st
     lines[i] = last.replace(/\s*\}\s*$/, "");
     lines.splice(i + 1, 0, body, `${startIndent}}`);
   } else {
-    throw new UserError("這個元素的寫法無法自動插入，請到「原始碼」分頁手動修改。");
+    throw new UserError("這個元素的寫法無法自動插入，請到模型頁的「原始碼」手動修改。");
   }
   return lines.join("\n");
 }
@@ -262,10 +262,10 @@ export function setShortNameText(content: string, el: Element, shortName: string
     const old = `<'${el.shortName}'>`, bare = `<${el.shortName}>`;
     if (line.includes(old)) next = line.replace(old, () => `<'${sn}'>`);
     else if (line.includes(bare)) next = line.replace(bare, () => `<'${sn}'>`);
-    else throw new UserError("這個元素的編號寫法無法自動修改，請到「原始碼」分頁修改。");
+    else throw new UserError("這個元素的編號寫法無法自動修改，請到模型頁的「原始碼」修改。");
   } else {
     const i = line.indexOf(tok);
-    if (i < 0) throw new UserError("這個元素的寫法無法自動加上編號，請到「原始碼」分頁修改。");
+    if (i < 0) throw new UserError("這個元素的寫法無法自動加上編號，請到模型頁的「原始碼」修改。");
     next = line.slice(0, i) + `<'${sn}'> ` + line.slice(i);
   }
   lines[el.line - 1] = next;
@@ -304,7 +304,7 @@ function wholeLines(lines: string[], el: Element): { first: number; last: number
   if (!el.loc) throw new UserError("找不到元素在檔案中的位置。");
   const first = lines[el.loc.line - 1] ?? "", last = lines[el.loc.endLine - 1] ?? "";
   const before = first.slice(0, charIndex(first, el.loc.col)), after = last.slice(charIndex(last, el.loc.endCol));
-  if (before.trim() || after.trim()) throw new UserError(`「${el.name}」和其他內容寫在同一行，無法自動搬移，請到「原始碼」分頁處理。`);
+  if (before.trim() || after.trim()) throw new UserError(`「${el.name}」和其他內容寫在同一行，無法自動搬移，請到模型頁的「原始碼」處理。`);
   return { first: el.loc.line - 1, last: el.loc.endLine - 1 };
 }
 
@@ -318,7 +318,7 @@ function insertEdit(lines: string[], target: Element, make: (indent: string) => 
   if (/^\s*\}\s*$/.test(last)) return { at: i, remove: 0, insert: body };
   if (/\{\s*\}\s*$/.test(last)) return { at: i, remove: 1, insert: [last.replace(/\{\s*\}\s*$/, "{"), ...body, `${startIndent}}`] };
   if (/;\s*$/.test(last)) return { at: i, remove: 1, insert: [last.replace(/;\s*$/, " {"), ...body, `${startIndent}}`] };
-  throw new UserError("這個套件的寫法無法自動插入，請到「原始碼」分頁手動修改。");
+  throw new UserError("這個套件的寫法無法自動插入，請到模型頁的「原始碼」手動修改。");
 }
 
 const reindent = (block: string[], indent: string): string[] => {
@@ -395,6 +395,6 @@ export function setCommentText(content: string, el: Element, body: string): stri
   const first = lines[el.loc.line - 1] ?? "", last = lines[el.loc.endLine - 1] ?? "";
   const a = charIndex(first, el.loc.col), b = charIndex(last, el.loc.endCol);
   const src = el.loc.line === el.loc.endLine ? first.slice(a, b) : [first.slice(a), ...lines.slice(el.loc.line, el.loc.endLine - 1), last.slice(0, b)].join("\n");
-  if (!/\/\*[\s\S]*\*\//.test(src)) throw new UserError("這則註解的寫法無法自動修改，請到「原始碼」分頁修改。");
+  if (!/\/\*[\s\S]*\*\//.test(src)) throw new UserError("這則註解的寫法無法自動修改，請到模型頁的「原始碼」修改。");
   return replaceLoc(content, el.loc, src.replace(/\/\*[\s\S]*\*\//, () => `/* ${commentBody(body)} */`).replace(/\n$/, ""));
 }

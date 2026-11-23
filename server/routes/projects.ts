@@ -25,7 +25,7 @@ export function mount(app: Express): void {
   app.post("/api/projects", auth.need(auth.can.createProject, "建立專案需要總工程師以上的權限。"), wrap(async (req, res) => {
     const { id, name, kind, gates, template } = req.body ?? {};
     const project = await store.createProject({ id: String(id ?? ""), name: String(name ?? ""), kind: kind === "small" ? "small" : "annual", gates, template: String(template ?? "sample"), author: author(req) });
-    // 自動建立 GitHub 儲存庫：失敗不影響專案建立，錯誤顯示在「版本」頁
+    // 自動建立 GitHub 儲存庫：失敗不影響專案建立，錯誤顯示在版本畫面
     const { autoRepo } = await auth.getConfig();
     if (autoRepo.enabled) await store.createRepo(project.id, project.name, autoRepo);
     res.json(project);

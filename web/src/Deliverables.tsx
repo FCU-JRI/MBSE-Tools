@@ -6,33 +6,13 @@ import { label, listOf, wrap } from "./model.ts";
 import { methodZh } from "./Inspector.tsx";
 import { RiskGrid } from "./Dashboard.tsx";
 
-export type DeliverTab = "req" | "fmea" | "path" | "docs";
-const TABS: [DeliverTab, string][] = [["req", "需求矩陣"], ["fmea", "FMEA 風險矩陣"], ["path", "開發路徑"], ["docs", "來源文件"]];
 const REQ = ["SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
 const when = (s: string) => new Date(s).toLocaleDateString("zh-TW");
 
-interface Props { view: View; meta: Meta; user: Me; tab: DeliverTab; setTab: (t: DeliverTab) => void; selectedId: string | null; onSelect: (id: string) => void; onChanged: (v: View) => void }
+/** 表格頁與專案管理頁共用的參數。 */
+export interface Props { view: View; meta: Meta; user: Me; selectedId: string | null; onSelect: (id: string) => void; onChanged: (v: View) => void }
 
-/** 產出物：每個專案都有、可瀏覽與匯出的三份文件，加上來源文件清單。 */
-export function Deliverables(p: Props) {
-  return (
-    <>
-      <div className="deliver-bar">
-        <nav className="seg" role="tablist">{TABS.map(([t, zh]) => <button key={t} role="tab" aria-selected={p.tab === t} onClick={() => p.setTab(t)}>{zh}</button>)}</nav>
-        <span style={{ flex: 1 }} />
-        <a className={`tbtn ${p.view.analysis.ok ? "" : "disabled"}`} href={p.view.analysis.ok ? `/api/projects/${p.view.project.id}/export.xlsx` : undefined}>匯出 Excel</a>
-        <button className="tbtn" onClick={() => window.print()}>列印／PDF</button>
-      </div>
-      <div className="center-scroll printable">
-        <p className="print-title">{p.view.project.name}　{TABS.find(([t]) => t === p.tab)?.[1]}</p>
-        {p.tab === "req" && <ReqMatrix {...p} />}
-        {p.tab === "fmea" && <Fmea {...p} />}
-        {p.tab === "path" && <Path {...p} />}
-        {p.tab === "docs" && <Docs {...p} />}
-      </div>
-    </>
-  );
-}
+// 原「產出物」頁的各份文件：需求矩陣、FMEA、推導鏈、來源文件放在表格頁；里程碑路徑放在專案管理頁。
 
 function SourceCell({ e, docs }: { e: Element; docs: Doc[] }) {
   if (!e.attrs.sourceDoc) return <span className="faint">—</span>;
@@ -41,7 +21,7 @@ function SourceCell({ e, docs }: { e: Element; docs: Doc[] }) {
   return d?.url ? <a href={d.url} target="_blank" rel="noreferrer noopener" title={d.title} onClick={(ev) => ev.stopPropagation()}>{text}</a> : <span title={d?.title}>{text}</span>;
 }
 
-function ReqMatrix({ view, meta, selectedId, onSelect }: Props) {
+export function ReqMatrix({ view, meta, selectedId, onSelect }: Props) {
   const [level, setLevel] = useState("");
   const [gap, setGap] = useState(false);
   const a = view.analysis;
@@ -62,7 +42,7 @@ function ReqMatrix({ view, meta, selectedId, onSelect }: Props) {
           <select className="input" value={level} onChange={(e) => setLevel(e.target.value)}><option value="">全部</option>{REQ.map((c) => <option key={c} value={c}>{meta.categories.find((x) => x.id === c)?.zh}</option>)}</select></label>
         <label className="check" style={{ marginBottom: 12 }}><input type="checkbox" checked={gap} onChange={(e) => setGap(e.target.checked)} /><span className="caption">只看有缺項的</span></label>
       </div>
-      {rows.length === 0 ? <p className="body">{all.length ? "沒有符合條件的需求。" : "還沒有需求。到「圖」或「表」新增。"}</p> : (
+      {rows.length === 0 ? <p className="body">{all.length ? "沒有符合條件的需求。" : "還沒有需求。到「模型」頁新增。"}</p> : (
         <table>
           <thead><tr><th>編號</th><th>層級</th><th>需求</th><th>出處</th><th>上層</th><th>滿足者</th><th>驗證</th><th>判定</th></tr></thead>
           <tbody>{rows.map((e) => {
@@ -86,7 +66,7 @@ function ReqMatrix({ view, meta, selectedId, onSelect }: Props) {
   );
 }
 
-function Fmea({ view, selectedId, onSelect }: Props) {
+export function Fmea({ view, selectedId, onSelect }: Props) {
   const [residual, setResidual] = useState(false);
   const [pick, setPick] = useState<string[] | null>(null);
   const risks = listOf(view.analysis.elements, "Risk");
@@ -112,7 +92,7 @@ function Fmea({ view, selectedId, onSelect }: Props) {
           {pick && <div><button className="tbtn primary" onClick={() => setPick(null)}>顯示全部</button></div>}
         </div>
       </div>
-      {rows.length === 0 ? <p className="body">還沒有風險。到左側「風險與安全」新增。</p> : (
+      {rows.length === 0 ? <p className="body">還沒有風險。到模型頁左欄「風險與安全」新增。</p> : (
         <table>
           <thead><tr><th>編號</th><th>失效模式</th><th>影響</th><th>原因</th><th>S</th><th>O</th><th>D</th><th>風險值</th><th>RPN</th><th>緩解措施</th><th>緩解後</th><th>負責人</th><th>狀態</th></tr></thead>
           <tbody>{rows.map((e) => (
@@ -131,7 +111,7 @@ function Fmea({ view, selectedId, onSelect }: Props) {
 }
 
 /** 推導鏈：從利害關係人一路到驗證，每一欄是一個層次，線是追溯關係。 */
-function Chain({ view, selectedId, onSelect }: Props) {
+export function Chain({ view, selectedId, onSelect }: Props) {
   const a = view.analysis;
   const cols: { zh: string; items: Element[] }[] = [
     { zh: "利害關係人與期望", items: listOf(a.elements, "Stakeholder", "Expectation") },
@@ -179,7 +159,7 @@ function Chain({ view, selectedId, onSelect }: Props) {
   );
 }
 
-function Path(p: Props) {
+export function Milestones(p: Props) {
   const { view, user, onChanged } = p;
   const [error, setError] = useState("");
   const setDate = async (gate: string, date: string) => {
@@ -215,16 +195,12 @@ function Path(p: Props) {
           })}
         </div>
       </section>
-      <section className="section">
-        <div className="section-head"><h2 className="section-title">推導鏈</h2><span className="label">需求是怎麼一步步來的</span></div>
-        <Chain {...p} />
-      </section>
     </>
   );
 }
 
 const blank: Doc = { id: "", title: "", type: "規則", revision: "", url: "", note: "" };
-function Docs({ view, user, onChanged }: Props) {
+export function Docs({ view, user, onChanged }: Props) {
   const id = view.project.id;
   const [form, setForm] = useState<Doc>(blank);
   const [error, setError] = useState("");

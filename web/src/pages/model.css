@@ -1,0 +1,11 @@
+/* 模型頁：圖上方的名稱列、左欄篩選、下方原始碼抽屜 */
+.model-bar { display: flex; align-items: center; gap: var(--space-3); min-height: 40px; padding: 0 var(--space-4); border-bottom: var(--stroke-hair) solid var(--line); flex: none; }
+.model-bar .grow { flex: 1; }
+.model-bar .tbtn[aria-pressed="true"] { color: var(--ink); font-weight: 700; }
+.model-main { display: flex; flex: 1; min-height: 0; }
+.model-filter { padding-top: var(--space-3); }
+.model-filter .input { width: 100%; }
+.source-drawer { flex: none; height: 45%; min-height: 240px; display: flex; flex-direction: column; border-top: var(--stroke-hair) solid var(--line-strong); background: var(--bg); }
+.source-drawer-head { padding: 0 var(--space-4); min-height: 32px; }
+.source-drawer-head .grow { flex: 1; }
+.source-drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--space-6) var(--space-4); display: flex; flex-direction: column; }

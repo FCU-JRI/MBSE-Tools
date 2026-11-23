@@ -27,7 +27,7 @@ export function mount(app: Express): void {
     if (!s.result) throw new store.UserError("還沒有模擬結果。");
     const bindings: sim.Binding[] = Array.isArray(req.body?.bindings) ? req.body.bindings : [];
     let a = await store.analyzeProject(id);
-    if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到「原始碼」分頁修正。");
+    if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const contents = new Map<string, string>();
     const applied: string[] = [];
     for (const b of bindings) {
