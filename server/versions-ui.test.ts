@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const PORT = 18971, PUB = 18972;
+const PORT = 18857, PUB = 18858;
 const I = `http://127.0.0.1:${PORT}`;
 let server: ChildProcess;
 let home: string;
