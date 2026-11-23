@@ -1,0 +1,55 @@
+/* 流程頁下半：討論白板 */
+.board { max-width: 1180px; margin: var(--space-8) auto 0; }
+.board-head { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap; }
+.board-grow { flex: 1; }
+.board-head .tbtn[aria-pressed="true"] { color: var(--warn); }
+.board-hint { margin: var(--space-1) 0 var(--space-2); }
+.board-tools { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; min-height: var(--row); padding: var(--space-1) 0; border-top: var(--stroke-hair) solid var(--line); }
+.board-tools .tbtn { margin: 0; }
+.board-tools .tbtn.danger { color: var(--danger); }
+.board-pick { width: auto; max-width: 22rem; height: 28px; font-size: 13px; }
+.board-swatch { width: 18px; height: 18px; padding: 0; border: var(--stroke-hair) solid var(--line-strong); cursor: pointer; }
+.board-swatch[aria-pressed="true"] { outline: var(--stroke-bold) solid var(--ink); outline-offset: 1px; }
+
+.board-canvas { position: relative; height: 560px; overflow: auto; border: var(--stroke-hair) solid var(--line); background:
+  radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0 / 24px 24px, var(--surface-1); }
+.board-canvas:focus { outline: none; }
+.board-canvas.linking, .board-canvas.linking * { cursor: crosshair !important; }
+.board-plane { position: relative; }
+
+/* 便利貼：淡色底，兩種主題都讀得到 */
+.c-yellow { --note: rgba(255, 176, 0, 0.22); }
+.c-blue { --note: rgba(80, 150, 255, 0.24); }
+.c-green { --note: rgba(40, 190, 130, 0.24); }
+.c-pink { --note: rgba(255, 90, 150, 0.22); }
+.c-gray { --note: rgba(150, 150, 150, 0.24); }
+.board-swatch { background: var(--note); }
+.board-note { position: absolute; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-2) var(--space-1);
+  background: linear-gradient(var(--note), var(--note)), var(--surface-2); border: var(--stroke-hair) solid var(--line-strong); cursor: grab; user-select: none; touch-action: none; z-index: 2; }
+.board-note:active { cursor: grabbing; }
+.board-note.sel, .board-frame.sel { outline: var(--stroke-bold) solid var(--ink); outline-offset: 1px; }
+.board-note.from, .board-frame.from { outline: var(--stroke-bold) dashed var(--warn); outline-offset: 2px; }
+.board-text { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-sans); font-size: 13px; line-height: 19px; white-space: pre-wrap; word-break: break-word; }
+textarea.board-text { width: 100%; padding: 0; border: 0; background: transparent; resize: none; outline: none; user-select: text; cursor: text; }
+.board-ref { align-self: flex-start; max-width: 100%; padding: 0; border: 0; background: none; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-ref:hover { text-decoration: underline; }
+.board-ref:disabled { color: var(--ink-faint); cursor: default; text-decoration: none; }
+.board-by { font-size: 11px; line-height: 14px; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+
+/* 框：虛線分區，拖標題移動 */
+.board-frame { position: absolute; border: var(--stroke-hair) dashed var(--line-strong); z-index: 0; }
+.board-frame-title { display: flex; align-items: center; height: 28px; padding: 0 var(--space-2); font-size: 12px; color: var(--ink-muted); cursor: grab; user-select: none; touch-action: none; }
+.board-frame-title .input { height: 24px; font-size: 12px; }
+
+.board-resize { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--line-strong) 50%); }
+
+/* 連線 */
+.board-links { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; overflow: visible; }
+.board-links g { pointer-events: stroke; cursor: pointer; }
+.board-links .hit { stroke: transparent; stroke-width: 12; }
+.board-links .ln { stroke: var(--line-strong); stroke-width: 1.5; }
+.board-links g.sel .ln { stroke: var(--ink); stroke-width: 2.5; }
+.board-links marker path { fill: var(--line-strong); }
+
+@media (max-width: 860px) { .board-canvas { height: 420px; } }
