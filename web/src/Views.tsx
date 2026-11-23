@@ -4,6 +4,8 @@ import { api } from "./api.ts";
 import type { Element, Gate, Me, Meta, View } from "./api.ts";
 import { label, listOf } from "./model.ts";
 import { methodZh } from "./Inspector.tsx";
+import { DataTable } from "./pages/tables/DataTable.tsx";
+import type { Col } from "./pages/tables/DataTable.tsx";
 
 
 export function TableView({ view, meta, catId, selectedId, onSelect }: { view: View; meta: Meta; catId: string; selectedId: string | null; onSelect: (id: string) => void }) {
@@ -15,29 +17,19 @@ export function TableView({ view, meta, catId, selectedId, onSelect }: { view: V
     ...view.analysis.relations.filter((r) => r.from === e.id && r.kind !== "succession" && r.kind !== "connect").map((r) => ({ zh: meta.relations[r.kind]?.zh ?? r.kind, o: byId.get(r.to) })),
     ...view.analysis.relations.filter((r) => r.to === e.id && r.kind !== "succession" && r.kind !== "connect").map((r) => ({ zh: `被${meta.relations[r.kind]?.zh ?? r.kind}`, o: byId.get(r.from) })),
   ].filter((x) => x.o);
-  return (
-    <section className="section">
-      <div className="section-head"><h1 className="section-title">{cat.zh}</h1><span className="label">{cat.en} · {rows.length}</span></div>
-      <p className="body muted" style={{ marginBottom: 16 }}>{cat.help}</p>
-      {rows.length === 0 ? <p className="body">還沒有{cat.zh}。在右側新增第一個。</p> : (
-        <table>
-          <thead><tr><th>編號</th><th>名稱</th><th>內容</th><th>關係</th></tr></thead>
-          <tbody>{rows.map((e) => (
-            <tr key={e.id} className="rowbtn" aria-selected={e.id === selectedId} onClick={() => onSelect(e.id)} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") onSelect(e.id); }}>
-              <td className="id">{e.shortName ?? "—"}</td>
-              <td>{e.name}</td>
-              <td>
-                {e.doc && <div>{e.doc}</div>}
-                {(cat.fields ?? []).filter((f) => e.attrs[f.name]).map((f) => <div key={f.name}><span className="faint">{f.zh}　</span>{e.attrs[f.name]}</div>)}
-                {e.attrs.kind && <div><span className="faint">方法　</span>{methodZh(e.attrs.kind)}</div>}
-              </td>
-              <td>{rel(e).map((r, i) => <div key={i}><span className="faint">{r.zh}　</span>{label(r.o as Element)}</div>)}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      )}
-    </section>
-  );
+  const fields = (e: Element) => (cat.fields ?? []).filter((f) => e.attrs[f.name]);
+  const cols: Col<Element>[] = [
+    { key: "id", title: "編號", text: (e) => e.shortName ?? "", cls: "id" },
+    { key: "name", title: "名稱", text: (e) => e.name },
+    { key: "content", title: "內容", text: (e) => [e.doc, ...fields(e).map((f) => `${f.zh} ${e.attrs[f.name]}`), e.attrs.kind ? `方法 ${methodZh(e.attrs.kind)}` : ""].filter(Boolean).join("；"),
+      render: (e) => <>
+        {e.doc && <div>{e.doc}</div>}
+        {fields(e).map((f) => <div key={f.name}><span className="faint">{f.zh}　</span>{e.attrs[f.name]}</div>)}
+        {e.attrs.kind && <div><span className="faint">方法　</span>{methodZh(e.attrs.kind)}</div>}
+      </> },
+    { key: "rel", title: "關係", text: (e) => rel(e).map((r) => `${r.zh} ${label(r.o as Element)}`).join("；"), render: (e) => <>{rel(e).map((r, i) => <div key={i}><span className="faint">{r.zh}　</span>{label(r.o as Element)}</div>)}</> },
+  ];
+  return <DataTable name={cat.zh} title={cat.zh} hint={cat.help} book={{ id: view.project.id, ok: view.analysis.ok }} rows={rows} cols={cols} rowId={(e) => e.id} selectedId={selectedId} onSelect={(e) => onSelect(e.id)} empty={`還沒有${cat.zh}。到「模型」頁新增第一個。`} />;
 }
 
 export function TraceView({ view, selectedId, onSelect }: { view: View; selectedId: string | null; onSelect: (id: string) => void }) {

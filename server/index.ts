@@ -18,6 +18,7 @@ import { mount as pm } from "./routes/pm.ts";
 import { mount as sim } from "./routes/sim.ts";
 import { mount as versionRoutes } from "./routes/versions.ts";
 import { mount as xlsx } from "./routes/export.ts";
+import { mount as tables } from "./routes/tables.ts";
 
 // 這個檔只負責共用的中介層、靜態檔與啟動；各功能的 API 在 server/routes/*.ts
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -81,7 +82,7 @@ app.get("/api/me", wrap(async (req, res) => {
 }));
 
 // 各功能的路由，依原本的順序掛上
-for (const m of [admin, projects, elements, diagrams, gates, pm, sim, versionRoutes, xlsx]) m(app);
+for (const m of [admin, projects, elements, diagrams, gates, pm, sim, versionRoutes, xlsx, tables]) m(app);
 
 const dist = path.join(ROOT, "dist");
 if (fs.existsSync(dist)) {

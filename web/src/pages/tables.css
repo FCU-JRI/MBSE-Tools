@@ -3,3 +3,22 @@
 .deliver-bar .seg button { height: 44px; }
 .fmea-top { display: flex; gap: var(--space-8); align-items: flex-start; margin-bottom: var(--space-4); flex-wrap: wrap; }
 .fmea-top > .stack { max-width: 34rem; }
+
+/* 統一工具列、快速篩選標籤、欄位與篩選面板 */
+.tbar { display: flex; align-items: center; gap: var(--space-6); flex-wrap: wrap; margin-bottom: var(--space-2); }
+.tbar-search { width: 14rem; flex: none; }
+.tbar .grow { flex: 1; }
+.tpanel { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-6); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); border: var(--stroke-hair) solid var(--line); }
+.tpanel .field { margin: 0; min-width: 10rem; }
+.tchips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.tchip { display: inline-flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-3); border: var(--stroke-hair) solid var(--line-strong); background: none; color: var(--ink-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.tchip:hover { color: var(--ink); }
+.tchip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.tchip .tc { font-size: 12px; opacity: 0.75; }
+.tscroll { overflow-x: auto; }
+.th-sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; text-align: left; }
+.th-sort:hover { color: var(--ink); }
+td.mark { text-align: center; }
+tr.static { cursor: default; }
+code.expr { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+@media print { .tscroll { overflow: visible; } }

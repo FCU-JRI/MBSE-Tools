@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { FormEvent } from "react";
 import { api } from "./api.ts";
 import type { Doc, Element, Me, Meta, View } from "./api.ts";
 import { label, listOf, wrap } from "./model.ts";
 import { methodZh } from "./Inspector.tsx";
 import { RiskGrid } from "./Dashboard.tsx";
+import { DataTable } from "./pages/tables/DataTable.tsx";
+import type { Col } from "./pages/tables/DataTable.tsx";
+
+const bookOf = (v: View) => ({ id: v.project.id, ok: v.analysis.ok });
 
 const REQ = ["SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
 const when = (s: string) => new Date(s).toLocaleDateString("zh-TW");
@@ -22,47 +26,39 @@ function SourceCell({ e, docs }: { e: Element; docs: Doc[] }) {
 }
 
 export function ReqMatrix({ view, meta, selectedId, onSelect }: Props) {
-  const [level, setLevel] = useState("");
-  const [gap, setGap] = useState(false);
   const a = view.analysis;
   const byId = new Map(a.elements.map((e) => [e.id, e]));
   const sat = new Map(a.satisfaction.map((s) => [s.requirement, s.status]));
   const outs = (e: Element, ...k: string[]) => a.relations.filter((r) => r.from === e.id && k.includes(r.kind)).map((r) => byId.get(r.to)).filter((x): x is Element => !!x);
   const ins = (e: Element, ...k: string[]) => a.relations.filter((r) => r.to === e.id && k.includes(r.kind)).map((r) => byId.get(r.from)).filter((x): x is Element => !!x);
   const all = listOf(a.elements, ...REQ);
-  const missing = (e: Element) => (outs(e, "derive", "refine", "trace").length === 0 && !e.attrs.sourceDoc) || ins(e, "satisfy").length === 0 || ins(e, "verify").length === 0;
-  const rows = all.filter((e) => (!level || e.category === level) && (!gap || missing(e)));
+  const noUp = (e: Element) => outs(e, "derive", "refine", "trace").length === 0 && !e.attrs.sourceDoc;
+  const noSat = (e: Element) => ins(e, "satisfy").length === 0;
+  const noVer = (e: Element) => ins(e, "verify").length === 0;
+  const verdict = (e: Element) => sat.get(e.qualifiedName);
   const miss = <span className="tag danger">MISS</span>;
   const list = (xs: Element[]) => (xs.length ? xs.map((x) => <div key={x.id}>{label(x)}</div>) : miss);
+  const names = (xs: Element[]) => (xs.length ? xs.map(label).join("、") : "MISS");
+  const cols: Col<Element>[] = [
+    { key: "id", title: "編號", text: (e) => e.shortName ?? "", cls: "id" },
+    { key: "level", title: "層級", text: (e) => meta.categories.find((c) => c.id === e.category)?.zh.replace("層需求", "") ?? "", cls: "id" },
+    { key: "name", title: "需求", text: (e) => e.name, render: (e) => <><div>{e.name}</div><div className="caption">{e.doc}</div></> },
+    { key: "doc", title: "內容", text: (e) => e.doc, hidden: true },
+    { key: "source", title: "出處", text: (e) => (e.attrs.sourceDoc ? `${e.attrs.sourceDoc}${e.attrs.sourceRef ? ` §${e.attrs.sourceRef}` : ""}` : ""), render: (e) => <SourceCell e={e} docs={view.docs} />, cls: "id" },
+    { key: "up", title: "上層", text: (e) => (noUp(e) ? "MISS" : outs(e, "derive", "refine", "trace").map(label).join("、") || "見出處"), render: (e) => (outs(e, "derive", "refine", "trace").length ? outs(e, "derive", "refine", "trace").map((x) => <div key={x.id}>{label(x)}</div>) : e.attrs.sourceDoc ? <span className="faint">見出處</span> : miss) },
+    { key: "sat", title: "滿足者", text: (e) => names(ins(e, "satisfy")), render: (e) => list(ins(e, "satisfy")) },
+    { key: "ver", title: "驗證", text: (e) => (noVer(e) ? "MISS" : ins(e, "verify").map((x) => `${label(x)}${x.attrs.kind ? `　${methodZh(x.attrs.kind)}` : ""}`).join("、")), render: (e) => (ins(e, "verify").length ? ins(e, "verify").map((x) => <div key={x.id}>{label(x)}{x.attrs.kind && <span className="faint">　{methodZh(x.attrs.kind)}</span>}</div>) : miss) },
+    { key: "verdict", title: "判定", text: (e) => (verdict(e) === "holds" ? "PASS" : verdict(e) === "fails" ? "FAIL" : ""), render: (e) => (verdict(e) === "holds" ? <span className="tag done">PASS</span> : verdict(e) === "fails" ? <span className="tag danger">FAIL</span> : <span className="faint">—</span>) },
+  ];
   return (
-    <section className="section">
-      <div className="section-head"><h1 className="section-title">需求矩陣</h1><span className="label">{rows.length} / {all.length} · 缺項 {all.filter(missing).length}</span></div>
-      <div className="row no-print">
-        <label className="field" style={{ flex: "0 0 12rem" }}><span className="label">層級</span>
-          <select className="input" value={level} onChange={(e) => setLevel(e.target.value)}><option value="">全部</option>{REQ.map((c) => <option key={c} value={c}>{meta.categories.find((x) => x.id === c)?.zh}</option>)}</select></label>
-        <label className="check" style={{ marginBottom: 12 }}><input type="checkbox" checked={gap} onChange={(e) => setGap(e.target.checked)} /><span className="caption">只看有缺項的</span></label>
-      </div>
-      {rows.length === 0 ? <p className="body">{all.length ? "沒有符合條件的需求。" : "還沒有需求。到「模型」頁新增。"}</p> : (
-        <table>
-          <thead><tr><th>編號</th><th>層級</th><th>需求</th><th>出處</th><th>上層</th><th>滿足者</th><th>驗證</th><th>判定</th></tr></thead>
-          <tbody>{rows.map((e) => {
-            const ev = ins(e, "verify"), up = outs(e, "derive", "refine", "trace"), s = sat.get(e.qualifiedName);
-            return (
-              <tr key={e.id} className="rowbtn" aria-selected={e.id === selectedId} onClick={() => onSelect(e.id)} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") onSelect(e.id); }}>
-                <td className="id">{e.shortName ?? "—"}</td>
-                <td className="id">{meta.categories.find((c) => c.id === e.category)?.zh.replace("層需求", "")}</td>
-                <td><div>{e.name}</div><div className="caption">{e.doc}</div></td>
-                <td className="id"><SourceCell e={e} docs={view.docs} /></td>
-                <td>{up.length ? up.map((x) => <div key={x.id}>{label(x)}</div>) : e.attrs.sourceDoc ? <span className="faint">見出處</span> : miss}</td>
-                <td>{list(ins(e, "satisfy"))}</td>
-                <td>{ev.length ? ev.map((x) => <div key={x.id}>{label(x)}{x.attrs.kind && <span className="faint">　{methodZh(x.attrs.kind)}</span>}</div>) : miss}</td>
-                <td>{s === "holds" ? <span className="tag done">PASS</span> : s === "fails" ? <span className="tag danger">FAIL</span> : <span className="faint">—</span>}</td>
-              </tr>
-            );
-          })}</tbody>
-        </table>
-      )}
-    </section>
+    <DataTable name="需求矩陣" title="需求矩陣" book={bookOf(view)} rows={all} cols={cols} rowId={(e) => e.id} selectedId={selectedId} onSelect={(e) => onSelect(e.id)}
+      hint="每條需求要有出處或上層、滿足者與驗證。標 MISS 的是還沒補上的；點一列，右側顯示屬性。"
+      chips={[
+        { id: "noVer", label: "缺驗證", test: noVer }, { id: "noSat", label: "缺滿足者", test: noSat }, { id: "noUp", label: "缺上層", test: noUp },
+        { id: "fail", label: "FAIL", test: (e) => verdict(e) === "fails" }, { id: "pass", label: "PASS", test: (e) => verdict(e) === "holds" },
+      ]}
+      filters={[{ id: "level", label: "層級", options: REQ.map((c) => [c, meta.categories.find((x) => x.id === c)?.zh ?? c]), test: (e, v) => e.category === v }]}
+      empty="還沒有需求。到「模型」頁新增。" />
   );
 }
 
@@ -72,41 +68,50 @@ export function Fmea({ view, selectedId, onSelect }: Props) {
   const risks = listOf(view.analysis.elements, "Risk");
   const n = (e: Element, k: string) => Number(e.attrs[k]) || 0;
   const score = (e: Element) => n(e, "severity") * n(e, "likelihood");
-  const rows = [...risks].filter((r) => !pick || pick.includes(r.id)).sort((x, y) => score(y) - score(x));
+  const after = (e: Element) => n(e, "residualSeverity") * n(e, "residualLikelihood");
+  const sorted = [...risks].sort((x, y) => score(y) - score(x));
+  const pre = useCallback((e: Element) => !pick || pick.includes(e.id), [pick]);
   const tag = (v: number) => (v >= 15 ? <span className="tag danger">{v}</span> : v >= 8 ? <span className="tag warn">{v}</span> : v > 0 ? <span className="tag">{v}</span> : <span className="faint">—</span>);
-  return (
-    <section className="section">
-      <div className="section-head"><h1 className="section-title">FMEA 風險矩陣</h1><span className="label">{risks.length} 項 · 高 {risks.filter((r) => score(r) >= 15).length} · 中 {risks.filter((r) => score(r) >= 8 && score(r) < 15).length}</span></div>
-      <div className="fmea-top">
-        <div>
-          <nav className="seg no-print" role="tablist" style={{ gap: 16 }}>
-            <button role="tab" aria-selected={!residual} onClick={() => setResidual(false)}>緩解前</button>
-            <button role="tab" aria-selected={residual} onClick={() => setResidual(true)}>緩解後</button>
-          </nav>
-          <RiskGrid risks={risks} residual={residual} size={46} onPick={(ids) => setPick(ids)} />
-          <p className="caption">橫軸　嚴重度 1–5　　縱軸　可能性 1–5</p>
-        </div>
-        <div className="stack">
-          <p className="body muted">格子裡的數字是落在該處的風險件數，點格子只看那幾項。風險值＝嚴重度 × 可能性：15 以上為高，8 到 14 為中。</p>
-          <p className="caption">RPN＝嚴重度 × 可能性 × 偵測度。偵測度越高代表越難在出事前發現。</p>
-          {pick && <div><button className="tbtn primary" onClick={() => setPick(null)}>顯示全部</button></div>}
-        </div>
+  const dash = (v: number) => (v ? String(v) : "");
+  const cols: Col<Element>[] = [
+    { key: "id", title: "編號", text: (e) => e.shortName ?? "", cls: "id" },
+    { key: "mode", title: "失效模式", text: (e) => e.attrs.failureMode || e.name },
+    { key: "effect", title: "影響", text: (e) => e.attrs.effect ?? "" },
+    { key: "cause", title: "原因", text: (e) => e.attrs.cause ?? "" },
+    { key: "s", title: "S", text: (e) => dash(n(e, "severity")), cls: "id" },
+    { key: "o", title: "O", text: (e) => dash(n(e, "likelihood")), cls: "id" },
+    { key: "d", title: "D", text: (e) => dash(n(e, "detection")), cls: "id" },
+    { key: "score", title: "風險值", text: (e) => dash(score(e)).padStart(3, "0"), render: (e) => tag(score(e)) },
+    { key: "rpn", title: "RPN", text: (e) => dash(score(e) * n(e, "detection")).padStart(4, "0"), render: (e) => <>{score(e) * n(e, "detection") || "—"}</>, cls: "id" },
+    { key: "mit", title: "緩解措施", text: (e) => e.attrs.mitigation ?? "MISS", render: (e) => <>{e.attrs.mitigation || <span className="tag danger">MISS</span>}</> },
+    { key: "after", title: "緩解後", text: (e) => dash(after(e)).padStart(3, "0"), render: (e) => tag(after(e)) },
+    { key: "owner", title: "負責人", text: (e) => e.attrs.owner ?? "" },
+    { key: "status", title: "狀態", text: (e) => e.attrs.status || "開啟" },
+  ];
+  const grid = (
+    <div className="fmea-top">
+      <div>
+        <nav className="seg no-print" role="tablist" style={{ gap: 16 }}>
+          <button role="tab" aria-selected={!residual} onClick={() => setResidual(false)}>緩解前</button>
+          <button role="tab" aria-selected={residual} onClick={() => setResidual(true)}>緩解後</button>
+        </nav>
+        <RiskGrid risks={risks} residual={residual} size={46} onPick={(ids) => setPick(ids)} />
+        <p className="caption">橫軸　嚴重度 1–5　　縱軸　可能性 1–5</p>
       </div>
-      {rows.length === 0 ? <p className="body">還沒有風險。到模型頁左欄「風險與安全」新增。</p> : (
-        <table>
-          <thead><tr><th>編號</th><th>失效模式</th><th>影響</th><th>原因</th><th>S</th><th>O</th><th>D</th><th>風險值</th><th>RPN</th><th>緩解措施</th><th>緩解後</th><th>負責人</th><th>狀態</th></tr></thead>
-          <tbody>{rows.map((e) => (
-            <tr key={e.id} className="rowbtn" aria-selected={e.id === selectedId} onClick={() => onSelect(e.id)} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") onSelect(e.id); }}>
-              <td className="id">{e.shortName ?? "—"}</td><td>{e.attrs.failureMode || e.name}</td><td>{e.attrs.effect}</td><td>{e.attrs.cause}</td>
-              <td className="id">{n(e, "severity") || "—"}</td><td className="id">{n(e, "likelihood") || "—"}</td><td className="id">{n(e, "detection") || "—"}</td>
-              <td>{tag(score(e))}</td><td className="id">{score(e) * n(e, "detection") || "—"}</td>
-              <td>{e.attrs.mitigation || <span className="tag danger">MISS</span>}</td>
-              <td>{tag(n(e, "residualSeverity") * n(e, "residualLikelihood"))}</td><td>{e.attrs.owner}</td><td>{e.attrs.status || "開啟"}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      )}
-    </section>
+      <div className="stack">
+        <p className="body muted">格子裡的數字是落在該處的風險件數，點格子只看那幾項。風險值＝嚴重度 × 可能性：15 以上為高，8 到 14 為中。</p>
+        <p className="caption">RPN＝嚴重度 × 可能性 × 偵測度。偵測度越高代表越難在出事前發現。</p>
+        {pick && <div><button className="tbtn primary" onClick={() => setPick(null)}>顯示全部</button></div>}
+      </div>
+    </div>
+  );
+  return (
+    <DataTable name="FMEA" title="FMEA 風險矩陣" book={bookOf(view)} rows={sorted} cols={cols} rowId={(e) => e.id} selectedId={selectedId} onSelect={(e) => onSelect(e.id)} above={grid} preFilter={pre}
+      chips={[
+        { id: "high", label: "高（15 以上）", test: (e) => score(e) >= 15 }, { id: "mid", label: "中（8–14）", test: (e) => score(e) >= 8 && score(e) < 15 },
+        { id: "noMit", label: "缺緩解", test: (e) => !e.attrs.mitigation }, { id: "open", label: "未結", test: (e) => (e.attrs.status || "開啟") !== "已結" },
+      ]}
+      empty="還沒有風險。到模型頁左欄「風險與安全」新增。" />
   );
 }
 
@@ -211,23 +216,19 @@ export function Docs({ view, user, onChanged }: Props) {
     try { await api(`/projects/${id}/pm/docs`, "POST", { ...form }); setForm(blank); await reload(); } catch (e) { setError((e as Error).message); }
   };
   const del = async (d: Doc) => { setError(""); try { await api(`/projects/${id}/pm/docs/delete`, "POST", { id: d.id }); setForm(blank); await reload(); } catch (e) { setError((e as Error).message); } };
+  const docCols: Col<Doc>[] = [
+    { key: "id", title: "編號", text: (d) => d.id, cls: "id" },
+    { key: "title", title: "名稱", text: (d) => `${d.title} ${d.note}`, render: (d) => <>{d.title}<div className="caption">{d.note}</div></> },
+    { key: "type", title: "類型", text: (d) => d.type },
+    { key: "rev", title: "版次", text: (d) => d.revision, cls: "id" },
+    { key: "url", title: "連結", text: (d) => d.url, render: (d) => (d.url ? <a href={d.url} target="_blank" rel="noreferrer noopener" onClick={(e) => e.stopPropagation()}>開啟</a> : <span className="faint">—</span>) },
+    { key: "used", title: "被引用", text: (d) => String(used(d)).padStart(4, "0"), render: (d) => <>{used(d)} 項</>, cls: "id" },
+  ];
   return (
     <section className="section">
-      <div className="section-head"><h1 className="section-title">來源文件</h1><span className="label">{view.docs.length}</span></div>
       <p className="body muted" style={{ marginBottom: 12 }}>需求書、競賽規則、標準等。這裡只記連結，檔案本身放在 Google Drive。登記後，每個項目都可以在右側欄標註出處。</p>
       {error && <p className="msg"><span className="tag danger">ERR</span>{error}</p>}
-      {view.docs.length > 0 && (
-        <table style={{ marginBottom: 16 }}>
-          <thead><tr><th>編號</th><th>名稱</th><th>類型</th><th>版次</th><th>連結</th><th>被引用</th></tr></thead>
-          <tbody>{view.docs.map((d) => (
-            <tr key={d.id} className="rowbtn" aria-selected={form.id === d.id} onClick={() => user.caps.edit && setForm(d)}>
-              <td className="id">{d.id}</td><td>{d.title}<div className="caption">{d.note}</div></td><td>{d.type}</td><td className="id">{d.revision}</td>
-              <td>{d.url ? <a href={d.url} target="_blank" rel="noreferrer noopener" onClick={(e) => e.stopPropagation()}>開啟</a> : <span className="faint">—</span>}</td>
-              <td className="id">{used(d)} 項</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      )}
+      <DataTable name="來源文件" title="來源文件" book={bookOf(view)} rows={view.docs} cols={docCols} rowId={(d) => d.id} selectedId={form.id} onSelect={(d) => user.caps.edit && setForm(d)} empty="還沒有登記文件。" />
       {user.caps.edit && (
         <form onSubmit={save} className="no-print">
           <div className="row">

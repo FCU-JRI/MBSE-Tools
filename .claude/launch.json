@@ -1,6 +1,1 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    { "name": "jri-mbse", "runtimeExecutable": "node", "runtimeArgs": ["server/index.ts"], "port": 8787 }
-  ]
-}
+{ "version": "0.0.1", "configurations": [ { "name": "mbse-2b", "runtimeExecutable": "env", "runtimeArgs": ["JRI_HOME=/private/tmp/claude-501/-Users-mars-Documents-JRI-JRI-MBSE--claude-worktrees-vibrant-murdock-aaac8e/b2875817-3758-4ed3-b42e-1b4f6355d152/scratchpad/home-2b", "PORT=18920", "PUBLIC_PORT=18921", "node", "server/index.ts"], "port": 18920 } ] }
