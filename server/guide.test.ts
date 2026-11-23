@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { STEPS } from "./process.ts";
 
-const PORT = 18827, PUB = 18828; // 和其他測試檔錯開（api 18787、google 18797、members 18807、closure 18817）
+const PORT = 18847, PUB = 18848; // 和其他測試檔錯開（api 18787、google 18797、members 18807、closure 18817）
 const I = `http://127.0.0.1:${PORT}`, P = `http://127.0.0.1:${PUB}`;
 let home = "";
 let server: ChildProcess;
