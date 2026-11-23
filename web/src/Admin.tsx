@@ -3,22 +3,27 @@ import type { FormEvent } from "react";
 import { api } from "./api.ts";
 import type { Project } from "./api.ts";
 
-interface Member { login: string; name: string; rank: string; subsystems: string[]; admin: boolean; tailscale?: string }
+interface Member { email: string; github?: string; name: string; rank: string; subsystems: string[]; admin: boolean; tailscale?: string }
+interface JoinRequest { email: string; name: string; requestedAt: string }
+/** previous：修改前的主鍵（email，舊資料則是 GitHub 帳號），改 email 時用來換掉舊的那筆 */
+type MemberForm = Member & { previous?: string };
 interface Share { id: string; project: string; label: string; createdBy: string; createdAt: string; expiresAt: string }
 interface AutoRepo { enabled: boolean; owner: string; visibility: "public" | "private" }
-interface Cfg { publicUrl: string; clientId: string; hasSecret: boolean; autoRepo: AutoRepo }
+interface Cfg { publicUrl: string; clientId: string; hasSecret: boolean; google: { clientId: string; hasSecret: boolean }; autoRepo: AutoRepo }
 
-const blank: Member = { login: "", name: "", rank: "C-II", subsystems: [], admin: false };
+const blank: MemberForm = { email: "", github: "", name: "", rank: "C-II", subsystems: [], admin: false };
 
-/** 管理頁：成員與職級、唯讀連結、GitHub 登入設定。 */
+/** 管理頁：成員與職級、加入申請、唯讀連結、登入設定（Google，GitHub 為第二選項）。 */
 export function Admin() {
   const [members, setMembers] = useState<Member[]>([]);
   const [ranks, setRanks] = useState<{ id: string; zh: string }[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [cfg, setCfg] = useState<Cfg>({ publicUrl: "", clientId: "", hasSecret: false, autoRepo: { enabled: false, owner: "", visibility: "public" } });
+  const [requests, setRequests] = useState<JoinRequest[]>([]);
+  const [cfg, setCfg] = useState<Cfg>({ publicUrl: "", clientId: "", hasSecret: false, google: { clientId: "", hasSecret: false }, autoRepo: { enabled: false, owner: "", visibility: "public" } });
   const [secret, setSecret] = useState("");
-  const [form, setForm] = useState<Member>(blank);
+  const [googleSecret, setGoogleSecret] = useState("");
+  const [form, setForm] = useState<MemberForm>(blank);
   const [share, setShare] = useState({ project: "", label: "", days: "14" });
   const [link, setLink] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -33,6 +38,7 @@ export function Admin() {
     run(async () => {
       const m = await api<{ members: Member[]; ranks: { id: string; zh: string }[] }>("/admin/members");
       setMembers(m.members); setRanks(m.ranks);
+      setRequests((await api<{ requests: JoinRequest[] }>("/admin/requests")).requests);
       setShares((await api<{ shares: Share[] }>("/admin/shares")).shares);
       const ps = await api<Project[]>("/projects");
       setProjects(ps); setShare((s) => ({ ...s, project: ps[0]?.id ?? "" }));
@@ -44,7 +50,11 @@ export function Admin() {
     });
   }, []);
 
-  const saveMember = (ev: FormEvent) => { ev.preventDefault(); run(async () => { setMembers((await api<{ members: Member[] }>("/admin/members", "POST", { ...form })).members); setForm(blank); }, "已儲存成員。"); };
+  const saveMember = (ev: FormEvent) => { ev.preventDefault(); run(async () => {
+    setMembers((await api<{ members: Member[] }>("/admin/members", "POST", { ...form })).members); setForm(blank);
+    setRequests((await api<{ requests: JoinRequest[] }>("/admin/requests")).requests); // 核准後申請會自動消失
+  }, "已儲存成員。"); };
+  const dismissRequest = (email: string) => run(async () => setRequests((await api<{ requests: JoinRequest[] }>("/admin/requests/delete", "POST", { email })).requests));
   const makeShare = (ev: FormEvent) => {
     ev.preventDefault();
     run(async () => {
@@ -53,7 +63,7 @@ export function Admin() {
       setShares((s) => [...s, r.share]);
     });
   };
-  const saveCfg = (ev: FormEvent) => { ev.preventDefault(); run(async () => { await api("/admin/config", "POST", { publicUrl: cfg.publicUrl, clientId: cfg.clientId, clientSecret: secret }); setSecret(""); setCfg(await api<Cfg>("/admin/config")); }, "已儲存登入設定。"); };
+  const saveCfg = (ev: FormEvent) => { ev.preventDefault(); run(async () => { await api("/admin/config", "POST", { publicUrl: cfg.publicUrl, googleClientId: cfg.google.clientId, googleClientSecret: googleSecret, clientId: cfg.clientId, clientSecret: secret }); setSecret(""); setGoogleSecret(""); setCfg(await api<Cfg>("/admin/config")); }, "已儲存登入設定。"); };
   const saveLib = (ev: FormEvent) => { ev.preventDefault(); run(async () => {
     await api(`/shared/${encodeURIComponent(lib.file)}`, "PUT", { content: lib.content });
     setSharedFiles((await api<{ files: { file: string; content: string }[] }>("/shared")).files);
@@ -62,7 +72,8 @@ export function Admin() {
   const repo = cfg.autoRepo;
   const setRepo = (patch: Partial<AutoRepo>) => setCfg({ ...cfg, autoRepo: { ...repo, ...patch } });
   const saveRepo = (ev: FormEvent) => { ev.preventDefault(); run(async () => { await api("/admin/config", "POST", { autoRepo: repo }); setCfg(await api<Cfg>("/admin/config")); }, "已儲存儲存庫設定。"); };
-  const callback =`${cfg.publicUrl || "（先填公開網址）"}/auth/github/callback`;
+  const base = cfg.publicUrl || "（先填公開網址）";
+  const googleReady = !!(cfg.google.clientId && cfg.google.hasSecret && cfg.publicUrl), githubReady = !!(cfg.clientId && cfg.hasSecret && cfg.publicUrl);
 
   return (
     <main className="page" style={{ width: "100%" }}>
@@ -70,21 +81,33 @@ export function Admin() {
 
       <section className="section">
         <div className="section-head"><h1 className="section-title">成員</h1><span className="label">{members.length}</span></div>
-        <p className="body muted" style={{ marginBottom: 12 }}>只有名單上的 GitHub 帳號能登入。職級決定能做什麼：組員可編輯模型，責任工程師以上可做人工確認，簽核依 AEAS 規定的職級。</p>
+        <p className="body muted" style={{ marginBottom: 12 }}>只有名單上的 Google 帳號（email）能從公開網址登入；有填 GitHub 帳號的成員也可以改用 GitHub 登入。職級決定能做什麼：組員可編輯模型，責任工程師以上可做人工確認，簽核依 AEAS 規定的職級。</p>
         {members.length > 0 && (
           <table style={{ marginBottom: 16 }}>
-            <thead><tr><th>GitHub 帳號</th><th>姓名</th><th>職級</th><th>次系統</th><th>管理員</th><th></th></tr></thead>
+            <thead><tr><th>Google email</th><th>GitHub 帳號</th><th>姓名</th><th>職級</th><th>次系統</th><th>管理員</th><th></th></tr></thead>
             <tbody>{members.map((m) => (
-              <tr key={m.login}>
-                <td className="id">{m.login}</td><td>{m.name}</td><td>{rankZh(m.rank)} <span className="faint">[{m.rank}]</span></td><td>{m.subsystems.join("、") || "—"}</td><td>{m.admin ? "是" : "—"}</td>
-                <td><div className="tbtn-row"><button className="tbtn" onClick={() => setForm({ ...m })}>修改</button><button className="tbtn" onClick={() => run(async () => setMembers((await api<{ members: Member[] }>("/admin/members/delete", "POST", { login: m.login })).members))}>移除</button></div></td>
+              <tr key={m.email || `github:${m.github}`}>
+                <td className="id">{m.email || <span className="tag">待補</span>}</td><td className="id">{m.github || "—"}</td><td>{m.name}</td><td>{rankZh(m.rank)} <span className="faint">[{m.rank}]</span></td><td>{m.subsystems.join("、") || "—"}</td><td>{m.admin ? "是" : "—"}</td>
+                <td><div className="tbtn-row"><button className="tbtn" onClick={() => setForm({ ...m, github: m.github ?? "", previous: m.email || m.github })}>修改</button><button className="tbtn" onClick={() => run(async () => setMembers((await api<{ members: Member[] }>("/admin/members/delete", "POST", m.email ? { email: m.email } : { login: m.github })).members))}>移除</button></div></td>
               </tr>
             ))}</tbody>
           </table>
         )}
+        {requests.length > 0 && (<>
+          <h3 className="label" style={{ margin: "8px 0" }}>加入申請（{requests.length}）</h3>
+          <p className="caption" style={{ marginBottom: 8 }}>名單外的人用 Google 登入後會出現在這裡。按「核准」帶入下方表單，設定職級後儲存即加入；不認識的就按「忽略」。</p>
+          <table style={{ marginBottom: 16 }}>
+            <thead><tr><th>Google email</th><th>Google 上的名字</th><th>申請時間</th><th></th></tr></thead>
+            <tbody>{requests.map((r) => (
+              <tr key={r.email}><td className="id">{r.email}</td><td>{r.name || "—"}</td><td className="id">{new Date(r.requestedAt).toLocaleString("zh-TW")}</td>
+                <td><div className="tbtn-row"><button className="tbtn" onClick={() => setForm({ ...blank, email: r.email, name: r.name })}>核准</button><button className="tbtn" onClick={() => dismissRequest(r.email)}>忽略</button></div></td></tr>
+            ))}</tbody>
+          </table>
+        </>)}
         <form onSubmit={saveMember}>
           <div className="row">
-            <label className="field"><span className="label">GitHub 帳號</span><input className="input" required value={form.login} onChange={(e) => setForm({ ...form, login: e.target.value })} /></label>
+            <label className="field"><span className="label">Google email</span><input className="input" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+            <label className="field"><span className="label">GitHub 帳號（選填）</span><input className="input" value={form.github ?? ""} onChange={(e) => setForm({ ...form, github: e.target.value })} /></label>
             <label className="field"><span className="label">姓名</span><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
             <label className="field"><span className="label">職級</span><select className="input" value={form.rank} onChange={(e) => setForm({ ...form, rank: e.target.value })}>{ranks.map((r) => <option key={r.id} value={r.id}>{r.zh} [{r.id}]</option>)}</select></label>
             <label className="field"><span className="label">次系統（用頓號分隔）</span><input className="input" value={form.subsystems.join("、")} onChange={(e) => setForm({ ...form, subsystems: e.target.value.split(/[、,，]/) })} /></label>
@@ -133,14 +156,21 @@ export function Admin() {
       </section>
 
       <section className="section">
-        <div className="section-head"><h2 className="section-title">GitHub 登入</h2><span className="label">{cfg.clientId && cfg.hasSecret && cfg.publicUrl ? "已設定" : "未設定"}</span></div>
-        <p className="body muted" style={{ marginBottom: 12 }}>成員從公開網址登入時使用。到 GitHub → Settings → Developer settings → OAuth Apps 建立一個 App，Authorization callback URL 填下面那一行，再把 Client ID 與 Client secret 貼到這裡。</p>
-        <p className="caption" style={{ marginBottom: 12 }}>Callback URL　<span className="data">{callback}</span></p>
+        <div className="section-head"><h2 className="section-title">登入設定</h2><span className="label">Google {googleReady ? "已設定" : "未設定"} · GitHub {githubReady ? "已設定" : "未設定"}</span></div>
+        <p className="body muted" style={{ marginBottom: 12 }}>成員從公開網址登入時使用。Google 為主要登入方式：到 Google Cloud Console → API 和服務 → 憑證，建立「OAuth 用戶端 ID」（網頁應用程式），「已授權的重新導向 URI」填下面 Google 那一行。GitHub 為第二選項，可不設定：到 GitHub → Settings → Developer settings → OAuth Apps 建立 App，Authorization callback URL 填 GitHub 那一行。Client secret 只存在這台電腦。</p>
+        <p className="caption">Google 重新導向 URI　<span className="data">{base}/auth/google/callback</span></p>
+        <p className="caption" style={{ marginBottom: 12 }}>GitHub callback URL　<span className="data">{base}/auth/github/callback</span></p>
         <form onSubmit={saveCfg}>
           <div className="row">
             <label className="field"><span className="label">公開網址</span><input className="input" value={cfg.publicUrl} onChange={(e) => setCfg({ ...cfg, publicUrl: e.target.value })} placeholder="https://…ts.net:8443" /></label>
-            <label className="field"><span className="label">Client ID</span><input className="input" value={cfg.clientId} onChange={(e) => setCfg({ ...cfg, clientId: e.target.value })} /></label>
-            <label className="field"><span className="label">Client secret{cfg.hasSecret ? "（已儲存，留空不變）" : ""}</span><input className="input" type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} /></label>
+          </div>
+          <div className="row">
+            <label className="field"><span className="label">Google Client ID</span><input className="input" value={cfg.google.clientId} onChange={(e) => setCfg({ ...cfg, google: { ...cfg.google, clientId: e.target.value } })} /></label>
+            <label className="field"><span className="label">Google Client secret{cfg.google.hasSecret ? "（已儲存，留空不變）" : ""}</span><input className="input" type="password" autoComplete="off" value={googleSecret} onChange={(e) => setGoogleSecret(e.target.value)} /></label>
+          </div>
+          <div className="row">
+            <label className="field"><span className="label">GitHub Client ID（選填）</span><input className="input" value={cfg.clientId} onChange={(e) => setCfg({ ...cfg, clientId: e.target.value })} /></label>
+            <label className="field"><span className="label">GitHub Client secret{cfg.hasSecret ? "（已儲存，留空不變）" : ""}</span><input className="input" type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} /></label>
           </div>
           <button className="tbtn primary">儲存設定</button>
         </form>

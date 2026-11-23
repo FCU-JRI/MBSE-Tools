@@ -1,6 +1,6 @@
 // 身分與權限。
 // 兩個連接埠：內部埠（本機與 Tailscale 私人網路）與公開埠（Funnel）。
-// 公開埠一律要 GitHub 登入或唯讀連結，不信任任何代理標頭。
+// 公開埠一律要登入（Google，GitHub 為第二選項）或唯讀連結，不信任任何代理標頭。
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -8,12 +8,14 @@ import { fileURLToPath } from "node:url";
 import type { NextFunction, Request, Response } from "express";
 import { GITHUB_OWNER, UserError } from "./projects.ts";
 import type { AutoRepo } from "./projects.ts";
+import { GOOGLE, IdTokenError, exchangeCode, verifyIdToken } from "./google.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = path.resolve(process.env.JRI_HOME ?? path.join(ROOT, "data"));
 const CONFIG_FILE = path.join(DATA, "config.json");
 const USERS_FILE = path.join(DATA, "users.json");
 const SHARES_FILE = path.join(DATA, "shares.json");
+const REQUESTS_FILE = path.join(DATA, "requests.json");
 
 export const INTERNAL_PORT = Number(process.env.PORT ?? 8787);
 export const PUBLIC_PORT = Number(process.env.PUBLIC_PORT ?? 8788);
@@ -27,7 +29,8 @@ export const RANK_ZH: Record<Rank, string> = {
 const LEVEL: Record<Rank, number> = { "F-VIII": 8, "R-VIII": 8, "D-VII": 7, "O-VI": 6, "O-V": 5, "O-IV": 4, "C-III": 3, "C-II": 2 };
 
 export interface Member {
-  login: string; // GitHub 帳號（小寫）
+  email: string; // Google 帳號的 email（小寫），成員名單的主鍵
+  github?: string; // GitHub 帳號（小寫），第二種登入方式，可不填
   name: string;
   rank: Rank;
   subsystems: string[];
@@ -35,11 +38,15 @@ export interface Member {
   tailscale?: string; // Tailscale 登入名稱，私人網路內免登入
 }
 
+/** 名單外的人用 Google 登入後留下的加入申請，等管理員核准。 */
+export interface JoinRequest { email: string; name: string; requestedAt: string }
+
 export interface Share { id: string; hash: string; project: string; label: string; createdBy: string; createdAt: string; expiresAt: string }
 
 export interface Config {
   sessionSecret: string;
   publicUrl: string; // 公開網址，例如 https://jri-mbse.xxx.ts.net:8443
+  google: { clientId: string; clientSecret: string };
   github: { clientId: string; clientSecret: string };
   tailscaleAdmins: string[]; // 這些 Tailscale 登入視為管理員
   autoRepo: AutoRepo; // 新專案自動在 GitHub 建立儲存庫
@@ -108,6 +115,7 @@ export async function getConfig(): Promise<Config> {
   config = {
     sessionSecret: c.sessionSecret || randomBytes(32).toString("hex"),
     publicUrl: c.publicUrl ?? "",
+    google: { clientId: c.google?.clientId ?? "", clientSecret: c.google?.clientSecret ?? "" },
     github: { clientId: c.github?.clientId ?? "", clientSecret: c.github?.clientSecret ?? "" },
     tailscaleAdmins: c.tailscaleAdmins ?? [],
     autoRepo: { enabled: c.autoRepo?.enabled === true, owner: c.autoRepo?.owner ?? "", visibility: c.autoRepo?.visibility === "private" ? "private" : "public" },
@@ -115,7 +123,7 @@ export async function getConfig(): Promise<Config> {
   if (!c.sessionSecret) await writeJson(CONFIG_FILE, config);
   return config;
 }
-export async function updateConfig(patch: { publicUrl?: string; clientId?: string; clientSecret?: string; autoRepo?: Partial<AutoRepo> }): Promise<void> {
+export async function updateConfig(patch: { publicUrl?: string; clientId?: string; clientSecret?: string; googleClientId?: string; googleClientSecret?: string; autoRepo?: Partial<AutoRepo> }): Promise<void> {
   const c = await getConfig();
   if (patch.autoRepo && typeof patch.autoRepo === "object") {
     const a = patch.autoRepo;
@@ -129,23 +137,57 @@ export async function updateConfig(patch: { publicUrl?: string; clientId?: strin
   if (typeof patch.publicUrl === "string" && patch.publicUrl.trim()) c.publicUrl = patch.publicUrl.trim().replace(/\/+$/, "");
   if (typeof patch.clientId === "string") c.github.clientId = patch.clientId.trim();
   if (typeof patch.clientSecret === "string" && patch.clientSecret.trim()) c.github.clientSecret = patch.clientSecret.trim();
+  if (typeof patch.googleClientId === "string") c.google.clientId = patch.googleClientId.trim();
+  if (typeof patch.googleClientSecret === "string" && patch.googleClientSecret.trim()) c.google.clientSecret = patch.googleClientSecret.trim();
   await writeJson(CONFIG_FILE, c);
 }
 
-export const listMembers = () => readJson<Member[]>(USERS_FILE, []);
-export async function saveMember(m: Member): Promise<Member[]> {
-  const login = m.login.trim().toLowerCase();
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,38})$/.test(login)) throw new AuthError(400, "GitHub 帳號格式不正確。");
-  if (!RANKS.includes(m.rank)) throw new AuthError(400, "職級不正確。");
-  const all = (await listMembers()).filter((x) => x.login !== login);
-  all.push({ login, name: m.name.trim() || login, rank: m.rank, subsystems: (m.subsystems ?? []).map((s) => s.trim()).filter(Boolean), admin: m.admin === true, tailscale: m.tailscale?.trim() || undefined });
-  all.sort((a, b) => LEVEL[b.rank] - LEVEL[a.rank] || a.login.localeCompare(b.login));
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{1,63}$/;
+const GITHUB_LOGIN = /^[a-z0-9](?:[a-z0-9-]{0,38})$/;
+const norm = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() : "");
+
+/** 讀成員名單。舊格式只有 GitHub 帳號（login），沒有 email，仍可用 GitHub 登入，修改時要補 email。 */
+export async function listMembers(): Promise<Member[]> {
+  const raw = await readJson<(Partial<Member> & { login?: string })[]>(USERS_FILE, []);
+  return raw.map(({ login, ...m }) => ({ ...m, email: norm(m.email), github: norm(m.github ?? login) || undefined } as Member));
+}
+const sortMembers = (all: Member[]) => all.sort((a, b) => LEVEL[b.rank] - LEVEL[a.rank] || (a.email || a.github || "").localeCompare(b.email || b.github || ""));
+/** 新增或修改成員。以 email 為主鍵；previous 是修改前的 email（改 email 時用）或舊格式的 GitHub 帳號。 */
+export async function saveMember(m: Partial<Member> & { previous?: string }): Promise<Member[]> {
+  const email = norm(m.email);
+  const github = norm(m.github) || undefined;
+  if (!EMAIL.test(email)) throw new AuthError(400, "email 格式不正確。");
+  if (github && !GITHUB_LOGIN.test(github)) throw new AuthError(400, "GitHub 帳號格式不正確。");
+  if (!RANKS.includes(m.rank as Rank)) throw new AuthError(400, "職級不正確。");
+  const prev = norm(m.previous);
+  const all = await listMembers();
+  if (github && all.some((x) => x.github === github && x.email !== email && x.email !== prev && !(prev && !x.email && x.github === prev))) throw new AuthError(400, `GitHub 帳號 ${github} 已經屬於另一位成員。`);
+  const rest = all.filter((x) => x.email !== email && !(prev && (x.email === prev || (!x.email && x.github === prev))));
+  rest.push({ email, github, name: String(m.name ?? "").trim() || email.split("@")[0], rank: m.rank as Rank, subsystems: (m.subsystems ?? []).map((s) => String(s).trim()).filter(Boolean), admin: m.admin === true, tailscale: typeof m.tailscale === "string" ? m.tailscale.trim() || undefined : undefined });
+  await writeJson(USERS_FILE, sortMembers(rest));
+  await dropRequest(email);
+  return rest;
+}
+/** 移除成員：key 是 email，舊格式則是 GitHub 帳號。 */
+export async function removeMember(key: string): Promise<Member[]> {
+  const k = norm(key);
+  const all = (await listMembers()).filter((x) => x.email !== k && !(!x.email && x.github === k));
   await writeJson(USERS_FILE, all);
   return all;
 }
-export async function removeMember(login: string): Promise<Member[]> {
-  const all = (await listMembers()).filter((x) => x.login !== login.toLowerCase());
-  await writeJson(USERS_FILE, all);
+
+// ───────── 加入申請：名單外的人用 Google 登入時留下 ─────────
+export const listRequests = () => readJson<JoinRequest[]>(REQUESTS_FILE, []);
+async function addRequest(email: string, name: string): Promise<void> {
+  const all = (await listRequests()).filter((r) => r.email !== email);
+  all.push({ email, name: name.slice(0, 60), requestedAt: new Date().toISOString() });
+  await writeJson(REQUESTS_FILE, all.slice(-200)); // 上限避免被灌爆
+}
+export async function dropRequest(email: string): Promise<JoinRequest[]> {
+  const k = norm(email);
+  const before = await listRequests();
+  const all = before.filter((r) => r.email !== k);
+  if (all.length !== before.length) await writeJson(REQUESTS_FILE, all);
   return all;
 }
 
@@ -222,7 +264,7 @@ export function decodeHeader(v: string): string {
   } catch { return v.slice(0, 60); }
 }
 
-const memberUser = (m: Member): User => ({ kind: "member", login: m.login, name: m.name, rank: m.rank, subsystems: m.subsystems, admin: m.admin || LEVEL[m.rank] >= 7, project: null });
+const memberUser = (m: Member): User => ({ kind: "member", login: m.email || m.github || "", name: m.name, rank: m.rank, subsystems: m.subsystems, admin: m.admin || LEVEL[m.rank] >= 7, project: null });
 
 async function identify(req: Request): Promise<User | null> {
   const c = await getConfig();
@@ -247,9 +289,10 @@ async function identify(req: Request): Promise<User | null> {
     }
   }
 
-  const session = verify<{ login: string }>(ck.jri_session, c.sessionSecret);
+  // 工作階段記的是登入方式與帳號：Google 對 email，GitHub 對 GitHub 帳號
+  const session = verify<{ email?: string; login?: string }>(ck.jri_session, c.sessionSecret);
   if (session) {
-    const m = members.find((x) => x.login === session.login);
+    const m = session.email ? members.find((x) => x.email && x.email === session.email) : session.login ? members.find((x) => x.github === session.login) : undefined;
     if (m) return memberUser(m);
   }
   const shared = verify<{ token: string }>(ck.jri_share, c.sessionSecret);
@@ -317,7 +360,7 @@ export function need(check: (u: User) => boolean, message: string) {
   };
 }
 
-// ───────── 路由：GitHub 登入與唯讀連結 ─────────
+// ───────── 路由：Google 登入、GitHub 登入（第二選項）與唯讀連結 ─────────
 
 export function mountAuthRoutes(app: import("express").Express): void {
   const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
@@ -325,6 +368,42 @@ export function mountAuthRoutes(app: import("express").Express): void {
 
   const limited = rateLimit(30, 60_000);
   app.use(["/auth", "/s"], limited);
+
+  const page = (res: Response, status: number, text: string) => res.status(status).type("text").send(text);
+  const startSession = (req: Request, res: Response, who: { email: string } | { login: string }, secret: string) => {
+    setCookie(res, "jri_session", sign({ ...who, exp: Date.now() + 30 * 86400_000 }, secret), 30 * 86400, isSecure(req));
+    setCookie(res, "jri_state", "", 0, isSecure(req));
+    res.redirect("/");
+  };
+
+  app.get("/auth/google", wrap(async (req, res) => {
+    const c = await getConfig();
+    if (!c.google.clientId || !c.google.clientSecret || !c.publicUrl) return page(res, 503, "尚未設定 Google 登入。請管理員到「管理」頁設定。");
+    const state = randomBytes(16).toString("hex"), nonce = randomBytes(16).toString("hex");
+    setCookie(res, "jri_state", sign({ state, nonce, exp: Date.now() + 600_000 }, c.sessionSecret), 600, isSecure(req));
+    const q = new URLSearchParams({ client_id: c.google.clientId, redirect_uri: `${c.publicUrl}/auth/google/callback`, response_type: "code", scope: "openid email profile", state, nonce, prompt: "select_account" });
+    res.redirect(`${GOOGLE.authorize}?${q}`);
+  }));
+
+  app.get("/auth/google/callback", wrap(async (req, res) => {
+    const c = await getConfig();
+    const saved = verify<{ state: string; nonce?: string }>(cookies(req).jri_state, c.sessionSecret);
+    if (!saved || !saved.nonce || saved.state !== req.query.state || typeof req.query.code !== "string") return page(res, 400, "登入逾時或狀態不符，請重新登入。");
+    let who;
+    try {
+      const idToken = await exchangeCode(req.query.code, { clientId: c.google.clientId, clientSecret: c.google.clientSecret, redirectUri: `${c.publicUrl}/auth/google/callback` });
+      who = await verifyIdToken(idToken, { clientId: c.google.clientId, nonce: saved.nonce });
+    } catch (e) {
+      if (e instanceof IdTokenError) return page(res, 400, e.message);
+      throw e;
+    }
+    if (!(await listMembers()).some((m) => m.email === who.email)) {
+      await addRequest(who.email, who.name);
+      setCookie(res, "jri_state", "", 0, isSecure(req));
+      return page(res, 403, `Google 帳號 ${who.email} 還不在成員名單中。已送出加入申請，請等總工程師核准後再登入。`);
+    }
+    startSession(req, res, { email: who.email }, c.sessionSecret);
+  }));
 
   app.get("/auth/github", wrap(async (req, res) => {
     const c = await getConfig();
@@ -348,12 +427,10 @@ export function mountAuthRoutes(app: import("express").Express): void {
     const me = (await (await fetch("https://api.github.com/user", { headers: { authorization: `Bearer ${token.access_token}`, "user-agent": "jri-mbse", accept: "application/vnd.github+json" } })).json()) as { login?: string };
     const login = String(me.login ?? "").toLowerCase();
     if (!login) return res.status(400).send("無法取得 GitHub 帳號。");
-    if (!(await listMembers()).some((m) => m.login === login)) {
-      return res.status(403).send(`GitHub 帳號 ${login} 還不在成員名單中。請把這個帳號告訴總工程師，由他加入後再登入。`);
+    if (!(await listMembers()).some((m) => m.github === login)) {
+      return res.status(403).send(`GitHub 帳號 ${login} 還不在成員名單中。請把這個帳號告訴總工程師，由他加入後再登入；或改用 Google 登入。`);
     }
-    setCookie(res, "jri_session", sign({ login, exp: Date.now() + 30 * 86400_000 }, c.sessionSecret), 30 * 86400, isSecure(req));
-    setCookie(res, "jri_state", "", 0, isSecure(req));
-    res.redirect("/");
+    startSession(req, res, { login }, c.sessionSecret);
   }));
 
   app.post("/auth/logout", (req, res) => {

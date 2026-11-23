@@ -35,7 +35,7 @@ export function App() {
 
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p></div>;
   if (!me) return <div className="page"><p className="label">載入中</p></div>;
-  if (!me.user) return <Login github={me.githubLogin} />;
+  if (!me.user) return <Login google={me.googleLogin} github={me.githubLogin} />;
   if (!meta) return <div className="page"><p className="label">載入中</p></div>;
   const user = me.user;
   // 只有這台電腦本機操作時可以自填名字；其餘身分來自登入
@@ -88,7 +88,7 @@ function Welcome({ name, role, onDone }: { name: string; role: string; onDone: (
   );
 }
 
-function Login({ github }: { github: boolean }) {
+function Login({ google, github }: { google: boolean; github: boolean }) {
   return (
     <div className="shell enter">
       <header className="topbar"><span className="brand">JRI MBSE</span><span className="label">噴射推進研究社</span></header>
@@ -97,8 +97,11 @@ function Login({ github }: { github: boolean }) {
         <span className="welcome-line" aria-hidden="true" style={{ display: "block", marginBottom: 32 }} />
         <section className="section">
           <div className="section-head"><h1 className="section-title">登入</h1></div>
-          <p className="body" style={{ marginBottom: 16 }}>JRI 成員請用 GitHub 帳號登入。帳號要先由總工程師加入成員名單。</p>
-          {github ? <a className="btn" href="/auth/github">用 GitHub 登入</a> : <p className="msg"><span className="tag">未設定</span>GitHub 登入尚未設定，請聯絡管理員。</p>}
+          <p className="body" style={{ marginBottom: 16 }}>JRI 成員請用 Google 帳號登入。第一次登入會送出加入申請，總工程師核准後就能使用。</p>
+          <div className="tbtn-row">
+            {google ? <a className="btn" href="/auth/google">用 Google 登入</a> : <p className="msg"><span className="tag">未設定</span>Google 登入尚未設定，請聯絡管理員。</p>}
+            {github && <a className="tbtn" href="/auth/github">改用 GitHub 登入</a>}
+          </div>
           <p className="caption" style={{ marginTop: 24 }}>外部審查委員請直接開啟收到的唯讀連結。</p>
         </section>
       </main>
