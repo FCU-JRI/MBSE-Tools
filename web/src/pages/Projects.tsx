@@ -34,8 +34,10 @@ export function ProjectsPage({ meta, user, onOpen }: { meta: Meta; user: Me; onO
     try { onOpen((await api<Project>("/projects", "POST", form)).id); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   return (
-    <main className="page home" style={{ width: "100%" }}>
-      <section className="section">
+    <main className="page proj-page">
+      <div className="fluid-bg" aria-hidden="true"><i /><i /><i /><i /></div>
+      <div className="proj-col">
+      <section className="section proj-card">
         <div className="section-head"><h1 className="section-title">專案</h1><span className="label">{projects?.length ?? 0}</span></div>
         {projects === null ? <p className="label">載入中</p> : projects.length === 0 ? <p className="body muted">{user.caps.createProject ? "還沒有專案。在右側建立第一個。" : "還沒有可以開啟的專案。"}</p> : projects.map((p) => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -57,7 +59,7 @@ export function ProjectsPage({ meta, user, onOpen }: { meta: Meta; user: Me; onO
           </form>
         )}
       </section>
-      {user.caps.createProject && <form className="section" onSubmit={create}>
+      {user.caps.createProject && <form className="section proj-card" onSubmit={create}>
         <div className="section-head"><h2 className="section-title">建立專案</h2></div>
         <label className="field"><span className="label">名稱</span><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="2027 年度探空火箭" /></label>
         <label className="field"><span className="label">代號</span><input className="input" required value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value.toLowerCase() })} placeholder="sr-2027" pattern="[a-z0-9][a-z0-9\-]{1,40}" /></label>
@@ -85,6 +87,7 @@ export function ProjectsPage({ meta, user, onOpen }: { meta: Meta; user: Me; onO
         {error && <p className="msg"><span className="tag danger">ERR</span>{error}</p>}
         <div style={{ marginTop: 12 }}><button className="btn" disabled={busy}>{busy ? "建立中" : "建立"}</button></div>
       </form>}
+      </div>
     </main>
   );
 }

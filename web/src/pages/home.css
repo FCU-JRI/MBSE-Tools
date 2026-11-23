@@ -29,3 +29,19 @@
   .dash-track { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .readout { font-size: 56px; line-height: 56px; }
 }
+
+/* 首頁新增：5 指標列、最近變更、次系統 */
+.dash-hero { grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); }
+.dash-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
+.kpi { display: flex; flex-direction: column; gap: var(--space-1); border: var(--stroke-hair) solid var(--line); background: none; color: inherit; text-align: left; cursor: pointer; padding: var(--space-3); font: inherit; min-width: 0; }
+.kpi:hover { background: var(--surface-1); border-color: var(--line-strong); }
+.kpi .readout { font-size: 40px; line-height: 44px; }
+.kpi .readout small { font-size: 14px; }
+.kpi .meter { height: var(--stroke-bold); }
+.dash-stat { display: flex; flex-direction: column; gap: var(--space-1); border: 0; background: none; color: inherit; text-align: left; cursor: pointer; padding: 0; font: inherit; }
+.dash-stat:hover .data { text-decoration: underline; text-underline-offset: 3px; }
+.dash > .section { margin-top: var(--space-6); }
+.dash-subs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+.dash-sub { display: flex; flex-direction: column; gap: var(--space-1); border: var(--stroke-hair) solid var(--line); background: none; color: inherit; text-align: left; cursor: pointer; padding: var(--space-3); font: inherit; }
+.dash-sub:hover { background: var(--surface-1); border-color: var(--line-strong); }
+@media (max-width: 860px) { .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
