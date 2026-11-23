@@ -32,6 +32,21 @@ export function mount(app: Express): void {
     res.json(await view(pid(req)));
   }));
 
+  // 撤回簽核：權限和簽核同一個節點相同；留下撤回紀錄，不刪原紀錄
+  app.post("/api/projects/:id/signoffs/revoke", wrap(async (req, res) => {
+    const u = me(req);
+    const project = await store.readProject(pid(req));
+    const at = String(req.body?.at ?? "");
+    const target = project.signoffs.find((s) => s.at === at && s.decision !== "REVOKE");
+    if (!target) throw new store.UserError("找不到這筆簽核。");
+    if (!auth.can.signoff(u, target.gate, project.highPower !== false, target.subsystem)) {
+      const def = GATES.find((g) => g.id === target.gate);
+      throw new store.UserError(`你的職級不能撤回這個節點的簽核。核可者：${def?.approver ?? "指定職級"}。`);
+    }
+    await store.revokeSignoff(pid(req), at, { by: u.name, role: u.rank ? `${auth.RANK_ZH[u.rank]} [${u.rank}]` : "", comment: String(req.body?.comment ?? "") });
+    res.json(await view(pid(req)));
+  }));
+
   // 審查報告：?gate=節點代號&format=html|docx。html 可用瀏覽器列印成 PDF。
   app.get("/api/projects/:id/report", wrap(async (req, res) => {
     const id = pid(req);

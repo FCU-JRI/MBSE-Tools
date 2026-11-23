@@ -19,7 +19,9 @@ const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
 export interface Signoff {
   gate: string;
   subsystem: string | null;
-  decision: "APPROVE" | "DENY";
+  /** REVOKE：撤回紀錄。原紀錄不刪，另加一筆說明誰在何時撤回哪一筆（revokes = 被撤回那筆的 at） */
+  decision: "APPROVE" | "DENY" | "REVOKE";
+  revokes?: string;
   by: string;
   role: string;
   comment: string;
@@ -365,6 +367,27 @@ export async function signoff(id: string, input: Omit<Signoff, "at" | "commit">)
     pushLater(dir);
   }
   return p;
+}
+
+/**
+ * 撤回簽核：按錯時用。不刪原紀錄，另加一筆 REVOKE，記下誰、何時、撤回哪一筆。
+ * 只能撤回同一節點（與次系統）最新一筆、尚未撤回的簽核；核可時打的基線標籤保留在版本紀錄裡。
+ */
+export async function revokeSignoff(id: string, at: string, input: { by: string; role: string; comment: string }): Promise<{ project: Project; revoked: Signoff }> {
+  const p = await readProject(mainOnly(id, "撤回簽核"));
+  const target = p.signoffs.find((s) => s.at === at && s.decision !== "REVOKE");
+  if (!target) throw new UserError("找不到這筆簽核。");
+  const revoked = new Set(p.signoffs.filter((s) => s.decision === "REVOKE").map((s) => s.revokes));
+  if (revoked.has(target.at)) throw new UserError("這筆簽核已經撤回過了。");
+  const latest = [...p.signoffs].reverse().find((s) => s.gate === target.gate && (s.subsystem ?? null) === (target.subsystem ?? null) && s.decision !== "REVOKE" && !revoked.has(s.at));
+  if (latest !== target) throw new UserError("只能撤回這個節點最新一筆、尚未撤回的簽核。");
+  if (!input.by.trim()) throw new UserError("請填撤回人姓名。");
+  const dir = dirOf(id);
+  const head = await git(dir, "rev-parse", "--short", "HEAD");
+  p.signoffs.push({ gate: target.gate, subsystem: target.subsystem, decision: "REVOKE", revokes: target.at, by: input.by, role: input.role, comment: input.comment.trim().slice(0, 200), at: new Date().toISOString(), commit: head });
+  await writeProject(id, p);
+  await commit(dir, input.by, `${target.gate.toUpperCase()}${target.subsystem ? `（${target.subsystem}）` : ""} 撤回簽核：${target.decision}（${target.by}，${target.at}）`);
+  return { project: p, revoked: target };
 }
 
 export async function history(id: string): Promise<{ commit: string; author: string; date: string; message: string }[]> {
