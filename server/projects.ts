@@ -19,7 +19,9 @@ const LIBRARY = path.join(ROOT, "library", "JRI.sysml");
 export interface Signoff {
   gate: string;
   subsystem: string | null;
-  decision: "APPROVE" | "DENY";
+  /** REVOKE：撤回紀錄。原紀錄不刪，另加一筆說明誰在何時撤回哪一筆（revokes = 被撤回那筆的 at） */
+  decision: "APPROVE" | "DENY" | "REVOKE";
+  revokes?: string;
   by: string;
   role: string;
   comment: string;
@@ -171,7 +173,7 @@ export const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 export interface AutoRepo { enabled: boolean; owner: string; visibility: "public" | "private" }
 const errText = (e: unknown) => String((e as { stderr?: string }).stderr || (e as Error).message).split("\n").map((s) => s.trim()).filter(Boolean).slice(-2).join(" ").slice(0, 300);
 
-/** 在 GitHub 建立 擁有者/專案代號 並設為推送目標。失敗不丟例外，錯誤記在同步狀態，「版本」頁會顯示。 */
+/** 在 GitHub 建立 擁有者/專案代號 並設為推送目標。失敗不丟例外，錯誤記在同步狀態，版本畫面會顯示。 */
 export async function createRepo(id: string, description: string, opt: AutoRepo): Promise<SyncState> {
   const dir = dirOf(mainOnly(id, "儲存庫設定"));
   await readProject(id);
@@ -262,6 +264,35 @@ export async function createProject(input: { id: string; name: string; kind: "an
   await repoConfig(dir);
   await commit(dir, input.author, `建立專案：${project.name}`);
   return project;
+}
+
+/** 改專案名稱、類型、節點。代號是儲存庫名稱，不能改。已有簽核紀錄的節點不能移除（紀錄不刪）。 */
+export async function updateProject(ref: string, input: { name?: unknown; kind?: unknown; gates?: unknown; author: string }): Promise<Project> {
+  const p = await readProject(ref);
+  const name = input.name === undefined ? p.name : String(input.name).trim().slice(0, 80);
+  if (!name) throw new UserError("請填專案名稱。");
+  const kind = input.kind === undefined ? p.kind : input.kind;
+  if (kind !== "annual" && kind !== "small") throw new UserError("專案類型只能是年度專案或小型專案。");
+  const all = GATES.map((g) => g.id);
+  let gates: string[];
+  if (kind === "annual") gates = all;
+  else {
+    const want = input.gates === undefined ? p.gates : input.gates;
+    if (!Array.isArray(want)) throw new UserError("節點格式不正確。");
+    const bad = want.find((g) => !all.includes(String(g)));
+    if (bad !== undefined) throw new UserError(`沒有「${String(bad)}」這個節點。`);
+    gates = all.filter((g) => want.includes(g));
+  }
+  if (gates.length === 0) throw new UserError("至少要保留一個節點。");
+  const dropped = p.gates.filter((g) => !gates.includes(g));
+  const locked = dropped.filter((g) => p.signoffs.some((s) => s.gate === g));
+  if (locked.length > 0) throw new UserError(`節點 ${locked.map((g) => g.toUpperCase()).join("、")} 已有簽核紀錄，不能移除。`);
+  if (name === p.name && kind === p.kind && gates.join() === p.gates.join()) return p;
+  const next: Project = { ...p, name, kind, gates };
+  await writeProject(ref, next);
+  const parts = [name !== p.name && `名稱 → ${name}`, kind !== p.kind && `類型 → ${kind === "annual" ? "年度專案" : "小型專案"}`, gates.join() !== p.gates.join() && `節點 → ${gates.join("、")}`].filter(Boolean);
+  await commit(dirOf(ref), input.author, `更新專案設定：${parts.join("；")}`);
+  return next;
 }
 
 export async function listFiles(id: string): Promise<string[]> {
@@ -365,6 +396,27 @@ export async function signoff(id: string, input: Omit<Signoff, "at" | "commit">)
     pushLater(dir);
   }
   return p;
+}
+
+/**
+ * 撤回簽核：按錯時用。不刪原紀錄，另加一筆 REVOKE，記下誰、何時、撤回哪一筆。
+ * 只能撤回同一節點（與次系統）最新一筆、尚未撤回的簽核；核可時打的基線標籤保留在版本紀錄裡。
+ */
+export async function revokeSignoff(id: string, at: string, input: { by: string; role: string; comment: string }): Promise<{ project: Project; revoked: Signoff }> {
+  const p = await readProject(mainOnly(id, "撤回簽核"));
+  const target = p.signoffs.find((s) => s.at === at && s.decision !== "REVOKE");
+  if (!target) throw new UserError("找不到這筆簽核。");
+  const revoked = new Set(p.signoffs.filter((s) => s.decision === "REVOKE").map((s) => s.revokes));
+  if (revoked.has(target.at)) throw new UserError("這筆簽核已經撤回過了。");
+  const latest = [...p.signoffs].reverse().find((s) => s.gate === target.gate && (s.subsystem ?? null) === (target.subsystem ?? null) && s.decision !== "REVOKE" && !revoked.has(s.at));
+  if (latest !== target) throw new UserError("只能撤回這個節點最新一筆、尚未撤回的簽核。");
+  if (!input.by.trim()) throw new UserError("請填撤回人姓名。");
+  const dir = dirOf(id);
+  const head = await git(dir, "rev-parse", "--short", "HEAD");
+  p.signoffs.push({ gate: target.gate, subsystem: target.subsystem, decision: "REVOKE", revokes: target.at, by: input.by, role: input.role, comment: input.comment.trim().slice(0, 200), at: new Date().toISOString(), commit: head });
+  await writeProject(id, p);
+  await commit(dir, input.by, `${target.gate.toUpperCase()}${target.subsystem ? `（${target.subsystem}）` : ""} 撤回簽核：${target.decision}（${target.by}，${target.at}）`);
+  return { project: p, revoked: target };
 }
 
 export async function history(id: string): Promise<{ commit: string; author: string; date: string; message: string }[]> {

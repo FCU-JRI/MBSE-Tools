@@ -141,7 +141,7 @@ export function insertInside(content: string, target: Element, make: (indent: st
     lines[i] = last.replace(/\s*\}\s*$/, "");
     lines.splice(i + 1, 0, body, `${startIndent}}`);
   } else {
-    throw new UserError("這個元素的寫法無法自動插入，請到「原始碼」分頁手動修改。");
+    throw new UserError("這個元素的寫法無法自動插入，請到模型頁的「原始碼」手動修改。");
   }
   return lines.join("\n");
 }
@@ -262,10 +262,10 @@ export function setShortNameText(content: string, el: Element, shortName: string
     const old = `<'${el.shortName}'>`, bare = `<${el.shortName}>`;
     if (line.includes(old)) next = line.replace(old, () => `<'${sn}'>`);
     else if (line.includes(bare)) next = line.replace(bare, () => `<'${sn}'>`);
-    else throw new UserError("這個元素的編號寫法無法自動修改，請到「原始碼」分頁修改。");
+    else throw new UserError("這個元素的編號寫法無法自動修改，請到模型頁的「原始碼」修改。");
   } else {
     const i = line.indexOf(tok);
-    if (i < 0) throw new UserError("這個元素的寫法無法自動加上編號，請到「原始碼」分頁修改。");
+    if (i < 0) throw new UserError("這個元素的寫法無法自動加上編號，請到模型頁的「原始碼」修改。");
     next = line.slice(0, i) + `<'${sn}'> ` + line.slice(i);
   }
   lines[el.line - 1] = next;
@@ -304,7 +304,7 @@ function wholeLines(lines: string[], el: Element): { first: number; last: number
   if (!el.loc) throw new UserError("找不到元素在檔案中的位置。");
   const first = lines[el.loc.line - 1] ?? "", last = lines[el.loc.endLine - 1] ?? "";
   const before = first.slice(0, charIndex(first, el.loc.col)), after = last.slice(charIndex(last, el.loc.endCol));
-  if (before.trim() || after.trim()) throw new UserError(`「${el.name}」和其他內容寫在同一行，無法自動搬移，請到「原始碼」分頁處理。`);
+  if (before.trim() || after.trim()) throw new UserError(`「${el.name}」和其他內容寫在同一行，無法自動搬移，請到模型頁的「原始碼」處理。`);
   return { first: el.loc.line - 1, last: el.loc.endLine - 1 };
 }
 
@@ -318,7 +318,7 @@ function insertEdit(lines: string[], target: Element, make: (indent: string) => 
   if (/^\s*\}\s*$/.test(last)) return { at: i, remove: 0, insert: body };
   if (/\{\s*\}\s*$/.test(last)) return { at: i, remove: 1, insert: [last.replace(/\{\s*\}\s*$/, "{"), ...body, `${startIndent}}`] };
   if (/;\s*$/.test(last)) return { at: i, remove: 1, insert: [last.replace(/;\s*$/, " {"), ...body, `${startIndent}}`] };
-  throw new UserError("這個套件的寫法無法自動插入，請到「原始碼」分頁手動修改。");
+  throw new UserError("這個套件的寫法無法自動插入，請到模型頁的「原始碼」手動修改。");
 }
 
 const reindent = (block: string[], indent: string): string[] => {
@@ -395,6 +395,149 @@ export function setCommentText(content: string, el: Element, body: string): stri
   const first = lines[el.loc.line - 1] ?? "", last = lines[el.loc.endLine - 1] ?? "";
   const a = charIndex(first, el.loc.col), b = charIndex(last, el.loc.endCol);
   const src = el.loc.line === el.loc.endLine ? first.slice(a, b) : [first.slice(a), ...lines.slice(el.loc.line, el.loc.endLine - 1), last.slice(0, b)].join("\n");
-  if (!/\/\*[\s\S]*\*\//.test(src)) throw new UserError("這則註解的寫法無法自動修改，請到「原始碼」分頁修改。");
+  if (!/\/\*[\s\S]*\*\//.test(src)) throw new UserError("這則註解的寫法無法自動修改，請到模型頁的「原始碼」修改。");
   return replaceLoc(content, el.loc, src.replace(/\/\*[\s\S]*\*\//, () => `/* ${commentBody(body)} */`).replace(/\n$/, ""));
+}
+
+// ───────── 閉環：建立後可改（類別、上層、自訂屬性、驗證事件、零件型別） ─────────
+
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** 宣告行上名稱之後的位置（找不到名稱就從行首）。 */
+function afterName(line: string, el: Element): number {
+  const i = line.indexOf(quote(el.name));
+  return i < 0 ? 0 : i + quote(el.name).length;
+}
+
+/**
+ * 改類別：把宣告行上的型別（: 舊類別 或 :> 舊類別）換成另一個類別。
+ * 只換名稱之後第一個符合的型別，其餘內容（編號、名稱、主體、關係）不動。
+ */
+export function setCategoryText(content: string, el: Element, fromId: string, toId: string): string {
+  if (!el.line) throw new UserError("找不到元素在檔案中的位置。");
+  const lines = content.split("\n");
+  const line = lines[el.line - 1] ?? "";
+  const start = afterName(line, el);
+  const re = new RegExp(`(:>?\\s*)(?:JRI::)?${escRe(fromId)}(?![A-Za-z0-9_'])`);
+  const rest = line.slice(start);
+  if (!re.test(rest)) throw new UserError("這個元素的類別寫法無法自動修改，請到模型頁的「原始碼」修改。");
+  lines[el.line - 1] = line.slice(0, start) + rest.replace(re, (_m, p: string) => `${p}${toId}`);
+  return lines.join("\n");
+}
+
+/** 把元素整段搬進另一個元素（或套件）的主體。元素的宣告必須獨占整行。 */
+export function moveBlockText(content: string, el: Element, target: Element): string {
+  const lines = content.split("\n");
+  const { first, last } = wholeLines(lines, el);
+  if (target.loc && el.loc && within(target.loc, el.loc)) throw new UserError("不能把元素放進它自己底下。");
+  return applyEdits(content, [
+    { at: first, remove: last - first + 1, insert: [] },
+    insertEdit(lines, target, (indent) => reindent(lines.slice(first, last + 1), indent)),
+  ]);
+}
+
+/** 零件（part x : 型別）換型別：只改宣告行上冒號後的型別。 */
+export function setUsageTypeText(content: string, usage: Element, typeQualified: string): string {
+  if (!usage.line) throw new UserError("找不到零件在檔案中的位置。");
+  const lines = content.split("\n");
+  const line = lines[usage.line - 1] ?? "";
+  const start = afterName(line, usage);
+  const m = /^(\s*:\s*)([^;{\[=]+?)(\s*(?:[;{\[=]|$))/.exec(line.slice(start));
+  if (!m) throw new UserError("這個零件的寫法無法自動換型別，請到模型頁的「原始碼」修改。");
+  lines[usage.line - 1] = line.slice(0, start) + m[1] + qname(typeQualified) + line.slice(start + m[1].length + m[2].length);
+  return lines.join("\n");
+}
+
+export interface CustomAttr { name: string; value: string; unit?: string }
+
+/** 自訂屬性的值：數字（可帶單位）、true/false，其餘當文字。 */
+export function attrLiteral(value: string, unit: string | undefined): string {
+  const v = value.trim(), u = (unit ?? "").trim();
+  if (!v) throw new UserError("請填屬性的值。");
+  if (/[\r\n]/.test(v)) throw new UserError("值不能換行。");
+  const num = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(v);
+  if (u) {
+    if (!num) throw new UserError("有單位時值必須是數字。");
+    if (!/^[A-Za-z°µΩ][A-Za-z0-9_°µΩ*/^ ().-]{0,23}$/.test(u)) throw new UserError("單位只能用英文字母、數字與 * / ^ ( )，例如 kg、m/s、N*s。");
+    return `${v} [${u}]`;
+  }
+  if (num || v === "true" || v === "false") return v;
+  return str(v);
+}
+
+/** 屬性在原始碼裡的寫法：重定義（:>> x = …）或自己宣告（attribute x = …）。 */
+export function attrForm(content: string, loc: Loc): "redefine" | "declare" {
+  const line = content.split("\n")[loc.line - 1] ?? "";
+  const text = line.slice(charIndex(line, loc.col)).trimStart();
+  return /^(:>>|redefines\b)/.test(text) ? "redefine" : "declare";
+}
+
+/**
+ * 新增、修改或刪除自訂屬性。oldName 有值表示修改既有的屬性；remove 表示刪除。
+ * 重定義的屬性（:>> x）名稱來自上層定義，不能改名，只能改值或刪除。
+ */
+export function setCustomAttrText(content: string, el: Element, input: { oldName?: string; name?: string; value?: string; unit?: string; remove?: boolean }): string {
+  const oldName = input.oldName?.trim() ?? "";
+  const loc = oldName ? el.attrLoc[oldName] : undefined;
+  if (oldName && !loc) throw new UserError(`找不到屬性「${oldName}」。`);
+  if (input.remove) {
+    if (!loc) throw new UserError("請指定要刪除的屬性。");
+    return replaceLoc(content, loc, "");
+  }
+  const name = (input.name ?? oldName).trim();
+  if (!name) throw new UserError("請填屬性名稱。");
+  if (/[\r\n]/.test(name) || name.length > 40) throw new UserError("屬性名稱不能換行，最長 40 個字。");
+  const literal = attrLiteral(input.value ?? "", input.unit);
+  if (loc) {
+    const form = attrForm(content, loc);
+    if (form === "redefine" && name !== oldName) throw new UserError(`「${oldName}」是沿用上層定義的屬性，不能改名；要換名稱請刪掉後新增。`);
+    if (name !== oldName && el.attrs[name] !== undefined) throw new UserError(`已經有叫「${name}」的屬性。`);
+    return replaceLoc(content, loc, form === "redefine" ? `:>> ${quote(name)} = ${literal};` : `attribute ${quote(name)} = ${literal};`);
+  }
+  if (el.attrs[name] !== undefined) throw new UserError(`已經有叫「${name}」的屬性。`);
+  return insertInside(content, el, (indent) => `${indent}attribute ${quote(name)} = ${literal};\n`);
+}
+
+/** 驗證方法：改、加或移除 @VerificationMethod。 */
+export function setMethodText(content: string, el: Element, method: string): string {
+  const kind = method ? methodKind(method) : "";
+  if (method && !kind) throw new UserError("驗證方法不合法。");
+  const text = kind ? `@VerificationMethod { kind = VerificationMethodKind::${kind}; }` : "";
+  const loc = el.metaLoc.VerificationMethod;
+  if (loc) return replaceLoc(content, loc, text);
+  if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
+/**
+ * 要驗證的需求：重寫驗證事件主體裡的 objective { verify …; }。
+ * objective 裡只能有 verify（沒有其他內容）才自動改，否則請使用者到原始碼修改。
+ */
+export function setVerifiesText(content: string, el: Element, requirements: string[]): string {
+  if (!el.line || !el.endLine) throw new UserError("找不到驗證事件在檔案中的位置。");
+  const lines = content.split("\n");
+  const a = el.line - 1, b = el.endLine - 1;
+  const seg = lines.slice(a, b + 1).join("\n");
+  const re = /objective\b([^{};]*)\{([^{}]*)\}/g;
+  const found = [...seg.matchAll(re)];
+  if (found.length > 1) throw new UserError("這個驗證事件有多個 objective，請到模型頁的「原始碼」修改。");
+  const body = requirements.map((q) => `verify ${qname(q)};`).join(" ");
+  if (found.length === 0) {
+    if (!body) return content;
+    return insertInside(content, el, (indent) => `${indent}objective { ${body} }\n`);
+  }
+  const m = found[0];
+  if (!/^(\s*verify\s+[^;{}]+;\s*)*$/.test(m[2])) throw new UserError("這個驗證事件的 objective 裡還有 verify 以外的內容，請到模型頁的「原始碼」修改。");
+  let next: string;
+  if (body) next = seg.slice(0, m.index) + `objective${m[1]}{ ${body} }` + seg.slice((m.index ?? 0) + m[0].length);
+  else {
+    // 整行只有 objective 就連同那一行移除
+    const lineStart = seg.lastIndexOf("\n", (m.index ?? 0) - 1) + 1;
+    const lineEnd = seg.indexOf("\n", (m.index ?? 0) + m[0].length);
+    const end = lineEnd < 0 ? seg.length : lineEnd;
+    const alone = seg.slice(lineStart, m.index).trim() === "" && seg.slice((m.index ?? 0) + m[0].length, end).trim() === "";
+    next = alone ? seg.slice(0, Math.max(0, lineStart - 1)) + seg.slice(end) : seg.slice(0, m.index) + seg.slice((m.index ?? 0) + m[0].length);
+  }
+  lines.splice(a, b - a + 1, ...next.split("\n"));
+  return lines.join("\n");
 }

@@ -87,7 +87,7 @@ const exists = (p: string) => fs.stat(p).then(() => true, () => false);
 const isAncestor = (dir: string, a: string, b: string) => git(dir, "merge-base", "--is-ancestor", a, b).then(() => true, () => false);
 
 // 工具自己維護的資料檔是 JSON。兩邊都改過（例如各自拖過圖）時 git 會當成文字衝突，這裡改成逐欄位合併。
-const DATA_FILES = new Map([["layout.json", 1], ["diagrams.json", 1], ["pm.json", 1], ["sim.json", 1], ["project.json", 2]]);
+const DATA_FILES = new Map([["layout.json", 1], ["diagrams.json", 1], ["pm.json", 1], ["sim.json", 1], ["board.json", 1], ["project.json", 2]]);
 // 工具放進儲存庫的副本（元模型庫、分析方法），每次讀專案都會更新成工具內的版本，衝突時留哪一邊都一樣
 const TOOL_COPY = /^(lib|\.claude)\//;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.ts";
 import type { Element, View } from "./api.ts";
+import type { Page } from "./workspace.ts";
 import { listOf } from "./model.ts";
 
 interface Task { id: string; title: string; start: string; end: string; done: boolean; re: string }
 interface Pm { tasks: Task[]; costs: { planned: number; actual: number }[] }
-interface Sim { result: { outputs: { key: string; zh: string; value: number; unit: string }[] } | null }
+interface Sim { result: { at?: string; outputs: { key: string; zh: string; value: number; unit: string }[] } | null }
+interface Hist { commit: string; date: string; message: string }
+interface Br { name: string; ahead: number }
 
-export type Go = (mode: string, arg?: string) => void;
+export type Go = (page: Page, arg?: string) => void;
 const today = () => new Date().toISOString().slice(0, 10);
 const num = (e: Element, k: string) => Number(e.attrs[k]) || 0;
 
@@ -53,98 +56,169 @@ function Bar({ label, done, total, onClick }: { label: string; done: number; tot
   );
 }
 
-/** 專案首頁：像中控台一樣，用圖和數字呈現狀態，文字盡量少。每一區點了就前往對應的頁面。 */
-export function Dashboard({ view, go }: { view: View; go: Go }) {
-  const id = view.project.id;
+const ago = (iso: string) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`;
+};
+
+/**
+ * 專案首頁：由上到下是現在的節點、5 個指標、性能與風險與需求覆蓋、任務與最近變更、各次系統。
+ * 每一格點了前往能處理它的頁。顏色只依計算結果；沒有資料的格子顯示空狀態，不畫沒有資料的圖。
+ */
+export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) {
   const [pm, setPm] = useState<Pm | null>(null);
   const [sim, setSim] = useState<Sim | null>(null);
+  const [hist, setHist] = useState<Hist[] | null>(null);
+  const [branches, setBranches] = useState<Br[] | null>(null);
+  const onBranch = !!view.branch;
   useEffect(() => {
     api<Pm>(`/projects/${id}/pm`).then(setPm).catch(() => setPm({ tasks: [], costs: [] }));
     api<Sim>(`/projects/${id}/sim`).then(setSim).catch(() => setSim({ result: null }));
-  }, [id]);
+    api<Hist[]>(`/projects/${id}/history`).then(setHist).catch(() => setHist(null));
+    if (!onBranch) api<Br[]>(`/projects/${id}/branches`).then(setBranches).catch(() => setBranches(null));
+  }, [id, onBranch]);
 
   const a = view.analysis;
   const approved = (g: string) => [...view.project.signoffs].reverse().find((s) => s.gate === g && !s.subsystem)?.decision === "APPROVE";
   const current = view.gates.find((g) => !approved(g.id)) ?? view.gates[view.gates.length - 1];
   const reqs = listOf(a.elements, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
   const has = (e: Element, dir: "in" | "out", ...k: string[]) => a.relations.some((r) => (dir === "in" ? r.to : r.from) === e.id && k.includes(r.kind));
+  const verified = reqs.filter((e) => has(e, "in", "verify")).length;
+  const sourced = reqs.filter((e) => has(e, "out", "derive", "refine", "trace") || !!e.attrs.sourceDoc).length;
+  const satisfied = reqs.filter((e) => has(e, "in", "satisfy")).length;
   const risks = listOf(a.elements, "Risk");
   const openHigh = risks.filter((r) => num(r, "severity") * num(r, "likelihood") >= 15 && !/結案|closed/i.test(r.attrs.status ?? "")).length;
+  const pass = a.satisfaction.filter((s) => s.status === "holds").length;
   const fails = a.satisfaction.filter((s) => s.status === "fails").length;
   const tasks = pm?.tasks ?? [];
   const late = tasks.filter((t) => !t.done && t.end < today());
   const next = tasks.filter((t) => !t.done).sort((x, y) => x.end.localeCompare(y.end)).slice(0, 5);
   const planned = (pm?.costs ?? []).reduce((s, c) => s + c.planned, 0), actual = (pm?.costs ?? []).reduce((s, c) => s + c.actual, 0);
-  const apogee = sim?.result?.outputs.find((o) => o.key === "apogee");
-  const margin = sim?.result?.outputs.find((o) => o.key === "staticMargin");
+  const budgetPct = planned ? Math.round((actual / planned) * 100) : null;
   const errors = a.diagnostics.filter((d) => d.severity === "error").length;
+  const outputs = sim?.result?.outputs ?? [];
+  const days = current && view.milestones[current.id] ? Math.ceil((new Date(view.milestones[current.id]).getTime() - Date.now()) / 86400000) : null;
+  const weekAgo = Date.now() - 7 * 86400000;
+  const merged = (hist ?? []).filter((h) => h.message.startsWith("合併分支 ") && new Date(h.date).getTime() >= weekAgo).length;
+  const subs = listOf(a.elements, "Subsystem");
+  const pct = (n: number, d: number) => (d ? Math.round((n / d) * 100) : 0);
 
   return (
     <div className="dash">
-      <section className="dash-hero">
-        <button className="dash-now" onClick={() => go("gates", current?.id)}>
+      <section className="dash-hero" aria-label="現在的節點">
+        <button className="dash-now" data-go="manage" onClick={() => go("manage", current?.id)}>
           <span className="label">現在的節點</span>
-          <span className="readout">{current ? current.done : 0}<small> / {current ? current.total : 0}</small></span>
           <span className="heading">{current?.zh ?? "尚未設定節點"} <span className="label">{current?.en}</span></span>
+          <span className="body muted">{days !== null ? (days >= 0 ? `還有 ${days} 天` : `已過 ${-days} 天`) : "未設日期"} · {current ? current.done : 0} / {current ? current.total : 0} 項完成</span>
         </button>
         <div className="dash-track" role="list" aria-label="審查節點進度">
           {view.gates.map((g) => {
             const ok = approved(g.id), cur = g.id === current?.id;
             return (
-              <button key={g.id} role="listitem" className={`dash-gate ${ok ? "ok" : ""} ${cur ? "cur" : ""}`} onClick={() => go("gates", g.id)} aria-label={`${g.zh}：${ok ? "已核可" : `${g.done} / ${g.total}`}`}>
+              <button key={g.id} role="listitem" data-go="manage" className={`dash-gate ${ok ? "ok" : ""} ${cur ? "cur" : ""}`} onClick={() => go("manage", g.id)} aria-label={`${g.zh}：${ok ? "已核可" : `${g.done} / ${g.total}`}`}>
                 <span className="meter"><span style={{ width: `${ok ? 100 : g.total ? (g.done / g.total) * 100 : 0}%` }} /></span>
-                <span className="label">{g.en.replace("Project ", "").replace(" Review", "").toUpperCase()}</span>
-                <span className="caption">{ok ? "DONE" : view.milestones[g.id]?.slice(5) ?? ""}</span>
+                <span className="label">{g.zh}</span>
+                <span className="caption">{ok ? "已核可" : view.milestones[g.id]?.slice(5) ?? ""}</span>
               </button>
             );
           })}
         </div>
       </section>
 
-      {errors > 0 && <button className="msg dash-alert" onClick={() => go("source")}><span className="tag danger">ERR</span>模型有 {errors} 個錯誤，圖表暫停更新。點此修正。</button>}
+      {errors > 0 && <button className="msg dash-alert" data-go="model" onClick={() => go("model", "source")}><span className="tag danger">ERR</span>模型有 {errors} 個錯誤，圖表暫停更新。點此修正。</button>}
+
+      <div className="dash-kpis" aria-label="關鍵指標">
+        <button className="kpi" data-go="tables:req" onClick={() => go("tables", "req")}>
+          <span className="label">需求有驗證</span>
+          <span className="readout">{reqs.length ? pct(verified, reqs.length) : "—"}{reqs.length > 0 && <small>%</small>}</span>
+          <span className="meter"><span style={{ width: `${pct(verified, reqs.length)}%` }} /></span>
+          <span className="caption">{verified} / {reqs.length}</span>
+        </button>
+        <button className="kpi" data-go="analysis" onClick={() => go("analysis")}>
+          <span className="label">計算判定</span>
+          <span className="readout">{pass}<small> PASS</small></span>
+          <span className="caption">{fails > 0 ? <span className="tag danger">{fails} FAIL</span> : "0 FAIL"}</span>
+        </button>
+        <button className="kpi" data-go="tables:fmea" onClick={() => go("tables", "fmea")}>
+          <span className="label">高風險未結</span>
+          <span className="readout" style={openHigh > 0 ? { color: "var(--danger)" } : undefined}>{openHigh}</span>
+          <span className="caption">共 {risks.length} 項風險</span>
+        </button>
+        <button className="kpi" data-go="manage" onClick={() => go("manage")}>
+          <span className="label">逾期任務</span>
+          <span className="readout" style={late.length > 0 ? { color: "var(--danger)" } : undefined}>{late.length}<small> / {tasks.length}</small></span>
+          <span className="caption">{pm === null ? "載入中" : tasks.length === 0 ? "沒有任務" : `${tasks.filter((t) => t.done).length} 項已完成`}</span>
+        </button>
+        <button className="kpi" data-go="manage" onClick={() => go("manage")}>
+          <span className="label">預算使用</span>
+          <span className="readout" style={budgetPct !== null && budgetPct > 100 ? { color: "var(--danger)" } : undefined}>{budgetPct ?? "—"}{budgetPct !== null && <small>%</small>}</span>
+          <span className="meter"><span style={{ width: `${Math.min(100, budgetPct ?? 0)}%` }} /></span>
+          <span className="caption">{planned ? `${actual.toLocaleString("zh-TW")} / ${planned.toLocaleString("zh-TW")}` : "尚未設預算"}</span>
+        </button>
+      </div>
 
       <div className="dash-grid">
-        <section className="section">
-          <div className="section-head"><h2 className="section-title">需求</h2><span className="label">{reqs.length}</span><button className="tbtn" onClick={() => go("deliver", "req")}>矩陣</button></div>
-          <Bar label="有來源" done={reqs.filter((e) => has(e, "out", "derive", "refine", "trace") || !!e.attrs.sourceDoc).length} total={reqs.length} onClick={() => go("deliver", "req")} />
-          <Bar label="有滿足者" done={reqs.filter((e) => has(e, "in", "satisfy")).length} total={reqs.length} onClick={() => go("deliver", "req")} />
-          <Bar label="有驗證" done={reqs.filter((e) => has(e, "in", "verify")).length} total={reqs.length} onClick={() => go("deliver", "req")} />
-          <div className="dash-stats">
-            <div><span className="label">計算判定</span><span className="data">{a.satisfaction.filter((s) => s.status === "holds").length} PASS {fails > 0 && <span className="tag danger">{fails} FAIL</span>}</span></div>
-            <div><span className="label">模型元素</span><span className="data">{a.elements.filter((e) => e.category).length}</span></div>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head"><h2 className="section-title">風險</h2><span className="label">{risks.length}</span><button className="tbtn" onClick={() => go("deliver", "fmea")}>FMEA</button></div>
-          <div className="dash-risk">
-            <RiskGrid risks={risks} onPick={() => go("deliver", "fmea")} />
-            <div className="dash-stats col">
-              <div><span className="label">高風險未結</span><span className="data">{openHigh > 0 ? <span className="tag danger">{openHigh}</span> : "0"}</span></div>
-              <div><span className="label">已有緩解</span><span className="data">{risks.filter((r) => (r.attrs.mitigation ?? "").trim()).length} / {risks.length}</span></div>
+        {outputs.length > 0 && (
+          <section className="section" data-cell="perf">
+            <div className="section-head"><h2 className="section-title">性能對門檻</h2><button className="tbtn" data-go="analysis" onClick={() => go("analysis")}>分析</button></div>
+            <div className="dash-stats">
+              {outputs.slice(0, 6).map((o) => <div key={o.key}><span className="label">{o.zh}</span><span className="data">{Number.isInteger(o.value) ? o.value.toLocaleString("zh-TW") : o.value.toFixed(2)} {o.unit}</span></div>)}
             </div>
-          </div>
+            <p className="caption" style={{ marginTop: 8 }}>門檻判定：{pass} PASS{fails > 0 ? <> · <span className="tag danger">{fails} FAIL</span></> : " · 0 FAIL"}</p>
+          </section>
+        )}
+
+        <section className="section" data-cell="risk">
+          <div className="section-head"><h2 className="section-title">S×O 風險熱圖</h2><span className="label">{risks.length}</span><button className="tbtn" data-go="tables:fmea" onClick={() => go("tables", "fmea")}>FMEA</button></div>
+          {risks.length === 0 ? <p className="caption">還沒有風險項目。</p> : <RiskGrid risks={risks} onPick={() => go("tables", "fmea")} />}
         </section>
 
-        <section className="section">
-          <div className="section-head"><h2 className="section-title">時程</h2><span className="label">{tasks.filter((t) => t.done).length} / {tasks.length}</span><button className="tbtn" onClick={() => go("plan")}>甘特圖</button></div>
-          {late.length > 0 && <p className="msg"><span className="tag danger">LATE</span>{late.length} 項逾期</p>}
+        <section className="section" data-cell="coverage">
+          <div className="section-head"><h2 className="section-title">需求覆蓋</h2><span className="label">{reqs.length}</span><button className="tbtn" data-go="tables:req" onClick={() => go("tables", "req")}>矩陣</button></div>
+          {reqs.length === 0 ? <p className="caption">還沒有需求。</p> : <>
+            <Bar label="有來源" done={sourced} total={reqs.length} onClick={() => go("tables", "req")} />
+            <Bar label="有滿足者" done={satisfied} total={reqs.length} onClick={() => go("tables", "req")} />
+            <Bar label="有驗證" done={verified} total={reqs.length} onClick={() => go("tables", "req")} />
+          </>}
+        </section>
+
+        <section className="section" data-cell="tasks">
+          <div className="section-head"><h2 className="section-title">接下來的任務</h2><button className="tbtn" data-go="manage" onClick={() => go("manage")}>甘特圖</button></div>
           {next.length === 0 ? <p className="caption">沒有進行中的任務。</p> : next.map((t) => (
-            <button key={t.id} className="dash-task" onClick={() => go("plan")}>
+            <button key={t.id} className="dash-task" data-go="manage" onClick={() => go("manage")}>
               <span className="label">{t.end.slice(5)}</span><span className="body">{t.title}</span>{t.end < today() && <span className="tag danger">LATE</span>}
             </button>
           ))}
         </section>
 
-        <section className="section">
-          <div className="section-head"><h2 className="section-title">成本與性能</h2><button className="tbtn" onClick={() => go("sim")}>模擬</button></div>
-          <Bar label="預算使用" done={actual} total={planned} onClick={() => go("plan")} />
+        <section className="section" data-cell="changes">
+          <div className="section-head"><h2 className="section-title">最近的變更</h2><button className="tbtn" data-go="versions" onClick={() => go("versions")}>版本</button></div>
           <div className="dash-stats">
-            <div><span className="label">遠地點</span><span className="data">{apogee ? `${Math.round(apogee.value).toLocaleString("zh-TW")} m` : "—"}</span></div>
-            <div><span className="label">穩定裕度</span><span className="data">{margin ? `${margin.value.toFixed(2)} cal` : "—"}</span></div>
+            <button className="dash-stat" data-go="versions" onClick={() => go("versions")}><span className="label">{onBranch ? "尚未合併" : "送審中分支"}</span><span className="data">{onBranch ? view.branch!.ahead : branches ? branches.filter((b) => b.ahead > 0).length : "—"}</span></button>
+            <button className="dash-stat" data-go="versions" onClick={() => go("versions")}><span className="label">本週合併</span><span className="data">{hist ? merged : "—"}</span></button>
+            <button className="dash-stat" data-go="versions" onClick={() => go("versions")}><span className="label">最後更新</span><span className="data">{hist && hist[0] ? ago(hist[0].date) : "—"}</span></button>
           </div>
         </section>
       </div>
+
+      <section className="section" data-cell="subsystems">
+        <div className="section-head"><h2 className="section-title">各次系統狀態</h2><span className="label">{subs.length}</span><button className="tbtn" data-go="tables:cat:Subsystem" onClick={() => go("tables", "cat:Subsystem")}>清單</button></div>
+        {subs.length === 0 ? <p className="caption">還沒有次系統。</p> : (
+          <div className="dash-subs">
+            {subs.map((s) => {
+              const mine = a.satisfaction.filter((x) => x.subject === s.qualifiedName || x.subject === s.name || x.subject === s.id);
+              const f = mine.filter((x) => x.status === "fails").length, h = mine.filter((x) => x.status === "holds").length;
+              const parts = a.elements.filter((e) => e.category === "Component" && e.owner === s.id).length;
+              return (
+                <button key={s.id} className="dash-sub" data-go="tables:cat:Subsystem" onClick={() => go("tables", "cat:Subsystem")}>
+                  <span className="heading">{s.name}</span>
+                  <span className="caption">{parts} 個元件 · {h} PASS{f > 0 && <> · <span className="tag danger">{f} FAIL</span></>}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

@@ -1,0 +1,47 @@
+/* 首頁：專案總覽儀表 */
+.dash { max-width: 1180px; margin: 0 auto; }
+.dash-hero { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: var(--space-8); align-items: end; padding: var(--space-4) 0 var(--space-6); }
+.dash-now { display: flex; flex-direction: column; gap: var(--space-2); border: 0; background: none; text-align: left; cursor: pointer; padding: 0; }
+.readout { font-size: 72px; line-height: 72px; font-weight: 600; letter-spacing: -0.03em; text-shadow: var(--glow-ink); }
+.readout small { font-size: 22px; font-weight: 500; letter-spacing: 0; color: var(--ink-muted); text-shadow: none; }
+.dash-track { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-2); }
+.dash-gate { display: flex; flex-direction: column; gap: var(--space-1); border: 0; background: none; padding: var(--space-2) 0; cursor: pointer; text-align: left; min-width: 0; }
+.dash-gate .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-gate.cur .label { color: var(--ink); font-weight: 700; }
+.dash-gate .meter { height: var(--stroke-bold); flex: none; }
+.dash-gate .caption { min-height: 16px; }
+.dash-gate:hover .label { color: var(--ink); }
+.dash-alert { width: 100%; border: 0; background: none; cursor: pointer; text-align: left; }
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6) var(--space-8); }
+.dash-grid .section + .section { margin-top: 0; }
+.dash-bar { display: grid; grid-template-columns: 6rem 1fr 5rem; align-items: center; gap: var(--space-3); min-height: 32px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 0; }
+.dash-bar .data { text-align: right; }
+.dash-bar:hover .body { text-decoration: underline; text-underline-offset: 3px; }
+.dash-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-3); }
+.dash-stats.col { grid-template-columns: 1fr; margin-top: 0; }
+.dash-stats > div { display: flex; flex-direction: column; gap: var(--space-1); }
+.dash-risk { display: flex; gap: var(--space-6); align-items: flex-start; }
+.dash-task { display: grid; grid-template-columns: 3.2rem 1fr auto; gap: var(--space-3); align-items: center; min-height: 32px; width: 100%; border: 0; border-bottom: var(--stroke-hair) solid var(--line); background: none; cursor: pointer; text-align: left; padding: 0; }
+.dash-task .body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 860px) {
+  .dash-hero, .dash-grid { grid-template-columns: 1fr; gap: var(--space-4); }
+  .dash-track { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .readout { font-size: 56px; line-height: 56px; }
+}
+
+/* 首頁新增：5 指標列、最近變更、次系統 */
+.dash-hero { grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); }
+.dash-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
+.kpi { display: flex; flex-direction: column; gap: var(--space-1); border: var(--stroke-hair) solid var(--line); background: none; color: inherit; text-align: left; cursor: pointer; padding: var(--space-3); font: inherit; min-width: 0; }
+.kpi:hover { background: var(--surface-1); border-color: var(--line-strong); }
+.kpi .readout { font-size: 40px; line-height: 44px; }
+.kpi .readout small { font-size: 14px; }
+.kpi .meter { height: var(--stroke-bold); }
+.dash-stat { display: flex; flex-direction: column; gap: var(--space-1); border: 0; background: none; color: inherit; text-align: left; cursor: pointer; padding: 0; font: inherit; }
+.dash-stat:hover .data { text-decoration: underline; text-underline-offset: 3px; }
+.dash > .section { margin-top: var(--space-6); }
+.dash-subs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+.dash-sub { display: flex; flex-direction: column; gap: var(--space-1); border: var(--stroke-hair) solid var(--line); background: none; color: inherit; text-align: left; cursor: pointer; padding: var(--space-3); font: inherit; }
+.dash-sub:hover { background: var(--surface-1); border-color: var(--line-strong); }
+@media (max-width: 860px) { .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

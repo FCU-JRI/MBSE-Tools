@@ -1,0 +1,19 @@
+/* 模型頁：圖上方的名稱列、左欄篩選、下方原始碼抽屜 */
+.model-bar { display: flex; align-items: center; gap: var(--space-3); min-height: 40px; padding: 0 var(--space-4); border-bottom: var(--stroke-hair) solid var(--line); flex: none; }
+.model-bar .grow { flex: 1; }
+.model-bar .tbtn[aria-pressed="true"] { color: var(--ink); font-weight: 700; }
+.model-main { display: flex; flex: 1; min-height: 0; }
+.model-filter { padding-top: var(--space-3); }
+.model-filter .input { width: 100%; }
+.source-drawer { flex: none; height: 45%; min-height: 240px; display: flex; flex-direction: column; border-top: var(--stroke-hair) solid var(--line-strong); background: var(--bg); }
+.source-drawer-head { padding: 0 var(--space-4); min-height: 32px; }
+.source-drawer-head .grow { flex: 1; }
+.source-drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--space-6) var(--space-4); display: flex; flex-direction: column; }
+
+/* 右欄：建立之後能改（類別、上層、驗證、自訂屬性、關係） */
+.closure .field > .caption { margin-top: 4px; }
+.inline-edit { display: flex; gap: var(--space-2); align-items: center; }
+.inline-edit .input { flex: 1; min-width: 0; }
+.attr-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.7fr) auto auto; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); }
+.attr-row .input { min-width: 0; }
+.rel-edit { border-left: var(--stroke-hair) solid var(--line-strong); padding: var(--space-2) 0 var(--space-2) var(--space-3); margin: 4px 0 var(--space-3); }

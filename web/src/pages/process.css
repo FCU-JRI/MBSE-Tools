@@ -1,0 +1,31 @@
+/* 流程指南：一列一步，做完的收成一行，正在做的那步展開 */
+.guide { max-width: 880px; margin: 0 auto; }
+.guide-head { display: flex; align-items: baseline; gap: var(--space-3); padding-bottom: var(--space-2); border-bottom: var(--stroke-hair) solid var(--line); flex-wrap: wrap; }
+.guide-head .grow { flex: 1; }
+.guide-list { list-style: none; margin: 0; padding: 0; }
+.guide-step { border-bottom: var(--stroke-hair) solid var(--line); }
+.guide-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: 44px; padding: 0 var(--space-1); border: 0; background: none; text-align: left; cursor: pointer; color: var(--ink-muted); font: inherit; }
+.guide-row .grow { flex: 1; }
+.guide-row:hover { color: var(--ink); background: var(--surface-1); }
+.guide-mark { display: inline-flex; align-items: center; justify-content: center; width: 1.6rem; height: 1.6rem; border: var(--stroke-hair) solid currentColor; border-radius: 50%; font-size: 12px; flex: none; }
+.guide-step.done .guide-mark { background: var(--ink-muted); color: var(--on-ink); border-color: var(--ink-muted); }
+.guide-step.current .guide-row { color: var(--ink); font-weight: 600; }
+.guide-step.current .guide-mark { border-width: var(--stroke-bold); }
+.guide-step.locked .guide-row { color: var(--ink-faint); }
+.guide-name { font-family: var(--font-sans); font-size: 15px; }
+.guide-tw { width: 1rem; text-align: center; color: var(--ink-faint); }
+.guide-body { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-2) 0 var(--space-6) calc(1.6rem + var(--space-3) + var(--space-1)); }
+.guide-body .section + .section { margin-top: 0; }
+.guide-part h2 { margin: 0 0 var(--space-1); }
+.guide-todo { font-size: 17px; line-height: 26px; }
+.guide-how { margin: 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: var(--space-1); }
+.guide-missing { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.guide-missing li { display: flex; align-items: baseline; gap: var(--space-2); }
+.guide-missing li::before { content: "·"; color: var(--ink-faint); }
+.guide-actions { padding-left: 0; flex-wrap: wrap; }
+.guide-example { margin: 0; }
+.guide-more { display: flex; flex-direction: column; gap: var(--space-1); }
+.proc-item { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) auto; gap: var(--space-3); align-items: baseline; width: 100%; min-height: 36px; padding: var(--space-1) 0; border: 0; border-bottom: var(--stroke-hair) solid var(--line); background: none; text-align: left; cursor: pointer; }
+.proc-item:hover { background: var(--surface-1); }
+.proc-item .tid { font-size: 11px; letter-spacing: 0.06em; color: var(--ink-muted); }
+@media (max-width: 860px) { .guide-body { padding-left: 0; } .proc-item { grid-template-columns: 5rem minmax(0, 1fr); } .proc-item .caption { grid-column: 2; } }

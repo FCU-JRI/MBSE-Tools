@@ -1,0 +1,29 @@
+/* 建立專案的三種方式：以髮絲線分隔的選項，不用卡片 */
+.choices { border: 0; padding: 0; margin: 0 0 var(--space-4); }
+.choices legend { padding: 0; margin-bottom: var(--space-1); }
+.choice { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; margin: 0; border-top: var(--stroke-hair) solid var(--line); cursor: pointer; color: var(--ink-muted); }
+.choice.on { color: var(--ink); box-shadow: inset var(--stroke-bold) 0 0 var(--ink); padding-left: var(--space-3); }
+.choice input { appearance: none; margin: 4px 0 0; width: 14px; height: 14px; border: var(--stroke-hair) solid var(--line-strong); background: var(--bg); display: grid; place-items: center; flex: none; cursor: pointer; }
+.choice input:checked { border-color: var(--ink); }
+.choice input:checked::after { content: ""; width: 6px; height: 6px; background: var(--ink); box-shadow: var(--glow-ink); }
+.choice > span { display: flex; flex-direction: column; gap: 2px; }
+.choice .heading { font-size: 14px; line-height: 20px; }
+
+/* 專案列表：內容置中，背景是模糊的流體動畫（純 CSS，不載入任何套件） */
+.proj-page { position: relative; isolation: isolate; width: 100%; max-width: none; margin: 0; padding: var(--space-8) var(--space-4); overflow: auto; flex: 1; }
+.proj-col { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-6); }
+.proj-card { background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: var(--stroke-hair) solid var(--line); padding: var(--space-6); margin: 0; }
+.proj-card .proj:hover { background: color-mix(in srgb, var(--surface-1) 80%, transparent); }
+.fluid-bg { position: fixed; inset: 48px 0 0 0; z-index: -1; overflow: hidden; background: var(--bg); pointer-events: none; }
+.fluid-bg i { position: absolute; width: 55vmax; height: 55vmax; border-radius: 50%; filter: blur(70px); opacity: 0.55; will-change: transform; animation: fluid-drift 26s ease-in-out infinite alternate; }
+.fluid-bg i:nth-child(1) { left: -12%; top: -18%; background: radial-gradient(circle at 40% 40%, #3b6bff, transparent 65%); }
+.fluid-bg i:nth-child(2) { right: -15%; top: 5%; background: radial-gradient(circle at 50% 50%, #ff5a3c, transparent 65%); animation-duration: 33s; animation-delay: -9s; }
+.fluid-bg i:nth-child(3) { left: 15%; bottom: -25%; background: radial-gradient(circle at 50% 50%, #18c29c, transparent 65%); animation-duration: 29s; animation-delay: -4s; }
+.fluid-bg i:nth-child(4) { right: 10%; bottom: -20%; width: 40vmax; height: 40vmax; background: radial-gradient(circle at 50% 50%, #c04bff, transparent 65%); animation-duration: 38s; animation-delay: -15s; }
+@keyframes fluid-drift {
+  0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+  50% { transform: translate(14vw, 9vh) scale(1.18) rotate(90deg); }
+  100% { transform: translate(-8vw, 16vh) scale(0.92) rotate(180deg); }
+}
+@media (prefers-color-scheme: light) { .fluid-bg i { opacity: 0.4; } .proj-card { background: color-mix(in srgb, var(--bg) 82%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .fluid-bg i { animation: none; } }

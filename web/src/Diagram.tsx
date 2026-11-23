@@ -162,6 +162,9 @@ export interface DiagramProps {
   onNew: (category: string, parentId: string | null) => void;
   onChanged: (v: View) => void;
   onError: (m: string) => void;
+  /** 剛建好的自訂圖：一打開就跳出「加入既有項目」 */
+  pickOnOpen?: boolean;
+  onPicked?: () => void;
 }
 
 export function Diagram(props: DiagramProps) {
@@ -189,7 +192,7 @@ const newId = (prefix: string) => `${prefix}:${Date.now().toString(36)}${Math.ra
 const linkIconOf = (k: string): IconName => (k === "compose" ? "diamond" : ["refine", "trace"].includes(k) ? "dashed" : "line"); // 衍生是連結，畫實線
 type Moved = View & { moved: Record<string, string>; packageId: string | null; layout: Layout; diagrams: Diagrams };
 
-function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError }: DiagramProps) {
+function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError, pickOnOpen, onPicked }: DiagramProps) {
   const pid = view.project.id;
   const flow = useReactFlow();
   const rf = useStoreApi();
@@ -252,6 +255,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
 
   useEffect(() => { api<Layout>(`/projects/${pid}/layout`).then((l) => { layoutRef.current = l; setLayout(l); }).catch(() => setLayout({})); }, [pid]);
   useEffect(() => { setTool("select"); setSelEdge(null); setSelNote(null); setConfirm(null); setPanel(null); setMenu(null); multiRef.current = []; setMulti([]); pending.current = null; }, [def.id]);
+  // 換圖時會先關掉面板（上一行），所以這裡要排在它後面
+  useEffect(() => { if (pickOnOpen && custom && !readOnly) { setQuery(""); setPanel("add"); onPicked?.(); } }, [pickOnOpen, def.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const vertical = graph.direction === "TB" || graph.direction === "BT";
   const straight = false; // 一律走直角折線
@@ -776,7 +781,8 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
         )}
         {(panel === "all" || panel === "add") && (
           <div className="canvas-panel" role="dialog" aria-label={panel === "all" ? "全部工具" : "加入既有項目"}>
-            <div className="section-head"><h2 className="section-title">{panel === "all" ? "全部工具" : "加入既有項目"}</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
+            <div className="section-head"><h2 className="section-title">{panel === "all" ? "全部工具" : "加入既有項目"}</h2><button className="tbtn" onClick={() => setPanel(null)}>{panel === "add" ? "完成" : "關閉"}</button></div>
+            {panel === "add" && <p className="caption">點一下就放進這張圖，可以連續點。之後要再加，用工具列的「加入既有項目」；要拿掉，選取後按「移出此圖」。</p>}
             <input className="input" placeholder="搜尋" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="搜尋" autoFocus />
             {panel === "all" && <>
               {Object.entries(meta.pillars).map(([p, pzh]) => {
