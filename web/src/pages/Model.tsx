@@ -31,8 +31,11 @@ export function ModelPage(p: PageProps) {
     if (extraTimer.current) clearTimeout(extraTimer.current);
     extraTimer.current = setTimeout(() => { api(`/projects/${id}/diagrams`, "PUT", { diagrams: next }).catch((e) => p.onNotice((e as Error).message)); }, 400);
   }, [id, readOnly, p.onNotice]);
+  // 剛建好的自訂圖：直接跳出「選要放進來的項目」
+  const [justCreated, setJustCreated] = useState<string | null>(null);
   const addDiagram = (title: string) => {
     const did = `custom:${Date.now().toString(36)}`;
+    setJustCreated(did);
     saveExtra({ ...extra, custom: [...extra.custom, { id: did, title: title.trim().slice(0, 60) || "自訂圖", members: [] }] });
     p.setSpot({ diagramId: did });
   };
@@ -53,7 +56,7 @@ export function ModelPage(p: PageProps) {
         <button className="tbtn" aria-pressed={source} onClick={() => p.setSpot({ source: !source })} title="SysML v2 文字原始碼">{"</>"} 原始碼</button>
       </div>
       <div className={`model-main ${source ? "with-source" : ""}`}>
-        <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
+        <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} pickOnOpen={def.id === justCreated} onPicked={() => setJustCreated(null)} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
           onSelectEdge={(e) => e && p.setSel({ type: "edge", edge: e })} onNew={(c, parentId) => p.setSel({ type: "new", category: c, parentId })}
           onChanged={(v: View) => { p.setView(v); p.onNotice(""); }} onError={p.onNotice} />
       </div>
