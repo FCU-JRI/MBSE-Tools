@@ -64,4 +64,4 @@ export interface Me {
   kind: "local" | "member" | "viewer"; login: string; name: string; rank: string | null; rankZh: string; subsystems: string[]; project: string | null;
   caps: { edit: boolean; createProject: boolean; confirm: boolean; merge: boolean; admin: boolean };
 }
-export interface MeResponse { user: Me | null; githubLogin: boolean; public: boolean }
+export interface MeResponse { user: Me | null; googleLogin: boolean; githubLogin: boolean; public: boolean }

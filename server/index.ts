@@ -111,14 +111,16 @@ app.use("/api/projects/:id", (req, res, next) => {
 
 app.get("/api/me", wrap(async (req, res) => {
   const c = await auth.getConfig();
-  res.json({ user: req.user ? auth.describe(req.user) : null, githubLogin: !!(c.github.clientId && c.github.clientSecret && c.publicUrl), public: req.isPublic === true });
+  res.json({ user: req.user ? auth.describe(req.user) : null, googleLogin: !!(c.google.clientId && c.google.clientSecret && c.publicUrl), githubLogin: !!(c.github.clientId && c.github.clientSecret && c.publicUrl), public: req.isPublic === true });
 }));
 
 // ───────── 管理：成員、唯讀連結、登入設定 ─────────
 const admin = auth.need(auth.can.admin, "只有總工程師以上或管理員可以操作。");
 app.get("/api/admin/members", admin, wrap(async (_req, res) => res.json({ members: await auth.listMembers(), ranks: auth.RANKS.map((r) => ({ id: r, zh: auth.RANK_ZH[r] })) })));
 app.post("/api/admin/members", admin, wrap(async (req, res) => res.json({ members: await auth.saveMember(req.body ?? {}) })));
-app.post("/api/admin/members/delete", admin, wrap(async (req, res) => res.json({ members: await auth.removeMember(String(req.body?.login ?? "")) })));
+app.post("/api/admin/members/delete", admin, wrap(async (req, res) => res.json({ members: await auth.removeMember(String(req.body?.email || req.body?.login || "")) })));
+app.get("/api/admin/requests", admin, wrap(async (_req, res) => res.json({ requests: await auth.listRequests() })));
+app.post("/api/admin/requests/delete", admin, wrap(async (req, res) => res.json({ requests: await auth.dropRequest(String(req.body?.email ?? "")) })));
 app.get("/api/admin/shares", admin, wrap(async (_req, res) => res.json({ shares: await auth.listShares() })));
 app.post("/api/admin/shares", admin, wrap(async (req, res) => {
   if (String(req.body?.project ?? "").includes("@")) throw new store.UserError("唯讀連結以專案為單位，不能只給某個分支。");
@@ -130,7 +132,7 @@ app.post("/api/admin/shares", admin, wrap(async (req, res) => {
 app.post("/api/admin/shares/delete", admin, wrap(async (req, res) => { await auth.revokeShare(String(req.body?.id ?? "")); res.json({ shares: await auth.listShares() }); }));
 app.get("/api/admin/config", admin, wrap(async (_req, res) => {
   const c = await auth.getConfig();
-  res.json({ publicUrl: c.publicUrl, clientId: c.github.clientId, hasSecret: !!c.github.clientSecret, tailscaleAdmins: c.tailscaleAdmins, autoRepo: c.autoRepo });
+  res.json({ publicUrl: c.publicUrl, clientId: c.github.clientId, hasSecret: !!c.github.clientSecret, google: { clientId: c.google.clientId, hasSecret: !!c.google.clientSecret }, tailscaleAdmins: c.tailscaleAdmins, autoRepo: c.autoRepo });
 }));
 app.post("/api/admin/config", admin, wrap(async (req, res) => { await auth.updateConfig(req.body ?? {}); res.json({ saved: true }); }));
 

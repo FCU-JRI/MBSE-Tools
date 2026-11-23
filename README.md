@@ -21,9 +21,9 @@
 |---|---|---|
 | 這台電腦本機 | 8787 | 管理員 |
 | Tailscale 私人網路（`tailscale serve`） | 8787 | 設定檔中的 Tailscale 帳號為管理員；其餘依成員名單 |
-| 公開網址（`tailscale funnel`） | 8788 | 必須用 GitHub 登入（需在成員名單內），或持有唯讀連結 |
+| 公開網址（`tailscale funnel`） | 8788 | 必須用 Google 登入（email 需在成員名單內；GitHub 登入為第二選項），或持有唯讀連結 |
 
-公開埠不信任任何代理標頭。成員名單、唯讀連結、GitHub 登入設定都在「管理」頁。
+公開埠不信任任何代理標頭。成員名單、加入申請、唯讀連結、登入設定都在「管理」頁。Google 登入的設定步驟見 [docs/GOOGLE-LOGIN.md](docs/GOOGLE-LOGIN.md)。
 
 ## 開發
 
@@ -64,7 +64,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
 
 ## 已知限制
 
-- GitHub 登入需要管理員先建立 OAuth App 並在「管理」頁填入。
+- Google 登入需要管理員先在 Google Cloud Console 建立 OAuth 用戶端並填入 Client ID 與 secret（見 [docs/GOOGLE-LOGIN.md](docs/GOOGLE-LOGIN.md)）。GitHub 登入為第二選項，要另建 OAuth App。
 - 專案的 GitHub 儲存庫：在「管理 → 專案儲存庫」開啟自動建立後，新增專案時會用 GitHub CLI 建立 `擁有者/專案代號` 並設為推送目標。執行網站的帳號要先 `gh auth login`（登入該擁有者）並 `gh auth setup-git`；未開啟時要先手動建立，再到「版本」頁填網址。
 - 分支：在網頁上開啟過的分支會在 `JRI_HOME/branches` 留一份工作目錄，工具目前不會刪除分支。時程、版面等資料檔會逐欄位自動合併。模型檔（`.sysml`）兩邊改到同一段時，只有「一邊只刪了內容，另一邊也刪了同樣內容並另有修改」會自動解決（記在提交訊息裡）；其餘情況不猜，需由分支作者在自己的電腦上解決。
 - 衍生、細化、驗證方法用 SysML v2 標準庫的寫法。舊寫法的模型在開啟時自動轉換，由工具單獨提交一筆；認不得的形狀（有名字或帶主體的 `#derive dependency`）不會轉換，要到「原始碼」分頁手動改。一般追溯（`#trace`）與 TPM（`#tpm`）標準庫沒有對應，仍是 JRI 自訂的標記。
