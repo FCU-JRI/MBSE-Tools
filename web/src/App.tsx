@@ -125,17 +125,22 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
   );
 }
 
-/** 右上的版本按鈕：顯示目前在哪個分支與還沒合併的數量，點開是版本畫面。 */
+/**
+ * 右上的版本按鈕。「未送審」的定義：
+ *  - 在分支上：這個分支相對 main 的變更項數（新增＋修改＋移除的模型元素），0 顯示「沒有改動」。
+ *  - 在 main 上：送審中的分支數（有領先 main 提交的分支）。
+ * 點開是版本畫面（修改 → 送審 → 核准）。
+ */
 function VersionButton({ id, view, active, onClick }: { id: string; view: View; active: boolean; onClick: () => void }) {
-  const [pending, setPending] = useState<number | null>(null);
-  const onBranch = !!view.branch;
-  // 在 main 上時，數一下有幾個分支有還沒合併的修改；讀不到就不顯示數字
+  const [count, setCount] = useState<number | null>(null);
+  const bname = view.branch?.name, bahead = view.branch?.ahead;
   useEffect(() => {
-    if (onBranch) return;
-    api<{ ahead: number }[]>(`/projects/${id}/branches`).then((b) => setPending(b.filter((x) => x.ahead > 0).length)).catch(() => setPending(null));
-  }, [id, onBranch]);
-  const name = view.branch?.name ?? "main";
-  const count = onBranch ? view.branch!.ahead : pending;
-  const note = count === null ? "" : onBranch ? ` · ${count} 項未合併` : ` · ${count} 個分支待審`;
-  return <button className="tbtn version-btn" aria-pressed={active} onClick={onClick} title="版本：分支、審查、合併、基線">{name}{note} ▾</button>;
+    setCount(null);
+    const q = bname
+      ? api<{ changes: unknown[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(bname)}`).then((d) => d.changes.length)
+      : api<{ ahead: number }[]>(`/projects/${id}/branches`).then((b) => b.filter((x) => x.ahead > 0).length);
+    q.then(setCount).catch(() => setCount(null));
+  }, [id, bname, bahead]);
+  const note = count === null ? "" : bname ? (count === 0 ? " · 沒有改動" : ` · ${count} 項未送審`) : ` · ${count} 個送審中`;
+  return <button className="tbtn version-btn" aria-pressed={active} onClick={onClick} title="版本：修改 → 送審 → 核准合併">{bname ?? "main"}{note} ▾</button>;
 }
