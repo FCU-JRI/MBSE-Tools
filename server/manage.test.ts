@@ -7,7 +7,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const PORT = 18817, PUB = 18818; // 和 api、google、members 測試的埠錯開
+const PORT = 18837, PUB = 18838; // 和 api、google、members 測試的埠錯開
 const I = `http://127.0.0.1:${PORT}/api`;
 let server: ChildProcess, home: string;
 
