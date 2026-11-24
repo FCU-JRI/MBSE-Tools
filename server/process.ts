@@ -2,7 +2,7 @@
 // 每一步都有「要回答的問題」與「完成條件」；前一步沒完成，後面的步驟不開放。
 // 同一份定義供網頁的引導流程、伺服器的順序檢查與給 AI 的 skill 使用。
 // WP3 起：流程頁與卡點改照框架檔（framework/jri.json）執行，見下方 frameworkView／holdPoint。
-// 這 17 步仍留在 API 的 view.process（既有測試與流程範本的教學順序鎖依賴它，移除要 Mars 核准改測試）。
+// 這 17 步仍留在 API 的 view.process（既有測試讀它的狀態）；舊的順序鎖已拿掉（Mars 2026-11-24 決定）。
 import type { Analysis } from "./engine.ts";
 import * as fw from "./framework.ts";
 import { CATEGORIES as CATS } from "./metamodel.ts";
@@ -230,15 +230,6 @@ export function evaluateProcess(a: Analysis): StepStatus[] {
   });
 }
 
-/**
- * 某個類別屬於哪一步；流程專案用來擋掉跳步驟的新增（舊 17 步順序鎖，PROC-06）。
- * 框架設計迴圈要產出的類別（設計方案、決策、風險、介面…）不受舊順序鎖：
- * 否則「風險」被鎖到第 15 步，任務剖面迴圈走不完，系統需求永遠過不了卡點。
- */
-export function stepOfCategory(category: string): StepDef | undefined {
-  if (framework().designLoop.steps.some((s) => (s.produces ?? []).includes(category))) return undefined;
-  return STEPS.find((s) => s.categories.includes(category));
-}
 
 // ───────── 框架（WP3）─────────
 let cached: fw.Framework | null = null;
@@ -285,9 +276,9 @@ export async function frameworkView(ref: string, project: Project, a: Analysis, 
   return fw.evaluateFramework(framework(), { a, settings: settingsOf(project), docs, approval: await approvalState(ref), catZh });
 }
 
-/** 新增元素前的卡點（FW-02）。專案設定 enforceHoldPoint 為真才擋；回傳要顯示的原因，null＝不擋。 */
+/** 新增元素前的卡點（FW-02）：只警告不擋（Mars 決定）。回傳要顯示的警告，null＝沒有卡點。 */
 export async function holdPoint(ref: string, project: Project, a: Analysis, docs: number, category: string): Promise<string | null> {
-  if (!settingsOf(project).enforceHoldPoint || !a.ok) return null;
+  if (!a.ok) return null;
   const ev = await frameworkView(ref, project, a, docs);
   return ev ? fw.holdPointBlock(ev, category) : null;
 }

@@ -119,7 +119,7 @@ export function validateFramework(f: Framework, known: Known): string[] {
 // ───────── 執行框架（WP3）：由模型證據算出每層每個對象走到哪一步、卡點、兩個來源 ─────────
 // 狀態不另外存：每次都從模型、專案設定、來源文件與分支狀態重算。
 
-/** 專案設定（PRJ-05）。預設值來自框架檔 settings；enforceHoldPoint 是工具加的（預設：流程範本專案才強制）。 */
+/** 專案設定（PRJ-05）。預設值來自框架檔 settings。卡點只警告不擋（Mars 決定），所以沒有強制開關。 */
 export interface FwSettings {
   fmeaThreshold: number;
   budgetMargin: number | null;
@@ -127,10 +127,9 @@ export interface FwSettings {
   tradeWeights: boolean;
   /** 「層.步」→ 角色 id；沒寫的用框架檔的 owner */
   owners: Record<string, string>;
-  enforceHoldPoint: boolean;
 }
 
-export function defaultSettings(f: Framework, template?: string): FwSettings {
+export function defaultSettings(f: Framework, _template?: string): FwSettings {
   const d = (id: string) => f.settings.find((s) => s.id === id)?.default;
   const num = (v: unknown, fb: number) => (typeof v === "number" && Number.isFinite(v) ? v : fb);
   return {
@@ -139,7 +138,6 @@ export function defaultSettings(f: Framework, template?: string): FwSettings {
     minAlternatives: num(d("minAlternatives"), 2),
     tradeWeights: d("tradeWeights") === true,
     owners: {},
-    enforceHoldPoint: template === "guided",
   };
 }
 
@@ -166,7 +164,6 @@ export function normalizeSettings(f: Framework, base: FwSettings, input: unknown
     }
   }
   if (b.tradeWeights !== undefined) out.tradeWeights = b.tradeWeights === true;
-  if (b.enforceHoldPoint !== undefined) out.enforceHoldPoint = b.enforceHoldPoint === true;
   if (b.owners !== undefined) {
     if (b.owners === null || typeof b.owners !== "object") throw new SettingsError("各步負責人格式不正確。");
     const keys = new Set(ownerSlots(f).map((s) => s.key));
@@ -516,23 +513,25 @@ export function evaluateFramework(f: Framework, ctx: FwContext): FrameworkEval {
     const from = layers.find((x) => x.id === s.basisFrom);
     const src = f.layers.find((x) => x.id === s.basisFrom);
     if (!from || !src) continue;
+    // 上一層每個對象都走完才算開（多個對象也只警告，不擋）
     const passed = from.objects.filter((o) => o.passed);
+    const allPassed = from.objects.length > 0 && passed.length === from.objects.length;
     const blocking = from.objects.filter((o) => !o.passed).map((o) => `「${o.name}」停在「${o.steps.find((x) => x.id === o.current)?.zh ?? "—"}」`);
     for (const c of cats) holdPoints.push({
-      category: c, zh: ctx.catZh?.(c) ?? c, fromLayer: from.id, fromLayerZh: from.zh, open: passed.length > 0,
-      reason: passed.length > 0 ? `${from.zh}已有 ${passed.length} 個對象的設計迴圈走完。`
+      category: c, zh: ctx.catZh?.(c) ?? c, fromLayer: from.id, fromLayerZh: from.zh, open: allPassed,
+      reason: allPassed ? `${from.zh}每個對象的設計迴圈都走完了。`
         : from.objects.length === 0 ? `第 ${from.order} 層「${from.zh}」還沒有任何${src.subject === "mission" ? "對象" : ctx.catZh?.(src.subject) ?? src.subject}，設計迴圈沒有開始。`
-        : `第 ${from.order} 層「${from.zh}」的設計迴圈還沒走到「是否符合需求＝是」：${blocking.join("；")}。`,
+        : `第 ${from.order} 層「${from.zh}」的設計迴圈還沒全部走到「是否符合需求＝是」${passed.length ? `（${passed.length}／${from.objects.length} 個走完）` : ""}：${blocking.join("；")}。`,
     });
   }
   return { name: f.name, version: f.version, settings: ctx.settings, layers, twoSources, holdPoints, approval: ctx.approval, problems: [] };
 }
 
-/** 新增某類別的元素時，卡點擋不擋。null＝不擋。 */
+/** 新增某類別的元素時的卡點警告（不擋）。null＝沒有卡點。 */
 export function holdPointBlock(ev: FrameworkEval, category: string): string | null {
   const hp = ev.holdPoints.find((x) => x.category === category);
   if (!hp || hp.open) return null;
-  return `還不能新增${hp.zh}（卡點）：下一層需求只能從上一層設計迴圈的產出推導。${hp.reason}`;
+  return `卡點警告：已新增${hp.zh}，但上一層設計迴圈還沒走完，下一層需求應從上一層設計迴圈的產出推導。${hp.reason}`;
 }
 
 /** 審查節點的框架檢查（MGT-02）：節點前該層的步驟，以及迴圈層每個對象的迴圈是否走完。 */

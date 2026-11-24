@@ -15,7 +15,7 @@ export interface FwObject { id: string | null; name: string; steps: FwStep[]; cu
 export interface FwLayer { id: string; order: number; zh: string; kind: "chain" | "loop"; subject: string; gate: string | null; outputsZh: string; steps: FwStep[]; before: FwStep[]; objects: FwObject[]; after: FwStep[]; passed: boolean }
 export interface FwEval {
   name: string; version: number; layers: FwLayer[];
-  settings: { fmeaThreshold: number; minAlternatives: number; budgetMargin: number | null; enforceHoldPoint: boolean };
+  settings: { fmeaThreshold: number; minAlternatives: number; budgetMargin: number | null };
   twoSources: { id: string; name: string; category: string; missing: string[]; text: string }[];
   holdPoints: { category: string; zh: string; fromLayer: string; fromLayerZh: string; open: boolean; reason: string }[];
   approval: { ok: boolean; detail: string };
@@ -56,13 +56,13 @@ export function FrameworkView(p: Props) {
         <span className="grow" />
         <button className="tbtn" onClick={() => setOpen(open.size === fw.layers.length ? new Set(firstOpen ? [firstOpen] : []) : new Set(fw.layers.map((l) => l.id)))}>{open.size === fw.layers.length ? "收起" : "全部展開"}</button>
       </div>
-      <p className="caption">需求與設計交替：每一層的設計迴圈沒走到「是否符合需求＝是」，不能推導下一層需求（卡點）。下一層需求要同時連到上一層需求（衍生自）與上一層的設計產出（#basis）。
-        {fw.settings.enforceHoldPoint ? "本專案在伺服器強制卡點。" : "本專案沒有強制卡點（專案管理頁 › 專案設定可打開），下面仍會標出。"}</p>
+      <p className="caption">需求與設計交替：每一層的設計迴圈沒走到「是否符合需求＝是」，不該推導下一層需求（卡點）。下一層需求要同時連到上一層需求（衍生自）與上一層的設計產出（#basis）。
+        卡點只警告、不擋：還是可以新增，但會標出來。</p>
 
       {closed.length > 0 && (
         <div className="section" data-fw="holdpoints">
           <div className="section-head"><h2 className="section-title">卡點</h2><span className="label">{closed.length}</span></div>
-          <ul className="guide-missing">{closed.map((h) => <li key={h.category}><span className="body"><b>還不能新增{h.zh}</b>　{h.reason}</span></li>)}</ul>
+          <ul className="guide-missing">{closed.map((h) => <li key={h.category}><span className="body"><b>新增{h.zh}會有卡點警告</b>　{h.reason}</span></li>)}</ul>
         </div>
       )}
       {fw.twoSources.length > 0 && (
@@ -106,7 +106,7 @@ function LayerBody(p: Props & { layer: FwLayer; fw: FwEval }) {
           ? <p className="body muted">還沒有{p.meta.categories.find((c) => c.id === l.subject)?.zh ?? "對象"}。先完成上面的步驟，設計迴圈才會開始。</p>
           : l.objects.map((o) => <ObjectLoop key={o.id ?? "mission"} {...p} obj={o} />)}
         {l.outputsZh && <p className="caption">迴圈產出：{l.outputsZh}</p>}
-        {out.map((h) => <p key={h.category} className="body" data-hold={h.category}>{h.open ? <span className="tag done">OPEN</span> : <span className="tag danger">HOLD</span>}　下一層「{h.zh}」{h.open ? "可以推導" : "還不能推導"}：{h.reason}</p>)}
+        {out.map((h) => <p key={h.category} className="body" data-hold={h.category}>{h.open ? <span className="tag done">OPEN</span> : <span className="tag danger">HOLD</span>}　下一層「{h.zh}」{h.open ? "可以推導" : "還不該推導（只警告）"}：{h.reason}</p>)}
         {l.after.length > 0 && <><h2 className="label">迴圈之後</h2><StepList {...p} steps={l.after} /></>}
       </>)}
     </div>

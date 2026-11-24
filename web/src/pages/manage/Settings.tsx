@@ -1,5 +1,5 @@
 // 專案設定：名稱、類型、節點可改；代號是儲存庫名稱，不可改。
-// 框架參數（PRJ-05）：FMEA 門檻、預算餘裕、最少候選數、方案權重、卡點強制、各步負責人；預設值來自框架檔（/api/meta 的 framework）。
+// 框架參數（PRJ-05）：FMEA 門檻、預算餘裕、最少候選數、方案權重、各步負責人；預設值來自框架檔（/api/meta 的 framework）。
 import { useEffect, useState } from "react";
 import { api, baseOf } from "../../api.ts";
 import type { Me, Meta, View } from "../../api.ts";
@@ -10,7 +10,7 @@ interface FwMeta {
   roles: { id: string; zh: string }[];
   owners: { key: string; layer: string; zh: string; default: string }[];
 }
-interface FwSet { fmeaThreshold: number; budgetMargin: number | null; minAlternatives: number; tradeWeights: boolean; enforceHoldPoint: boolean; owners: Record<string, string> }
+interface FwSet { fmeaThreshold: number; budgetMargin: number | null; minAlternatives: number; tradeWeights: boolean; owners: Record<string, string> }
 
 export function Settings({ view, meta, user, setView }: { view: View; meta: Meta; user: Me; setView: (v: View) => void }) {
   const p = view.project;
@@ -70,7 +70,7 @@ function FrameworkSettings({ view, meta, ro, setView }: { view: View; meta: Meta
     const owners: Record<string, string> = {};
     for (const o of fm.owners) { const a = s.owners[o.key] ?? "", b = cur.owners[o.key] ?? ""; if (a !== b) owners[o.key] = a; }
     try {
-      setView(await api<View>(`/projects/${view.project.id}`, "PATCH", { settings: { fmeaThreshold: s.fmeaThreshold, budgetMargin: s.budgetMargin, minAlternatives: s.minAlternatives, tradeWeights: s.tradeWeights, enforceHoldPoint: s.enforceHoldPoint, owners } }));
+      setView(await api<View>(`/projects/${view.project.id}`, "PATCH", { settings: { fmeaThreshold: s.fmeaThreshold, budgetMargin: s.budgetMargin, minAlternatives: s.minAlternatives, tradeWeights: s.tradeWeights, owners } }));
       setMsg({ ok: true, text: "已儲存框架參數。" });
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
   };
@@ -88,7 +88,6 @@ function FrameworkSettings({ view, meta, ro, setView }: { view: View; meta: Meta
             <input className="input" name="minAlternatives" type="number" min={1} max={10} value={s.minAlternatives} onChange={(e) => setS({ ...s, minAlternatives: Number(e.target.value) })} /></label>
         </div>
         <label className="check"><input type="checkbox" name="tradeWeights" checked={s.tradeWeights} onChange={(e) => setS({ ...s, tradeWeights: e.target.checked })} /><span className="caption">{zh("tradeWeights")?.zh ?? "方案比較要權重"}（預設 {def("tradeWeights") === "true" ? "要" : "可給可不給"}）</span></label>
-        <label className="check"><input type="checkbox" name="enforceHoldPoint" checked={s.enforceHoldPoint} onChange={(e) => setS({ ...s, enforceHoldPoint: e.target.checked })} /><span className="caption">在伺服器強制卡點：上一層設計迴圈沒走完，不能新增下一層需求（流程範本預設打開）</span></label>
         <details style={{ marginTop: 12 }}>
           <summary className="label">{zh("owners")?.zh ?? "各步負責人"}（{fm.owners.length} 項；預設照 AEAS 職級）</summary>
           {layers.map((ly) => (
