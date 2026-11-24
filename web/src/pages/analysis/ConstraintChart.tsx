@@ -54,7 +54,7 @@ function flight(P: Params, m0: number, mp: number, T: number, tb: number): Res {
 }
 /** 由軸上的兩個座標算出一個設計點的結果。 */
 function at(mode: Mode, P: Params, x: number, y: number): Res {
-  if (mode === "mI") { const mp = y / (P.isp * G0); return mp >= x * 0.95 ? { ...flight(P, x, x * 0.01, 1, 1), h: 0, mp, zeta: mp / x, tw: y / P.tb / (x * G0) } : flight(P, x, mp, y / P.tb, P.tb); }
+  if (mode === "mI") { const mp = y / (P.isp * G0); return mp >= x * 0.99 ? { ...flight(P, x, x * 0.01, 1, 1), h: 0, mp, zeta: mp / x, tw: y / P.tb / (x * G0) } : flight(P, x, mp, y / P.tb, P.tb); }
   const mp = x * P.m0, T = y * P.m0 * G0, md = T / (P.isp * G0);
   return flight(P, P.m0, mp, T, mp / md);
 }
@@ -62,6 +62,7 @@ const trapz = (c: [number, number][]) => c.reduce((s, p, i) => (i ? s + ((p[1] +
 const niceStep = (span: number) => { const raw = span / 6, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; };
 
 const NX = 60, NY = 44;
+const DEF: Record<string, number> = {};
 interface Axis { min: number; max: number; log: boolean; zh: string; unit: string }
 
 export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v: View) => void }) {
@@ -74,6 +75,8 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
   const [useCal, setUseCal] = useState(true);
   const [pin, setPin] = useState<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  const [ov, setOv] = useState<Record<string, number>>({});
+  const [zmaxPct, setZmaxPct] = useState(75);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [tmp, setTmp] = useState<{ metric: Metric; op: ">=" | "<="; value: string }>({ metric: "accel", op: "<=", value: "" });
@@ -131,10 +134,14 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
 
   const axes = useMemo<{ x: Axis; y: Axis } | null>(() => {
     if (!P || !P0) return null;
+    const r = (k: string) => ov[k] ?? DEF[k];
+    const ok = (a: number, b: number) => (Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > a ? [a, b] : null);
+    const d = mode === "mI" ? { x: [P0.m0 * 0.5, P0.m0 * 2], y: [P0.It * 0.4, P0.It * 2.5] } : { x: [0.2, 0.9], y: [1.5, 40] };
+    const xs = ok(r(`${mode}x0`) ?? d.x[0], r(`${mode}x1`) ?? d.x[1]) ?? d.x, ys = ok(r(`${mode}y0`) ?? d.y[0], r(`${mode}y1`) ?? d.y[1]) ?? d.y;
     return mode === "mI"
-      ? { x: { min: P0.m0 * 0.5, max: P0.m0 * 2, log: false, zh: "起飛質量", unit: "kg" }, y: { min: P0.It * 0.4, max: P0.It * 2.5, log: false, zh: "總衝量", unit: "N·s" } }
-      : { x: { min: 0.2, max: 0.9, log: false, zh: "推進劑質量分數 ζ", unit: "" }, y: { min: 1.5, max: 40, log: true, zh: "起飛推重比 T/W", unit: "" } };
-  }, [mode, P, P0]);
+      ? { x: { min: xs[0], max: xs[1], log: false, zh: "起飛質量", unit: "kg" }, y: { min: ys[0], max: ys[1], log: false, zh: "總衝量", unit: "N·s" } }
+      : { x: { min: xs[0], max: Math.min(xs[1], 0.99), log: false, zh: "推進劑質量分數 ζ", unit: "" }, y: { min: ys[0], max: ys[1], log: true, zh: "起飛推重比 T/W", unit: "" } };
+  }, [mode, P, P0, ov]);
   const posOf = (a: Axis, f: number) => (a.log ? a.min * Math.pow(a.max / a.min, f) : a.min + f * (a.max - a.min));
   const fracOf = (a: Axis, v: number) => (a.log ? Math.log(v / a.min) / Math.log(a.max / a.min) : (v - a.min) / (a.max - a.min));
 
@@ -145,14 +152,14 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
     let best = -1;
     for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) {
       const res = at(mode, P, posOf(axes.x, (i + 0.5) / NX), posOf(axes.y, (j + 0.5) / NY));
-      const phys = res.tw > 1 && res.zeta < 0.9;
+      const phys = res.tw > 1 && res.zeta < zmaxPct / 100;
       const sat = cons.map((c) => { const v = metricOf(res, c.metric); return c.op === ">=" ? v >= c.value : v <= c.value; });
       cells.push({ res, sat, phys });
       if (phys && sat.every(Boolean) && (best < 0 || res.h > cells[best].res.h)) best = cells.length - 1;
     }
     return { cells, best };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [P, axes, mode, cons, calOn, cal]);
+  }, [P, axes, mode, cons, calOn, cal, zmaxPct]);
 
   /** 目前設計點（來自模型） */
   const design = useMemo(() => {
@@ -230,13 +237,17 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
   const shownRes = shown && P ? at(mode, P, shown.x, shown.y) : null;
 
   const target = setup?.targets;
+  /** 模型裡沒有對應屬性就不自創，只提示要在哪裡加什麼 */
+  const hints: string[] = [];
+  if (target && !target.mass) hints.push("質量：模型裡沒有 dryMass 或 mass 屬性。請在系統零件（例如「火箭」）加 dryMass 屬性，或到模擬頁把 rocket.mass_kg 對應到模型的質量屬性。");
+  if (target && !target.impulse) hints.push("總衝量：模型裡沒有 totalImpulse 屬性。請在推進次系統（零件或它的定義）加 totalImpulse 屬性（單位 N·s）。");
   const writeBack = async () => {
     if (!pin || !P || !P0 || !target) return;
     const res = at(mode, P, pin.x, pin.y), It = res.mp * P.isp * G0;
     const ro = setup!.sim.inputs;
     // 有對應 rocket.mass_kg 時，寫的是不含發動機的結構質量；否則寫 dryMass／mass（起飛質量扣掉推進劑）
     const mass = setup!.sim.linked.includes("rocket.mass_kg") ? res.m0 - res.mp - ro.motor.dry_mass_kg : res.m0 - res.mp;
-    if (!target.mass && !target.impulse) { setMsg("模型裡找不到可寫回的質量或總衝量屬性。"); return; }
+    if (!target.mass && !target.impulse) { setMsg(`不寫回：${hints.join(" ")}`); return; }
     setBusy(true); setMsg("");
     try {
       let v: View | null = null;
@@ -244,6 +255,7 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
       if (target.impulse) v = await api<View>(`/projects/${id}/elements/attribute`, "POST", { id: target.impulse.id, name: target.impulse.attribute, oldName: target.impulse.exists ? target.impulse.attribute : undefined, value: String(Math.round(It)), unit: "N*s" });
       if (v) onChanged(v);
       setMsg(`已寫回模型：${[target.mass && `${target.mass.element.split("::").pop()}.${target.mass.attribute} = ${fmt(mass, 2)} kg`, target.impulse && `${target.impulse.element.split("::").pop()}.${target.impulse.attribute} = ${fmt(It, 0)} N·s`].filter(Boolean).join("、")}。請照一般流程送審。`);
+      if (hints.length) setMsg((m) => `${m} 另外未寫回：${hints.join(" ")}`);
       setPin(null);
     } catch (e) { setMsg((e as Error).message); }
     setBusy(false);
@@ -290,7 +302,7 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
           <li key={c.id} data-src={c.src}><i style={{ background: METRIC[c.metric].color }} />{c.label}{c.src === "temp" ? <button className="tbtn" onClick={() => setTemps((t) => t.filter((x) => x.id !== c.id))}>移除</button> : <span className="tag">需求</span>}</li>
         ))}
         {cons.length === 0 && <li className="muted">需求裡還沒有遠地點、加速度、離軌速度、動壓的數值條件；可在下面臨時加（只存在這張圖上，標「參考」）。</li>}
-        <li className="muted"><i style={{ background: "#888" }} />灰色：推重比 &lt; 1 或推進劑佔起飛質量 &gt; 90%（無法起飛）</li>
+        <li className="muted"><i style={{ background: "#888" }} />灰色：推重比 &lt; 1，或推進劑佔起飛質量超過 {zmaxPct}%（物理限制，上限可在「圖的範圍」調）</li>
         <li><i style={{ background: "#1d9e75" }} />綠色：可行域</li>
       </ul>
       <div className="cc-row">
@@ -300,6 +312,21 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
         <input className="input" inputMode="decimal" placeholder="數值" value={tmp.value} onChange={(e) => setTmp({ ...tmp, value: e.target.value })} onKeyDown={(e) => e.key === "Enter" && addTemp()} aria-label="數值" />
         <button className="tbtn" onClick={addTemp}>加入</button>
       </div>
+      <p className="caption">需求門檻的單位：長度 m、cm、km；加速度請寫 'm/s²'（模型裡的 [g] 是公克，不是 g 力）；速度 'm/s'；壓力 Pa、kPa。</p>
+      <details className="cc-range">
+        <summary>圖的範圍與推進劑佔比上限（可調）</summary>
+        <div className="cc-row">
+          <label className="cc-inline">推進劑佔起飛質量上限 <input className="input" type="number" min={10} max={99} value={zmaxPct} onChange={(e) => setZmaxPct(Math.min(99, Math.max(10, Number(e.target.value) || 75)))} aria-label="推進劑佔比上限" /> %</label>
+          {(mode === "mI"
+            ? [["x0", "質量下限", axes.x.min], ["x1", "質量上限", axes.x.max], ["y0", "衝量下限", axes.y.min], ["y1", "衝量上限", axes.y.max]]
+            : [["x0", "ζ 下限", axes.x.min], ["x1", "ζ 上限", axes.x.max], ["y0", "T/W 下限", axes.y.min], ["y1", "T/W 上限", axes.y.max]]
+          ).map(([k, zh, v]) => (
+            <label key={k as string} className="cc-inline">{zh as string} <input className="input" type="number" step="any" data-range={`${mode}${k}`} value={+Number(v).toPrecision(4)} onChange={(e) => setOv({ ...ov, [`${mode}${k}`]: Number(e.target.value) })} aria-label={zh as string} /></label>
+          ))}
+          <button className="tbtn" onClick={() => { setOv({}); setZmaxPct(75); }}>恢復預設</button>
+        </div>
+        <p className="caption">預設值的來源：質量為模型設計點的 0.5–2 倍、總衝量 0.4–2.5 倍（以設計點為中心的探索範圍）；ζ 0.2–0.9、T/W 1.5–40 取自原型；推進劑佔比上限 75% 取自原型的「ζ 技術上限」預設。這些是畫圖用的工作假設，不是需求；依專案實際的結構與發動機資料調整。</p>
+      </details>
       <div className="cc-wrap"><canvas ref={cv} role="img" aria-label="約束圖：彩色為違反各約束的區域，綠色為可行域" onPointerMove={(e) => setHover(point(e))} onPointerLeave={() => setHover(null)} onPointerDown={(e) => { const p = point(e); if (p) setPin(p); }} /></div>
       <div className="cc-readout" aria-live="polite">
         {shownRes ? <>
@@ -310,7 +337,7 @@ export function ConstraintChart({ view, onChanged }: { view: View; onChanged: (v
       </div>
       <div className="cc-row">
         <button className="tbtn primary" disabled={!pin || busy || (!target?.mass && !target?.impulse)} onClick={writeBack}>設為設計點</button>
-        <span className="caption">{target?.mass || target?.impulse ? `寫回：${[target?.mass && `${target.mass.element.split("::").pop()}.${target.mass.attribute}`, target?.impulse && `${target.impulse.element.split("::").pop()}.${target.impulse.attribute}`].filter(Boolean).join("、")}（走一般的送審）` : "模型裡找不到質量或總衝量屬性，無法寫回。"}</span>
+        <span className="caption">{target?.mass || target?.impulse ? `${hints.length ? `${hints.join(" ")} ` : ""}寫回：${[target?.mass && `${target.mass.element.split("::").pop()}.${target.mass.attribute}`, target?.impulse && `${target.impulse.element.split("::").pop()}.${target.impulse.attribute}`].filter(Boolean).join("、")}（走一般的送審）` : hints.join(" ")}</span>
       </div>
       {msg && <p className="msg" data-msg="writeback">{msg}</p>}
     </section>

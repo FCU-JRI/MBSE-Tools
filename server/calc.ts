@@ -23,7 +23,12 @@ const unitName = (u: string) => u.replace(/^[A-Za-z]+::/, "").replace(/^'(.*)'$/
 /** 把解析器回傳的值整理成簡單的物件；不認得的種類回傳 null。 */
 export function decode(v: any): Val | null {
   if (!v || typeof v !== "object") return null;
-  const num = (m: any) => (m && (typeof m.value === "number" || typeof m.value === "bigint") ? Number(m.value) : null);
+  const num = (m: any) => {
+    if (m && (typeof m.value === "number" || typeof m.value === "bigint")) return Number(m.value);
+    // 小數（例如 2.85）解析器給的是分數
+    if (m?.kind === "rational" && m.denominator) return Number(m.numerator) / Number(m.denominator);
+    return null;
+  };
   if (v.kind === "quantity") {
     const value = num(v.magnitude);
     if (value === null) return null;
@@ -198,6 +203,11 @@ export interface VerdictInput {
 }
 const TERM = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\s*(?:\[[^\]]+\]|\['[^']+'\])?)\s*$/;
 
+/** 門檻求值：先帶共用庫（有 km、kPa 這類前綴單位），專案沒有共用庫時退回只用標準單位。 */
+async function evalThreshold(sources: readonly Source[], text: string): Promise<Val> {
+  return evalExpr(sources, text, ["JRI"]).catch(() => evalExpr(sources, text));
+}
+
 export async function buildVerdicts(sources: readonly Source[], inp: VerdictInput): Promise<VerdictRow[]> {
   const rows: VerdictRow[] = [];
   const cache = new Map<string, Record<string, Val> | string>();
@@ -225,7 +235,7 @@ export async function buildVerdicts(sources: readonly Source[], inp: VerdictInpu
       if (got && "unit" in got) {
         term.value = got.value; term.unit = got.unit;
         try {
-          const th = await evalExpr(sources, thText);
+          const th = await evalThreshold(sources, thText);
           if ("dim" in th && th.dim === got.dim) {
             const scale = got.value !== 0 ? got.base / got.value : th.value !== 0 ? th.base / th.value : 1;
             const diff = op === ">=" || op === ">" ? got.base - th.base : op === "<=" || op === "<" ? th.base - got.base : -Math.abs(got.base - th.base);
@@ -283,7 +293,7 @@ export async function chartLimits(sources: readonly Source[], rows: Pick<Verdict
     const op = t.op === ">=" || t.op === ">" ? ">=" : t.op === "<=" || t.op === "<" ? "<=" : null;
     if (!metric || !op) continue;
     try {
-      const th = await evalExpr(sources, t.threshold);
+      const th = await evalThreshold(sources, t.threshold);
       if (!("dim" in th)) continue;
       // 量綱要符合：長度、加速度、速度、壓力。基本單位的質量用 g，壓力要換回 kg。（模型裡的 g 是公克，不是 g 力）
       const dims = Object.fromEntries(JSON.parse(th.dim) as [string, number][]);
