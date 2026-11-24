@@ -18,12 +18,14 @@ const KINDS: { zh: string; kinds: DiagramKind[] }[] = [
   { zh: "自訂圖", kinds: ["custom"] },
 ];
 
+export interface ListSpec { category: string; layer: string; layerZh: string; ids: string[] | null }
+
 export interface TreeProps {
   view: View; meta: Meta; diagrams: DiagramDef[]; diagramId: string; selectedId: string | null;
-  /** 中間正在列出的類別 */
-  listCat: string | null;
+  /** 中間正在列出的類別（ids＝本層的元素；null＝全專案） */
+  listCat: ListSpec | null;
   onDiagram: (id: string) => void; onAddDiagram?: (title: string) => void;
-  onList: (category: string) => void; onCategory: (id: string) => void; onElement: (id: string) => void;
+  onList: (spec: ListSpec) => void; onCategory: (id: string) => void; onElement: (id: string) => void;
 }
 
 /** 對象的迴圈進度：第幾步／共幾步與步驟名稱；走完時回傳 null */
@@ -56,10 +58,12 @@ export function LayerTree(p: TreeProps) {
         <div className="section model-layers" aria-label="依框架的層">
           <ul className="tree">{layers.map((l) => {
             const fl = fw ? (l as FwLayer) : null;
-            const cats = layerProduces(l.id).filter((c) => meta.categories.some((x) => x.id === c)).map((c) => ({ c, n: listOf(els, c).length }));
+            // 數量照層級只算本層（伺服器 layerMembers，和本層 FMEA 同一套規則）；模型有錯時才退回全專案數量
+            const members = (fl as (FwLayer & { members?: Record<string, string[]> }) | null)?.members;
+            const cats = layerProduces(l.id).filter((c) => meta.categories.some((x) => x.id === c)).map((c) => ({ c, n: members ? members[c]?.length ?? 0 : listOf(els, c).length }));
             const objs = fl?.objects ?? [];
-            // 還沒開始：迴圈層看有沒有對象（類別數量是全專案的，迴圈各步的類別每層都有）；鏈狀層看產生的類別有沒有元素
-            const empty = l.kind === "loop" ? fl ? objs.every((o) => !o.id) && (objs.length === 0 || cats.every((x) => x.n === 0)) : false : cats.every((x) => x.n === 0);
+            // 還沒開始：迴圈層看有沒有對象；鏈狀層看本層產生的類別有沒有元素
+            const empty = l.kind === "loop" && fl ? objs.every((o) => !o.id) && (objs.length === 0 || cats.every((x) => x.n === 0)) : cats.every((x) => x.n === 0);
             const isOpen = open.has(l.id);
             const holds = (fw?.holdPoints ?? []).filter((h) => h.fromLayer === l.id && !h.open);
             const gate = fl?.gate ? view.gates.find((g) => g.id === fl.gate) : undefined;
@@ -85,7 +89,7 @@ export function LayerTree(p: TreeProps) {
                   {cats.length > 0 && <li className="layer-group" data-group="categories">
                     <span className="label">類別</span>
                     <ul>{cats.map(({ c, n }) => (
-                      <li key={c}><button className="tree-row" aria-current={p.listCat === c} onClick={() => p.onList(c)} title={`在中間列出全部${catZh(c)}`} data-cat={c}>
+                      <li key={c}><button className="tree-row" aria-current={p.listCat?.category === c && p.listCat.layer === l.id} onClick={() => p.onList({ category: c, layer: l.id, layerZh: l.zh, ids: members?.[c] ?? null })} title={`本層的${catZh(c)}：${n} 個，點了在中間列出`} data-cat={c}>
                         <span className="tn">{catZh(c)}</span><span className="tc">{n}</span>
                       </button></li>
                     ))}</ul>

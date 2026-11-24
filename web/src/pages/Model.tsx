@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { api } from "../api.ts";
 import type { Diagrams, Meta, View } from "../api.ts";
-import { diagramsOf } from "../model.ts";
+import { diagramsOf, PALETTE } from "../model.ts";
 import type { DiagramDef } from "../model.ts";
 import { Diagram } from "../Diagram.tsx";
 import type { DiagramHandle } from "../Diagram.tsx";
@@ -12,7 +12,10 @@ import { SourceTab } from "../SourceTab.tsx";
 import { Columns, SelectionPane } from "../layout.tsx";
 import type { PageProps } from "../workspace.ts";
 import { LayerTree } from "./model/LayerTree.tsx";
+import type { ListSpec } from "./model/LayerTree.tsx";
 import { CategoryList } from "./model/CategoryList.tsx";
+import { diagramLayer, fileLayers, layerTools } from "./model/framework.ts";
+import { fwOf } from "../Process.tsx";
 import "./model.css";
 
 export function ModelPage(p: PageProps) {
@@ -42,9 +45,14 @@ export function ModelPage(p: PageProps) {
   const source = p.spot.source;
 
   // 左欄點了某層的類別：中間改列出這個類別的元素；換圖就回到圖
-  const [listCat, setListCat] = useState<string | null>(null);
+  const [listCat, setListCat] = useState<ListSpec | null>(null);
   const openDiagram = (d: string) => { setListCat(null); p.setSpot({ diagramId: d }); };
   const handle = useRef<DiagramHandle | null>(null);
+  // 工具箱依框架（MOD-14）：這張圖在哪一層，就列那層框架自動化需要的元素與關係
+  const fw = fwOf(view);
+  const ctxCat = def.context ? view.analysis.elements.find((e) => e.id === def.context)?.category ?? null : null;
+  const toolLayer = diagramLayer(ctxCat, PALETTE[def.kind], fw?.layers.find((l) => !l.passed)?.id ?? fileLayers()[0]?.id ?? null);
+  const tools = toolLayer ? { layerZh: fileLayers().find((l) => l.id === toolLayer)?.zh ?? "", ...layerTools(toolLayer) } : undefined;
   const left = <LayerTree view={view} meta={meta} diagrams={diagrams} diagramId={def.id} selectedId={selectedId} listCat={listCat} onAddDiagram={readOnly ? undefined : (t) => { setListCat(null); addDiagram(t); }}
     onDiagram={openDiagram} onList={setListCat} onCategory={(c) => p.setSel({ type: "new", category: c, parentId: null })} onElement={(eid) => p.setSel({ type: "element", id: eid })} />;
 
@@ -62,11 +70,11 @@ export function ModelPage(p: PageProps) {
       </div>
       <div className={`model-main ${source ? "with-source" : ""}`}>
         {listCat
-          ? <CategoryList view={view} meta={meta} category={listCat} selectedId={selectedId} readOnly={readOnly} onElement={(eid) => p.setSel({ type: "element", id: eid })}
+          ? <CategoryList key={`${listCat.layer}:${listCat.category}`} view={view} meta={meta} spec={listCat} selectedId={selectedId} readOnly={readOnly} onElement={(eid) => p.setSel({ type: "element", id: eid })}
               onNew={(c) => p.setSel({ type: "new", category: c, parentId: null })} onClose={() => setListCat(null)} />
           : <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} pickOnOpen={def.id === justCreated} onPicked={() => setJustCreated(null)} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
               onSelectEdge={(e) => e && p.setSel({ type: "edge", edge: e })} onNew={(c, parentId) => p.setSel({ type: "new", category: c, parentId })}
-              onChanged={(v: View) => { p.setView(v); p.onNotice(""); }} onError={p.onNotice} handle={handle} />}
+              onChanged={(v: View) => { p.setView(v); p.onNotice(""); }} onError={p.onNotice} handle={handle} framework={tools} />}
       </div>
       {source && (
         <div className="source-drawer" role="region" aria-label="原始碼">
