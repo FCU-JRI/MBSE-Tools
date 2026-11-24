@@ -74,7 +74,7 @@ export function TablesPage(p: PageProps) {
         {table === "verify" && <VerifyMatrix {...tp} />}
         {table === "fmea" && <Fmea {...tp} />}
         {table === "params" && <Params {...tp} />}
-        {table === "trade" && <Trade {...tp} />}
+        {table === "trade" && <Trade {...tp} readOnly={p.readOnly} />}
         {table === "n2" && <N2 {...tp} />}
         {table === "formula" && <Formulas view={view} selectedId={selectedId} onSelect={onSelect} />}
         {table === "conflicts" && <Conflicts {...tp} />}

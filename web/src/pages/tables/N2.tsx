@@ -1,5 +1,5 @@
 // N² 矩陣：對角線是次系統，格子是兩個次系統之間的介面（InterfaceUsage；種類 attrs.kind、成熟度 attrs.maturity）。
-// 介面兩端由連接埠（短名 IF-xxx-A／IF-xxx-B）所屬的次系統定義推出。
+// 介面有方向：A 端（列）→ B 端（欄）。介面兩端由連接埠（短名 IF-xxx-A／IF-xxx-B）所屬的次系統定義推出。
 import { label } from "../../model.ts";
 import type { Props } from "../../Deliverables.tsx";
 import "./wp5a.css";
@@ -12,7 +12,7 @@ export function N2({ view, selectedId, onSelect }: Props) {
   const ifs = a.elements.filter((e) => e.kind === "InterfaceUsage");
   const end = (i: (typeof ifs)[number], side: "A" | "B") => a.elements.find((p) => p.kind === "PortUsage" && p.shortName === `${i.shortName}-${side}`)?.owner ?? null;
   const rows = ifs.map((i) => ({ i, a: end(i, "A"), b: end(i, "B") }));
-  const at = (r: string, c: string) => rows.filter((x) => (x.a === r && x.b === c) || (x.a === c && x.b === r));
+  const at = (r: string, c: string) => rows.filter((x) => x.a === r && x.b === c);
   const orphan = rows.filter((x) => !subs.some((s) => s.id === x.a) || !subs.some((s) => s.id === x.b));
   const chip = (i: (typeof ifs)[number]) => (
     <button key={i.id} type="button" className="tbtn cell" aria-current={selectedId === i.id} onClick={() => onSelect(i.id)}>
@@ -21,7 +21,7 @@ export function N2({ view, selectedId, onSelect }: Props) {
   );
   return (
     <div>
-      <p className="body muted">對角線是次系統，格子是兩個次系統之間的介面，標種類與成熟度；介面沒有方向，所以對角線上下兩側相同（下側淡色）。點介面看右欄。新增介面在系統的右欄「介面」。</p>
+      <p className="body muted">對角線是次系統，格子是兩個次系統之間的介面，標種類與成熟度；每個介面有方向：由 A 端（列）到 B 端（欄），放在列→欄那一格，所以上下兩側不同。點介面看右欄。新增介面在系統的右欄「介面」。</p>
       {subs.length === 0 ? <p className="body">還沒有次系統。</p> : (
         <div style={{ overflowX: "auto" }}>
           <table className="n2" aria-label="N² 矩陣">
@@ -32,7 +32,7 @@ export function N2({ view, selectedId, onSelect }: Props) {
                   <th>{r.name}</th>
                   {subs.map((c, ci) => ri === ci
                     ? <td key={c.id} className="diag" onClick={() => onSelect(r.id)}>{r.name}</td>
-                    : <td key={c.id} className={ci < ri ? "mirror" : ""} data-cell={`${ri},${ci}`}>{at(r.id, c.id).map((x) => chip(x.i))}</td>)}
+                    : <td key={c.id} data-cell={`${ri},${ci}`}>{at(r.id, c.id).map((x) => chip(x.i))}</td>)}
                 </tr>
               ))}
             </tbody>

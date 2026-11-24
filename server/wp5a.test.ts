@@ -115,3 +115,44 @@ package Extra {
   assert.ok(find(a, "succession", "發射", "滑行"));
   assert.equal(a.ok, true);
 });
+
+test("TAB-12：準則、權重、分數可填可改可刪", async () => {
+  let text = await fs.readFile(modelFile(), "utf8");
+  text += `
+package Alts2 {
+    private import JRI::*;
+    variation part def <'ALT-009'> '測試方案' :> DesignAlternative {
+        variant part <'ALT-009-1'> '甲案';
+        variant part <'ALT-009-2'> '乙案';
+    }
+}
+`;
+  await fs.writeFile(modelFile(), text);
+  const send = async (p: string, b: any, want = 200) => { const r = await call(`${P}/trade/${p}`, "POST", b); assert.equal(r.status, want, JSON.stringify(r.data).slice(0, 400)); return r.data; };
+  const a0 = await view();
+  assert.equal(a0.ok, true, JSON.stringify(a0.diagnostics));
+  const id = (n: string) => a0.elements.find((e: any) => e.name === n).id;
+  const alt = id("測試方案"), req = id("遠地點高度"), v1 = id("甲案"), v2 = id("乙案");
+  let d = await send("criterion", { alt, requirement: req, weight: "3" });
+  const get = (a: any, n: string) => a.elements.find((e: any) => e.name === n);
+  assert.equal(get(d.analysis, "遠地點高度").attrs.weight, "3.0");
+  assert.ok(d.analysis.relations.some((r: any) => r.kind === "trace" && r.from === alt && r.to === req));
+  await send("criterion", { alt, requirement: req }, 400); // 已經是準則
+  d = await send("score", { variant: v1, requirement: req, score: "4" });
+  d = await send("score", { variant: v2, requirement: req, score: "2.5" });
+  assert.equal(get(d.analysis, "甲案").attrs.score_REQ_SYS_001, "4.0");
+  assert.equal(get(d.analysis, "乙案").attrs.score_REQ_SYS_001, "2.5");
+  d = await send("score", { variant: v1, requirement: req, score: "5" }); // 改
+  assert.equal(get(d.analysis, "甲案").attrs.score_REQ_SYS_001, "5.0");
+  await send("score", { variant: v1, requirement: req, score: "abc" }, 400);
+  d = await send("weight", { requirement: req, weight: "2" });
+  assert.equal(get(d.analysis, "遠地點高度").attrs.weight, "2.0");
+  d = await send("weight", { requirement: req, weight: "" }); // 拿掉權重
+  assert.equal(get(d.analysis, "遠地點高度").attrs.weight, undefined);
+  d = await send("score", { variant: v2, requirement: req, score: "" }); // 刪分數
+  assert.equal(get(d.analysis, "乙案").attrs.score_REQ_SYS_001, undefined);
+  d = await send("criterion/delete", { alt, requirement: req }); // 刪準則：連結與剩下的分數一起拿掉
+  assert.equal(get(d.analysis, "甲案").attrs.score_REQ_SYS_001, undefined);
+  assert.ok(!d.analysis.relations.some((r: any) => r.kind === "trace" && r.from === alt && r.to === req));
+  assert.equal(d.analysis.ok, true);
+});
