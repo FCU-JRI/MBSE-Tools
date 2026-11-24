@@ -465,7 +465,7 @@
    "sources": "D：互卡往上交",
    "framework": "crossCutting.conflicts",
    "verify": "故意改錯一端數字，出現一筆衝突",
-   "note": "依賴計算器 ANA-09"
+   "note": "2026-11-24 實測：validateInstance 能判出介面兩端不合與預算超支"
   },
   {
    "id": "FW-06",
@@ -1178,7 +1178,7 @@
    "sources": "D：方案比較用標準寫法",
    "framework": "designLoop.proposal",
    "verify": "每層至少能建 2 個候選並標選定",
-   "note": "解析器支援未實測"
+   "note": "2026-11-24 實測：variation／variant 與 TradeStudy 可解析；TradeStudy 跑得動但 selectedAlternative 沒回傳"
   },
   {
    "id": "MOD-24",
@@ -1683,7 +1683,7 @@
    "sources": "SPEC 分析；約束圖連動討論",
    "framework": "designLoop.calc",
    "verify": "軸與約束線從模型推出；選點可寫回",
-   "note": "依賴 ANA-09"
+   "note": "可用解析器 runSweep 掃描（參數寫法要再查）"
   },
   {
    "id": "ANA-09",
@@ -1700,7 +1700,7 @@
    "sources": "框架 elementTypes.Calculation",
    "framework": "designLoop.calc",
    "verify": "每條公式有合成數值驗算測試",
-   "note": "解析器不會算值，要自己寫"
+   "note": "2026-11-24 實測：解析器 instantiate／calc 會算值並換單位（600 cm、50 m/s² → 24.49 m/s），不用自己寫；要接上並寫驗算測試"
   },
   {
    "id": "ANA-10",
@@ -1768,7 +1768,7 @@
    "sources": "D：要做",
    "framework": "",
    "verify": "—",
-   "note": "另案規劃"
+   "note": "2026-11-24 實測：executeState 可走過狀態轉換；觸發事件寫法未測。另案規劃"
   },
   {
    "id": "MGT-01",
