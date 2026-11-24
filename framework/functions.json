@@ -414,7 +414,7 @@
    "sources": "D：遇到設計就喊卡",
    "framework": "designLoop.outputs",
    "verify": "系統迴圈未過時，新增次系統需求被擋並說明原因",
-   "note": "WP3 #46：卡點擋下一層需求（流程範本預設強制，範本／空白可在設定打開）"
+   "note": "WP3 #46：依 Mars 決定不擋，所有專案只顯示卡點警告（回應帶 holdWarning）"
   },
   {
    "id": "FW-03",
@@ -515,11 +515,11 @@
     "git"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "既有判定＋D",
    "framework": "designLoop.meets",
    "verify": "全 PASS 且 PR 核准才判是",
-   "note": "WP3 #46：constraint 判定已接；「PR 核准」暫用「無未合併分支」代替（待 Mars 決定）"
+   "note": "WP3 #46：constraint 判定＋「無未合併分支」代表核准（Mars 決定不接 GitHub 審查）"
   },
   {
    "id": "FW-09",
@@ -716,11 +716,11 @@
     "model"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "既有",
    "framework": "designLoop.outputs",
    "verify": "—",
-   "note": "WP3 #46：框架卡點已加；舊 17 步順序鎖因既有測試依賴仍保留（待 Mars 決定）"
+   "note": "WP3 #46：舊 17 步順序鎖已拿掉（Mars 授權改相關既有測試）"
   },
   {
    "id": "PROC-07",
@@ -1482,11 +1482,11 @@
     "model"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "框架 F1 第 2 步；METHOD 圖 9",
    "framework": "designLoop.tradeStudy",
    "verify": "準則、權重、分數、選定與否決",
-   "note": "WP5a #45：唯讀方案比較表；權重與分數暫用屬性約定、沒有表單（待 Mars 決定資料模型）"
+   "note": "WP5a #45：共用庫 @TradeWeight 與 TradeScore；表上加準則、填權重與分數、刪準則，算加權總分（整合後實點 3×4=12、3×2=6）"
   },
   {
    "id": "TAB-13",
@@ -1537,7 +1537,7 @@
    "sources": "METHOD 第 4 節；TR-06 介面圖",
    "framework": "designLoop.outputs",
    "verify": "對角線次系統、格子是介面",
-   "note": "WP5a #45：N² 矩陣；介面無方向，上下兩側相同"
+   "note": "WP5a #45：N² 依介面 A→B 方向放格，上下兩側不同"
   },
   {
    "id": "ANA-01",
@@ -2161,10 +2161,7 @@
     "MOD-26",
     "FW-04"
    ],
-   "gaps": [
-    "TAB-12",
-    "FW-08"
-   ]
+   "gaps": []
   },
   {
    "id": "FLOW-3",
@@ -2208,9 +2205,7 @@
     "HOME-02",
     "MGT-02"
    ],
-   "gaps": [
-    "FW-08"
-   ]
+   "gaps": []
   }
  ]
 }
