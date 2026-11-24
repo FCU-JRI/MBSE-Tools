@@ -681,11 +681,11 @@
     "model"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "TR-09",
    "framework": "",
    "verify": "複製出提示",
-   "note": "WP3 #46 換成框架版時拿掉了，已請 WP3 補回"
+   "note": "WP3 #46 05ccd5d 補回：每步依框架產生提示，可展開看全文"
   },
   {
    "id": "PROC-05",
