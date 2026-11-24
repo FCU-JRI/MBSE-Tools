@@ -20,7 +20,7 @@ async function resolve(dir: string, ref: string): Promise<string> {
 }
 
 /** 解析某個版本（分支、標籤或提交）的模型，用目前的元模型庫與共用元件庫。 */
-async function analyzeAt(dir: string, sha: string): Promise<Analysis> {
+export async function analyzeAt(dir: string, sha: string): Promise<Analysis> {
   const names = (await git(dir, "ls-tree", "--name-only", sha, "model/")).split("\n").map((n) => n.trim()).filter((n) => n.endsWith(".sysml"));
   const shared = await listShared();
   const list: Source[] = [["JRI.sysml", await fs.readFile(LIBRARY, "utf8")]];

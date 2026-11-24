@@ -11,18 +11,22 @@ interface Baseline { ref: string; label: string; date: string; commit: string }
 const TYPE_ZH = { added: "新增", removed: "移除", changed: "修改" } as const;
 const when = (s: string) => new Date(s).toLocaleString("zh-TW", { hour12: false });
 
-function Changes({ list }: { list: Change[] }) {
+function Changes({ list, post }: { list: Change[]; post?: Set<string> }) {
   if (list.length === 0) return <p className="caption">模型元素沒有差異。</p>;
+  const late = list.filter((c) => c.type !== "added" && post?.has(c.key)).length;
   return (
+    <>
+    {late > 0 && <p className="caption" role="alert"><span className="tag danger">核可後變更</span> 有 {late} 項需求或介面在節點核可之後被修改或移除，審查時請特別確認。</p>}
     <table>
       <thead><tr><th>變更</th><th>編號</th><th>名稱</th><th>內容</th></tr></thead>
       <tbody>{list.map((c) => (
         <tr key={c.type + c.key}>
-          <td><span className={`tag ${c.type === "added" ? "done" : ""}`}>{TYPE_ZH[c.type]}</span></td><td className="id">{c.key.includes("::") ? "—" : c.key}</td><td>{c.name}</td>
+          <td><span className={`tag ${c.type === "added" ? "done" : ""}`}>{TYPE_ZH[c.type]}</span></td><td className="id">{c.key.includes("::") ? "—" : c.key}</td><td>{c.name}{c.type !== "added" && post?.has(c.key) && <span className="tag danger" style={{ marginLeft: 6 }} title="節點核可後，這條需求或介面被修改">核可後變更</span>}</td>
           <td>{c.fields.map((f, i) => <div key={i}><span className="faint">{f.field}　</span><span className="muted" style={{ textDecoration: "line-through" }}>{f.from || "（空）"}</span>　→　{f.to || "（空）"}</div>)}</td>
         </tr>
       ))}</tbody>
     </table>
+    </>
   );
 }
 
@@ -44,6 +48,8 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
   const [url, setUrl] = useState("");
   const [branches, setBranches] = useState<Branch[] | null>(null);
   const [mine, setMine] = useState<Change[] | null>(null);
+  // FW-09：最近一次節點核可時已有的需求與介面；之後被修改或移除的在差異上標「核可後變更」
+  const [post, setPost] = useState<{ keys: Set<string>; gate: string } | null>(null);
   const [showMine, setShowMine] = useState(false);
   const [open, setOpen] = useState<{ name: string; diff: string; changes: Change[] } | null>(null);
   const [baselines, setBaselines] = useState<Baseline[]>([]);
@@ -62,6 +68,8 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
     const s = await api<Sync>(`/projects/${id}/sync`); setSync(s); setUrl(s.remote);
     const b = await api<Baseline[]>(`/projects/${id}/baselines`); setBaselines(b); setCmp((c) => ({ from: c.from || b[1]?.ref || "", to: c.to }));
     setBranches(await api<Branch[]>(`/projects/${id}/branches`));
+    const cc = await api<{ approved: { gate: string; keys: string[] } | null }>(`/projects/${id}/change-control`).catch(() => ({ approved: null }));
+    setPost(cc.approved ? { keys: new Set(cc.approved.keys), gate: cc.approved.gate } : null);
     if (branch) setMine((await api<{ changes: Change[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(branch.name)}`)).changes);
   }), [id, branch?.name]);
   useEffect(() => { load(); }, [load]);
@@ -95,7 +103,7 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
               <p className="body">責任工程師以上在 main 審查並合併，之後才成為大家看到的版本。{user.caps.merge ? "你有合併權限，請回到 main 操作。" : "你沒有合併權限，等責任工程師處理。"}</p>
             </Step>
           </div>
-          {showMine && mine && <Changes list={mine} />}
+          {showMine && mine && <Changes list={mine} post={post?.keys} />}
         </section>
       ) : (
         <section className="section">
@@ -126,7 +134,7 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
           {open && (
             <div style={{ marginTop: 16 }}>
               <div className="section-head"><h3 className="section-title">{open.name} 的變更</h3><button className="tbtn" onClick={() => setOpen(null)}>關閉</button></div>
-              <Changes list={open.changes} />
+              <Changes list={open.changes} post={post?.keys} />
               <pre className="code" style={{ maxHeight: 320, marginTop: 12 }}>{open.diff || "（沒有文字差異）"}</pre>
             </div>
           )}
@@ -153,7 +161,7 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
               <label className="field"><span className="label">到</span><select className="input" value={cmp.to} onChange={(e) => setCmp({ ...cmp, to: e.target.value })}>{baselines.map((b) => <option key={b.ref} value={b.ref}>{b.label}　{when(b.date)}</option>)}</select></label>
               <div className="tbtn-row" style={{ marginBottom: 12 }}><button className="tbtn primary" onClick={() => run(async () => setResult((await api<{ changes: Change[] }>(`/projects/${id}/compare?from=${encodeURIComponent(cmp.from)}&to=${encodeURIComponent(cmp.to)}`)).changes))}>比較差異</button></div>
             </div>
-            {result && <Changes list={result} />}
+            {result && <Changes list={result} post={post?.keys} />}
           </>
         )}
       </section>

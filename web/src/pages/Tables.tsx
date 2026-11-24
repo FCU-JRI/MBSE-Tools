@@ -6,6 +6,7 @@ import { listOf } from "../model.ts";
 import { Columns, SelectionPane } from "../layout.tsx";
 import { Formulas } from "./tables/Formulas.tsx";
 import { Params, VerifyMatrix } from "./tables/Derived.tsx";
+import { Conflicts } from "./tables/Conflicts.tsx";
 import type { PageProps, TableGroup } from "../workspace.ts";
 import "./tables.css";
 
@@ -16,6 +17,7 @@ const GROUPS: { zh: string; items: [TableGroup, string][] }[] = [
   { zh: "風險", items: [["fmea", "FMEA 表"], ["cat:SafetyFactor", "安全係數"], ["cat:Anomaly", "異常報告"]] },
   { zh: "設計", items: [["params", "設計參數表"]] },
   { zh: "作業", items: [["cat:SOP", "標準作業程序"], ["cat:QCRecord", "加工 QC 紀錄"], ["cat:RosterEntry", "名冊"]] },
+  { zh: "衝突與決策", items: [["conflicts", "衝突"]] },
   { zh: "公式", items: [["formula", "constraint 與 calc"]] },
   { zh: "參考資料", items: [["docs", "來源文件"]] },
 ];
@@ -71,6 +73,7 @@ export function TablesPage(p: PageProps) {
         {table === "fmea" && <Fmea {...tp} />}
         {table === "params" && <Params {...tp} />}
         {table === "formula" && <Formulas view={view} selectedId={selectedId} onSelect={onSelect} />}
+        {table === "conflicts" && <Conflicts {...tp} />}
         {table === "docs" && <Docs {...tp} />}
         {catId && <TableView view={view} meta={meta} catId={catId} selectedId={selectedId} onSelect={onSelect} />}
       </div>
