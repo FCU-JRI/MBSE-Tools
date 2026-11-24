@@ -5,5 +5,5 @@ import type { PageProps } from "../workspace.ts";
 import "./home.css";
 
 export function HomePage(p: PageProps) {
-  return <Scroll className="enter"><Dashboard id={p.id} view={p.view} go={p.go} /></Scroll>;
+  return <Scroll className="enter"><Dashboard id={p.id} view={p.view} go={p.go} open={(eid) => p.setSel({ type: "element", id: eid })} /></Scroll>;
 }
