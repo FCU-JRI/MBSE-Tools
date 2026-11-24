@@ -24,25 +24,44 @@ export function Inspector(p: Props) {
     const el = sel.type === "element" ? p.view.analysis.elements.find((e) => e.id === sel.id) : undefined;
     return <ReadPanel {...p} el={el} />;
   }
-  if (p.sel.type === "edge") return <EdgePanel {...p} edge={p.sel.edge} />;
+  if (p.sel.type === "edge") return <><EdgePanel {...p} edge={p.sel.edge} /><NewButton {...p} category={null} /></>;
   if (p.sel.type === "element") {
     const sel = p.sel;
     const el = p.view.analysis.elements.find((e) => e.id === sel.id);
-    if (el) return el.shared ? <ReadPanel {...p} el={el} /> : <EditPanel key={el.id} {...p} el={el} />;
+    if (el) return <>{el.shared ? <ReadPanel {...p} el={el} /> : <EditPanel key={el.id} {...p} el={el} />}<NewButton {...p} category={el.shared ? null : el.category} /></>;
   }
   const s = p.sel.type === "new" ? p.sel : { category: "SystemRequirement", parentId: null };
   return <NewPanel key={`${s.category}:${s.parentId}`} {...p} category={s.category} parentId={s.parentId} />;
 }
+
+/** 右欄最下方的「新增」（MOD-14）：選到元素時預設新增同一類別，選到線時用上次的類別。 */
+function NewButton({ meta, setSel, category }: Props & { category: string | null }) {
+  const cat = meta.categories.find((c) => c.id === category && !c.special);
+  return (
+    <div className="section inspector-new">
+      <button className="btn" onClick={() => setSel({ type: "new", category: cat?.id ?? "SystemRequirement", parentId: null })}>＋ 新增{cat ? cat.zh : ""}</button>
+    </div>
+  );
+}
+
+/** 關係列的標籤：依方向（從這個元素出去／指向這個元素）用不同說法；「被」字句只用在讀得通的地方。 */
+const OUT_ZH: Record<string, string> = { connect: "連接", succession: "之後是", transition: "轉換到", compose: "組成" };
+const IN_ZH: Record<string, string> = {
+  derive: "衍生出", refine: "被細化", trace: "被追溯", basis: "作為依據", satisfy: "被滿足", verify: "被驗證", allocate: "被分配",
+  include: "被包含", connect: "連接", succession: "之前是", transition: "轉換自", compose: "屬於",
+};
+export const relLabel = (meta: Meta, kind: string, outgoing: boolean) =>
+  outgoing ? meta.relations[kind]?.zh ?? OUT_ZH[kind] ?? kind : IN_ZH[kind] ?? `被${meta.relations[kind]?.zh ?? OUT_ZH[kind] ?? kind}`;
 
 /** 唯讀：只顯示內容與關係。 */
 function ReadPanel({ view, meta, setSel, el }: Props & { el: Element | undefined }) {
   if (!el) return <div className="section"><div className="section-head"><h2 className="section-title">屬性</h2></div><p className="caption">點選圖或表中的項目查看內容。</p></div>;
   const cat = meta.categories.find((c) => c.id === el.category);
   const byId = new Map(view.analysis.elements.map((e) => [e.id, e]));
-  const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
+  const rels = view.analysis.relations;
   const list = [
-    ...rels.filter((r) => r.from === el.id).map((r) => ({ zh: meta.relations[r.kind]?.zh ?? r.kind, o: byId.get(r.to) })),
-    ...rels.filter((r) => r.to === el.id).map((r) => ({ zh: `被${meta.relations[r.kind]?.zh ?? r.kind}`, o: byId.get(r.from) })),
+    ...rels.filter((r) => r.from === el.id).map((r) => ({ zh: relLabel(meta, r.kind, true), o: byId.get(r.to) })),
+    ...rels.filter((r) => r.to === el.id).map((r) => ({ zh: relLabel(meta, r.kind, false), o: byId.get(r.from) })),
   ].filter((x) => x.o);
   return (
     <>
@@ -181,9 +200,10 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const save = (ev: FormEvent) => { ev.preventDefault(); call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, name, shortName: sn, doc, attrs, source: src }), "已寫入。"); };
   const remove = async () => { if (await call(() => api(`/projects/${pid}/${el.kind === "InterfaceUsage" ? "interfaces" : "elements"}/delete`, "POST", { id: el.id }))) setSel({ type: "new", category: el.category ?? "SystemRequirement", parentId: null }); };
 
-  const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
-  const out = rels.filter((r) => r.from === el.id).map((r) => ({ r, zh: meta.relations[r.kind]?.zh ?? r.kind, other: byId.get(r.to) }));
-  const inn = rels.filter((r) => r.to === el.id).map((r) => ({ r, zh: `被${meta.relations[r.kind]?.zh ?? r.kind}`, other: byId.get(r.from) }));
+  // 全部關係種類都列（MOD-20）：先後順序、連接、狀態轉換也在這裡改，不必回圖上選線
+  const rels = view.analysis.relations;
+  const out = rels.filter((r) => r.from === el.id).map((r) => ({ r, zh: relLabel(meta, r.kind, true), other: byId.get(r.to) }));
+  const inn = rels.filter((r) => r.to === el.id).map((r) => ({ r, zh: relLabel(meta, r.kind, false), other: byId.get(r.from) }));
   const targets = els.filter((e) => e.category && e.kind !== "ReferenceUsage" && e.id !== el.id);
   const sat = view.analysis.satisfaction.find((s) => s.requirement === el.qualifiedName);
 
@@ -246,7 +266,7 @@ function EdgePanel({ view, meta, setSel, onChanged, edge }: Props & { edge: GEdg
   const byId = new Map(view.analysis.elements.map((e) => [e.id, e]));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const zh = meta.relations[edge.kind]?.zh ?? ({ compose: "包含", connect: "連接", succession: "之後是", transition: "轉換到" } as Record<string, string>)[edge.kind] ?? edge.kind;
+  const zh = edge.kind === "define" ? "定義為" : relLabel(meta, edge.kind, true);
   const a = byId.get(edge.source), b = byId.get(edge.target);
   const pid = view.project.id;
   const call: Call = async (fn, done) => {
@@ -713,7 +733,8 @@ function EdgeChange({ view, meta, edge, a, b, usage, lower, busy, call, verifies
         <select className="input" value={to} onChange={(e) => setTo(e.target.value)}>{toOpts.map((x) => <option key={x.id} value={x.id}>{label(x)}</option>)}</select>
       </label>
       {note && <p className="caption">{note}</p>}
-      <div><button className="tbtn primary" disabled={busy || same} onClick={async () => { if (await submit()) onDone(); }}>確定修改</button></div>
+      {from === to && <p className="caption">起點和終點不能是同一個。</p>}
+      <div><button className="tbtn primary" disabled={busy || same || from === to} onClick={async () => { if (await submit()) onDone(); }}>確定修改</button></div>
     </div>
   );
 }
