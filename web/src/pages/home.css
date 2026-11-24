@@ -45,3 +45,16 @@
 .dash-sub { display: flex; flex-direction: column; gap: var(--space-1); border: var(--stroke-hair) solid var(--line); background: none; color: inherit; text-align: left; cursor: pointer; padding: var(--space-3); font: inherit; }
 .dash-sub:hover { background: var(--surface-1); border-color: var(--line-strong); }
 @media (max-width: 860px) { .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* HOME-04 設計迴圈進度 */
+.dash-loop-layers { display: flex; flex-direction: column; gap: var(--space-3); }
+.dash-loop-layer { display: flex; flex-direction: column; gap: var(--space-1); border-top: var(--stroke-hair) solid var(--line); padding-top: var(--space-2); }
+.dash-loop-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.dash-loop-warn { border: 0; cursor: pointer; }
+.dash-loop-obj { display: grid; grid-template-columns: minmax(6rem, 14rem) auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 32px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 0; }
+.dash-loop-obj:hover .body { text-decoration: underline; text-underline-offset: 3px; }
+.dash-steps { display: inline-flex; gap: 3px; }
+.dash-steps i { width: 14px; height: var(--stroke-bold); background: var(--line); display: block; }
+.dash-steps i.done { background: var(--ink); }
+.dash-steps i.current { background: var(--warn); }
+@media (max-width: 640px) { .dash-loop-obj { grid-template-columns: 1fr auto; } .dash-loop-obj .dash-steps { display: none; } }

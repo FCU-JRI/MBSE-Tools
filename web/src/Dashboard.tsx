@@ -4,6 +4,8 @@ import { api } from "./api.ts";
 import type { Element, View } from "./api.ts";
 import type { Page } from "./workspace.ts";
 import { listOf } from "./model.ts";
+import { fwOf } from "./Process.tsx";
+import type { FwEval, FwLayer, FwObject } from "./Process.tsx";
 
 interface Task { id: string; title: string; start: string; end: string; done: boolean; re: string }
 interface Pm { tasks: Task[]; costs: { planned: number; actual: number }[] }
@@ -58,6 +60,50 @@ function Bar({ label, done, total, onClick }: { label: string; done: number; tot
   );
 }
 
+/** 設計迴圈進度（HOME-04）：每層每個對象走到第幾步，卡點警告標在該層。資料全來自 view.framework（伺服器由模型證據算出）。 */
+export function LoopProgress({ fw, go, open }: { fw: FwEval; go: Go; open?: (elementId: string) => void }) {
+  const holds = (l: FwLayer) => fw.holdPoints.filter((h) => h.open && h.fromLayer === l.id);
+  const rowOf = (o: FwObject) => {
+    const total = o.steps.length, done = o.steps.filter((x) => x.state === "done").length;
+    const cur = o.steps.find((x) => x.id === o.current) ?? o.steps.find((x) => x.state !== "done");
+    return { total, done, cur };
+  };
+  const visit = (o: FwObject) => { if (o.id && open) open(o.id); go("model"); };
+  return (
+    <section className="section dash-loop" data-cell="loop" aria-label="設計迴圈進度">
+      <div className="section-head"><h2 className="section-title">設計迴圈進度</h2><button className="tbtn" data-go="process" onClick={() => go("process")}>流程頁</button></div>
+      <div className="dash-loop-layers">
+        {fw.layers.map((l) => {
+          const hs = holds(l);
+          return (
+            <div key={l.id} className={`dash-loop-layer ${l.passed ? "ok" : ""}`} data-layer={l.id}>
+              <div className="dash-loop-head">
+                <span className="label">第 {l.order} 層</span>
+                <span className="body">{l.zh}</span>
+                {l.passed && <span className="tag done">通過</span>}
+                {hs.map((h) => <button key={h.category} className="tag warn dash-loop-warn" data-hold={h.category} title={h.reason} onClick={() => go("process")}>卡點：{h.zh}</button>)}
+              </div>
+              {l.objects.length === 0
+                ? <p className="caption">{l.kind === "chain" ? `${l.steps.filter((x) => x.state === "done").length} / ${l.steps.length} 步` : "還沒有對象"}</p>
+                : l.objects.map((o) => {
+                  const r = rowOf(o);
+                  return (
+                    <button key={o.id ?? o.name} className="dash-loop-obj" data-object={o.name} onClick={() => visit(o)} aria-label={`${l.zh}／${o.name}：${r.done} / ${r.total} 步${r.cur ? `，目前「${r.cur.zh}」` : ""}`}>
+                      <span className="body">{o.name}</span>
+                      <span className="dash-steps" aria-hidden="true">{o.steps.map((x) => <i key={x.id} className={x.state} title={x.zh} />)}</span>
+                      <span className="data">{o.passed ? "已通過" : `${r.done} / ${r.total} · ${r.cur?.zh ?? ""}`}</span>
+                      {!o.passed && r.cur && r.cur.issues.length > 0 && <span className="tag warn" title={r.cur.issues[0].text}>缺 {r.cur.issues.length}</span>}
+                    </button>
+                  );
+                })}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
   return m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`;
@@ -67,7 +113,7 @@ const ago = (iso: string) => {
  * 專案首頁：由上到下是現在的節點、5 個指標、性能與風險與需求覆蓋、任務與最近變更、各次系統。
  * 每一格點了前往能處理它的頁。顏色只依計算結果；沒有資料的格子顯示空狀態，不畫沒有資料的圖。
  */
-export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) {
+export function Dashboard({ view, go, id, open }: { view: View; go: Go; id: string; open?: (elementId: string) => void }) {
   const [pm, setPm] = useState<Pm | null>(null);
   const [sim, setSim] = useState<Sim | null>(null);
   const [margins, setMargins] = useState<Margin[] | null>(null);
@@ -83,6 +129,7 @@ export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) 
   }, [id, onBranch]);
 
   const a = view.analysis;
+  const fw = fwOf(view);
   const approved = (g: string) => [...view.project.signoffs].reverse().find((s) => s.gate === g && !s.subsystem)?.decision === "APPROVE";
   const current = view.gates.find((g) => !approved(g.id)) ?? view.gates[view.gates.length - 1];
   const reqs = listOf(a.elements, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
@@ -130,6 +177,8 @@ export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) 
       </section>
 
       {errors > 0 && <button className="msg dash-alert" data-go="model" onClick={() => go("model", "source")}><span className="tag danger">ERR</span>模型有 {errors} 個錯誤，圖表暫停更新。點此修正。</button>}
+
+      {fw && <LoopProgress fw={fw} go={go} open={open} />}
 
       <div className="dash-kpis" aria-label="關鍵指標">
         <button className="kpi" data-go="tables:req" onClick={() => go("tables", "req")}>

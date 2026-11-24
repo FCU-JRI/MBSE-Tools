@@ -247,3 +247,51 @@ export async function buildVerdicts(sources: readonly Source[], inp: VerdictInpu
   }
   return rows;
 }
+
+// ───────── 約束圖（ANA-08） ─────────
+// 約束線從需求的數值條件讀（用判定總覽的條件拆解），門檻交給解析器求值（含單位換算）。
+// 約束圖是概念設計參考，不計入驗證矩陣；pass／fail 只由 constraint 與模擬決定。
+
+export type ChartMetric = "apogee" | "accel" | "rail" | "q" | "speed";
+export interface ChartLimit {
+  metric: ChartMetric;
+  op: ">=" | "<=";
+  /** SI 基本單位的門檻（m、m/s²、m/s、Pa） */
+  value: number;
+  /** 模型裡寫的原文，例如 2850 [m] */
+  text: string;
+  requirement: string;
+  name: string;
+}
+const METRIC_BY_ATTR: Record<string, ChartMetric> = {
+  apogee: "apogee", maxapogee: "apogee", altitude: "apogee",
+  maxacceleration: "accel", maxaccel: "accel", maxaxialacceleration: "accel",
+  railexitspeed: "rail", railexitvelocity: "rail", railspeed: "rail", liftoffspeed: "rail",
+  maxdynamicpressure: "q", maxq: "q", dynamicpressure: "q",
+  maxspeed: "speed", maxvelocity: "speed",
+};
+const CHART_DIM: Record<ChartMetric, Record<string, number>> = {
+  apogee: { metre: 1 }, accel: { metre: 1, second: -2 }, rail: { metre: 1, second: -1 }, speed: { metre: 1, second: -1 }, q: { gram: 1, metre: -1, second: -2 },
+};
+export const chartMetricOf = (attribute: string): ChartMetric | null => METRIC_BY_ATTR[attribute.toLowerCase()] ?? null;
+
+/** 把判定總覽的條件項變成約束線；只收一維彈道會算的量（遠地點、加速度、離軌速度、動壓、最大速度）。 */
+export async function chartLimits(sources: readonly Source[], rows: Pick<VerdictRow, "requirement" | "name" | "terms">[]): Promise<ChartLimit[]> {
+  const out: ChartLimit[] = [];
+  for (const r of rows) for (const t of r.terms) {
+    const metric = chartMetricOf(t.attribute);
+    const op = t.op === ">=" || t.op === ">" ? ">=" : t.op === "<=" || t.op === "<" ? "<=" : null;
+    if (!metric || !op) continue;
+    try {
+      const th = await evalExpr(sources, t.threshold);
+      if (!("dim" in th)) continue;
+      // 量綱要符合：長度、加速度、速度、壓力。基本單位的質量用 g，壓力要換回 kg。（模型裡的 g 是公克，不是 g 力）
+      const dims = Object.fromEntries(JSON.parse(th.dim) as [string, number][]);
+      const norm = (o: Record<string, number>) => JSON.stringify(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+      if (norm(dims) !== norm(CHART_DIM[metric])) continue;
+      const gram = dims.gram ?? 0;
+      out.push({ metric, op, value: th.base / Math.pow(1000, gram), text: t.threshold, requirement: r.requirement, name: r.name });
+    } catch { /* 門檻算不出來就不畫這條線 */ }
+  }
+  return out;
+}
