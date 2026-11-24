@@ -1155,11 +1155,11 @@
    "writes": [
     "model"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "框架 elementTypes",
    "framework": "layers.missionDefinition",
    "verify": "可建、可改、可刪",
-   "note": "共用庫要先定義"
+   "note": "WP1：共用庫 MissionRequirement，右欄新增、改、刪；已列入需求矩陣、報告、匯出與節點檢查"
   },
   {
    "id": "MOD-23",
@@ -1250,11 +1250,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：CAD 只放連結",
    "framework": "designLoop.cad",
    "verify": "可填、可改、可刪",
-   "note": ""
+   "note": "WP1：@CadLink（cadUrl、cadVersion、cadTool），右欄 CAD 連結可寫入、改版本、拿掉"
   },
   {
    "id": "MOD-28",
@@ -1269,11 +1269,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：FMEA、方案比較分層",
    "framework": "metadata.layer",
    "verify": "推不出層級時可手填",
-   "note": ""
+   "note": "WP1：@LayerTag（layer），右欄層級下拉，可設可清"
   },
   {
    "id": "MOD-29",
@@ -1288,11 +1288,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "TR-08",
    "framework": "designLoop.tradeStudy",
    "verify": "每次選定方案與裁決都有理由、裁決者、日期",
-   "note": ""
+   "note": "WP1：DesignDecision（理由、裁決者、日期）；連到選定方案與受影響需求留待 WP1 第二部分"
   },
   {
    "id": "TAB-01",
@@ -1501,11 +1501,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "白板 貫穿全程",
    "framework": "crossCutting.riskRegister",
    "verify": "時程、預算、場地、人員風險可登錄",
-   "note": "Risk 加 kind 欄位"
+   "note": "WP1：Risk 加 riskKind（技術／時程／預算／場地／人員）；表格頁專門的風險登錄檢視留待 WP5"
   },
   {
    "id": "TAB-14",
@@ -2142,7 +2142,9 @@
     "MGT-02",
     "MGT-05"
    ],
-   "gaps": []
+   "gaps": [
+    "MGT-02"
+   ]
   },
   {
    "id": "FLOW-2",
@@ -2166,8 +2168,8 @@
     "TAB-12",
     "TAB-04",
     "FW-07",
-    "MOD-27",
     "ANA-09",
+    "FW-08",
     "MOD-24",
     "MOD-25",
     "FW-02",
@@ -2209,7 +2211,7 @@
     "FW-05",
     "TAB-14",
     "FW-06",
-    "MOD-29"
+    "FW-09"
    ]
   },
   {
@@ -2225,7 +2227,12 @@
     "MGT-02"
    ],
    "gaps": [
-    "ANA-10"
+    "ANA-10",
+    "ANA-01",
+    "ANA-04",
+    "FW-08",
+    "HOME-02",
+    "MGT-02"
    ]
   }
  ]

@@ -81,7 +81,7 @@ export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) 
   const a = view.analysis;
   const approved = (g: string) => [...view.project.signoffs].reverse().find((s) => s.gate === g && !s.subsystem)?.decision === "APPROVE";
   const current = view.gates.find((g) => !approved(g.id)) ?? view.gates[view.gates.length - 1];
-  const reqs = listOf(a.elements, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
+  const reqs = listOf(a.elements, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
   const has = (e: Element, dir: "in" | "out", ...k: string[]) => a.relations.some((r) => (dir === "in" ? r.to : r.from) === e.id && k.includes(r.kind));
   const verified = reqs.filter((e) => has(e, "in", "verify")).length;
   const sourced = reqs.filter((e) => has(e, "out", "derive", "refine", "trace") || !!e.attrs.sourceDoc).length;

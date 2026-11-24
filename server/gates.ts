@@ -40,7 +40,7 @@ interface Ctx {
   hasIn: (e: Element, ...kinds: string[]) => boolean; // e 是關係的終點
 }
 
-const REQS = ["SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
+const REQS = ["MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
 
 const atLeastOne = (label: string, ...cats: string[]) => (c: Ctx) => {
   const n = c.of(...cats).length;

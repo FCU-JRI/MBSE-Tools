@@ -10,7 +10,7 @@ import type { Col } from "./pages/tables/DataTable.tsx";
 
 const bookOf = (v: View) => ({ id: v.project.id, ok: v.analysis.ok });
 
-const REQ = ["SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
+const REQ = ["MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
 const when = (s: string) => new Date(s).toLocaleDateString("zh-TW");
 
 /** 表格頁與專案管理頁共用的參數。 */

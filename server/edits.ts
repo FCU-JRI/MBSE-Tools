@@ -287,6 +287,34 @@ export function setSourceText(content: string, el: Element, doc: string, ref: st
   return insertInside(content, el, (indent) => `${indent}${text}\n`);
 }
 
+/** CAD 連結（@CadLink）：設計迴圈第 5 步。只放連結與版本，不附檔；網址清空就拿掉。 */
+export function setCadText(content: string, el: Element, url: string, version: string, tool: string): string {
+  const u = url.trim(), v = version.trim(), t = tool.trim();
+  let text = "";
+  if (u) {
+    if (!/^https?:\/\/\S{3,300}$/.test(u)) throw new UserError("CAD 連結必須是 http(s) 網址。");
+    if (!v) throw new UserError("請填 CAD 版本。");
+    if (v.length > 40 || t.length > 40) throw new UserError("版本與工具名稱最多 40 字。");
+    text = `@CadLink { cadUrl = ${str(u)}; cadVersion = ${str(v)};${t ? ` cadTool = ${str(t)};` : ""} }`;
+  }
+  const loc = el.metaLoc.CadLink;
+  if (loc) return replaceLoc(content, loc, text);
+  if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
+export const LAYERS = ["mission", "system", "subsystem", "component"] as const;
+/** 層級（@LayerTag）：推不出層級時才手填；空字串就拿掉。 */
+export function setLayerText(content: string, el: Element, layer: string): string {
+  const l = layer.trim();
+  if (l && !(LAYERS as readonly string[]).includes(l)) throw new UserError("層級只能是任務、系統、次系統或元件。");
+  const text = l ? `@LayerTag { layer = ${str(l)}; }` : "";
+  const loc = el.metaLoc.LayerTag;
+  if (loc) return replaceLoc(content, loc, text);
+  if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
 // ───────── 套件與註解 ─────────
 
 interface LineEdit { at: number; remove: number; insert: string[] } // at 為行的索引（從 0 起算）

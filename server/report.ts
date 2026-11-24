@@ -65,7 +65,7 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
   if (stm) S.push({ heading: "3.3　模式與狀態", level: 2, paragraphs: [], svg: stm });
 
   chapter("4　需求與驗證");
-  const reqs = of("SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  const reqs = of("MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
   add("4.1　需求表", [], { head: ["編號", "層級", "名稱", "需求內容", "衍生自", "滿足者", "計算判定"], rows: reqs.map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "derive", "refine", "trace"), ins(e, "satisfy"), verdict(e)]) }, { svg: diagramSvg(project.name, a, "req") ?? undefined });
   const rvm: string[][] = [];
   for (const r of reqs) {

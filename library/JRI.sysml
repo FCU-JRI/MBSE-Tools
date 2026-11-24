@@ -20,10 +20,14 @@ package JRI {
     requirement def Goal;
     /* 目的 Objective */
     requirement def Objective;
-    /* 效能量度 Measure of Effectiveness */
-    requirement def MOE;
+    /* 效能量度 Measure of Effectiveness。successLevel：成功判準三級（最低、完全、額外） */
+    requirement def MOE {
+        attribute successLevel : String[0..1];
+    }
     /* 性能量度 Measure of Performance */
     requirement def MOP;
+    /* 任務需求：第 1 層的出口（來源：成功判準與來源文件的硬條件），第 2 層任務剖面的輸入 */
+    requirement def MissionRequirement;
     /* 系統層需求 */
     requirement def SystemRequirement;
     /* 次系統層需求 */
@@ -49,6 +53,20 @@ package JRI {
     metadata def Source {
         attribute sourceDoc : String;
         attribute sourceRef : String[0..1];
+    }
+
+    /* CAD 連結：設計迴圈第 5 步。模型只放連結與版本，不附檔。
+       用法：@CadLink { cadUrl = "https://..."; cadVersion = "v3"; cadTool = "Onshape"; } */
+    metadata def CadLink {
+        attribute cadUrl : String;
+        attribute cadVersion : String;
+        attribute cadTool : String[0..1];
+    }
+
+    /* 層級：mission（任務）、system（系統）、subsystem（次系統）、component（元件）。推不出層級時才手填。
+       用法：@LayerTag { layer = "subsystem"; } */
+    metadata def LayerTag {
+        attribute layer : String;
     }
 
     // ───────── 結構支柱 Structure ─────────
@@ -107,6 +125,15 @@ package JRI {
         attribute residualSeverity : Integer;
         attribute residualLikelihood : Integer;
         attribute status : String;
+        /* 風險種類：技術、時程、預算、場地、人員（風險登錄用） */
+        attribute riskKind : String[0..1];
+    }
+
+    /* 設計決策：方案選定、衝突裁決都留理由、裁決者與日期（TR-08） */
+    item def DesignDecision {
+        attribute rationale : String;
+        attribute decidedBy : String;
+        attribute decidedOn : String;
     }
 
     /* 安全係數 Factor of Safety */

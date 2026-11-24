@@ -51,7 +51,7 @@ export async function exportWorkbook(project: Project, a: Analysis, gates: GateS
 
   const sat = new Map(a.satisfaction.map((s) => [s.requirement, s.status]));
   const satZh = (e: Element) => ({ holds: "滿足", fails: "不滿足", undecided: "未判定" } as Record<string, string>)[sat.get(e.qualifiedName) ?? ""] ?? "";
-  const reqs = of("SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  const reqs = of("MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
 const src = (e: Element) => { const d = plan.docs.find((x) => x.id === e.attrs.sourceDoc); return e.attrs.sourceDoc ? `${e.attrs.sourceDoc}${d ? " " + d.title : ""}${e.attrs.sourceRef ? " §" + e.attrs.sourceRef : ""}` : ""; };
   sheet("需求矩陣", [["編號", 14], ["層級", 14], ["名稱", 22], ["需求內容", 50], ["出處", 28], ["衍生自", 30], ["滿足者", 22], ["驗證方法", 12], ["驗證事件", 28], ["計算判定", 12]],
     reqs.map((e) => {

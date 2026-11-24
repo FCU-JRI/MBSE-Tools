@@ -6,7 +6,7 @@ import * as store from "../projects.ts";
 import { evaluateProcess, stepOfCategory } from "../process.ts";
 import { paramLines, paramWord } from "../modernize.ts";
 import { attrForm, moveBlockText, setCategoryText, setCustomAttrText, setMethodText, setUsageTypeText, setVerifiesText, nextShortName } from "../edits.ts";
-import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, snippetFor } from "../edits.ts";
+import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, setCadText, setLayerText, snippetFor } from "../edits.ts";
 import { wrap, author, pid, view, editable, rootFile, inFile, isUserPackage } from "./common.ts";
 import type { An } from "./common.ts";
 import type { NewRelation } from "../edits.ts";
@@ -196,6 +196,11 @@ export function mount(app: Express): void {
       const d = String(b.source.doc ?? "").trim(), r = String(b.source.ref ?? "").trim();
       if (d !== (target.attrs.sourceDoc ?? "") || r !== (target.attrs.sourceRef ?? "")) steps.push((c, el) => setSourceText(c, el, d, r));
     }
+    if (b.cad && typeof b.cad === "object") {
+      const u = String(b.cad.url ?? "").trim(), v = String(b.cad.version ?? "").trim(), t = String(b.cad.tool ?? "").trim();
+      if (u !== (target.attrs.cadUrl ?? "") || v !== (target.attrs.cadVersion ?? "") || t !== (target.attrs.cadTool ?? "")) steps.push((c, el) => setCadText(c, el, u, v, t));
+    }
+    if (typeof b.layer === "string" && b.layer.trim() !== (target.attrs.layer ?? "")) steps.push((c, el) => setLayerText(c, el, b.layer));
     if (steps.length === 0 && !newId) return res.json({ saved: true, ...(await view(id)) });
     let el: Element = target;
     for (const step of steps) {

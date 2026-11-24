@@ -115,7 +115,7 @@ const edge = (id: string, source: string, target: string, kind: string, text: st
   tail: kind === "compose" ? "diamond" : "none",
 });
 
-const REQ_CATS = ["Expectation", "Need", "Goal", "Objective", "MOE", "MOP", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
+const REQ_CATS = ["Expectation", "Need", "Goal", "Objective", "MOE", "MOP", "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
 
 /** 一般的節點：需求顯示 doc 隔間，定義顯示 attributes 隔間。 */
 function node(e: Element, a: Analysis): GNode {
@@ -285,7 +285,7 @@ export const LINK_TOOLS: Record<DiagramKind, LinkTool[]> = {
 };
 export const PALETTE: Record<DiagramKind, string[]> = {
   bdd: ["System", "Subsystem", "Component", "ExternalEntity"],
-  req: ["Need", "Goal", "Objective", "MOE", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "VerificationEvent"],
+  req: ["Need", "Goal", "Objective", "MOE", "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "VerificationEvent"],
   act: ["MissionPhase", "Function"],
   ibd: [],
   uc: ["Stakeholder", "UseCase"],

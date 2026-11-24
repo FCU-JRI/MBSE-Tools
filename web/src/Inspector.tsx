@@ -101,7 +101,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const isVer = cat.keyword === "verification";
-  const reqs = listOf(view.analysis.elements, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  const reqs = listOf(view.analysis.elements, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
   const parent = parentId ? view.analysis.elements.find((e) => e.id === parentId) : undefined;
 
   const submit = async (ev: FormEvent) => {
@@ -214,6 +214,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
         <ParentField view={view} meta={meta} el={el} busy={busy} call={call} />
         {cat?.keyword === "verification" && <VerifyFields view={view} el={el} busy={busy} call={call} setSel={setSel} />}
         <CustomAttrs view={view} el={el} cat={cat} busy={busy} call={call} />
+        <DesignTags view={view} el={el} cat={cat} busy={busy} call={call} />
       </div>
 
       <div className="section">
@@ -293,7 +294,7 @@ const LOCAL_KINDS = ["succession", "connect", "transition"];
 const CHANGE_KINDS = [...TRACE_LIKE, "include", ...LOCAL_KINDS];
 const KIND_ZH: Record<string, string> = { compose: "組成", connect: "連接", succession: "先後順序", transition: "狀態轉換", include: "包含", verify: "驗證" };
 const relName = (meta: Meta, k: string) => meta.relations[k]?.zh ?? KIND_ZH[k] ?? k;
-const REQ_ALL = ["Expectation", "Need", "Goal", "Objective", "MOE", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
+const REQ_ALL = ["Expectation", "Need", "Goal", "Objective", "MOE", "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
 const linkStyle = { textTransform: "none" as const, letterSpacing: 0, fontSize: 13, justifyContent: "flex-start" as const };
 
 /** 類別：只列同一個 SysML 關鍵字的類別。 */
@@ -418,6 +419,46 @@ function VerifyFields({ view, el, busy, call, setSel }: { view: View; el: Elemen
 const splitUnit = (v: string) => { const m = /^(.*?)\s*\[([^\]]+)\]$/.exec(v); return m ? { value: m[1], unit: m[2] } : { value: v, unit: "" }; };
 
 /** 自訂屬性：類別預設欄位以外的屬性（名稱、值、單位），放在屬性欄最下面。 */
+const LAYER_ZH: [string, string][] = [["", "（自動判斷）"], ["mission", "任務"], ["system", "系統"], ["subsystem", "次系統"], ["component", "元件"]];
+
+/** 設計資料標記：結構元素的 CAD 連結（設計迴圈第 5 步），需求、風險、決策的層級（推不出層級時才手填）。 */
+function DesignTags({ view, el, cat, busy, call }: { view: View; el: Element; cat: Category | undefined; busy: boolean; call: Call }) {
+  const pid = view.project.id;
+  const [cad, setCad] = useState({ url: el.attrs.cadUrl ?? "", version: el.attrs.cadVersion ?? "", tool: el.attrs.cadTool ?? "" });
+  const [layer, setLayer] = useState(el.attrs.layer ?? "");
+  useEffect(() => { setCad({ url: el.attrs.cadUrl ?? "", version: el.attrs.cadVersion ?? "", tool: el.attrs.cadTool ?? "" }); setLayer(el.attrs.layer ?? ""); }, [el]);
+  if (!cat) return null;
+  const structural = cat.keyword === "part def";
+  const layered = cat.keyword === "requirement" || cat.id === "Risk" || cat.id === "DesignDecision";
+  if (!structural && !layered) return null;
+  const cadDirty = cad.url.trim() !== (el.attrs.cadUrl ?? "") || cad.version.trim() !== (el.attrs.cadVersion ?? "") || cad.tool.trim() !== (el.attrs.cadTool ?? "");
+  const patch = (body: Record<string, unknown>, done: string) => call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, ...body }), done);
+  return (
+    <>
+      {structural && <div className="field">
+        <span className="label">CAD 連結</span>
+        <input className="input" value={cad.url} onChange={(e) => setCad({ ...cad, url: e.target.value })} placeholder="https://…" aria-label="CAD 網址" spellCheck={false} />
+        <div className="row" style={{ gap: 8, marginTop: 4 }}>
+          <input className="input" style={{ flex: 1 }} value={cad.version} onChange={(e) => setCad({ ...cad, version: e.target.value })} placeholder="版本，例如 v3" aria-label="CAD 版本" />
+          <input className="input" style={{ flex: 1 }} value={cad.tool} onChange={(e) => setCad({ ...cad, tool: e.target.value })} placeholder="工具，例如 Onshape" aria-label="CAD 工具" />
+        </div>
+        <div className="tbtn-row" style={{ paddingLeft: 0 }}>
+          <button type="button" className="tbtn" disabled={busy || !cadDirty} onClick={() => patch({ cad }, cad.url.trim() ? "已寫入 CAD 連結。" : "已拿掉 CAD 連結。")}>寫入 CAD 連結</button>
+          {el.attrs.cadUrl && <button type="button" className="tbtn" disabled={busy} onClick={() => patch({ cad: { url: "", version: "", tool: "" } }, "已拿掉 CAD 連結。")}>拿掉</button>}
+        </div>
+        <span className="caption">只放連結與版本，不附檔。設計迴圈的「CAD 建模」靠這裡判定完成。</span>
+      </div>}
+      {layered && <label className="field">
+        <span className="label">層級</span>
+        <select className="input" value={layer} disabled={busy} onChange={(e) => { setLayer(e.target.value); patch({ layer: e.target.value }, "已更新層級。"); }}>
+          {LAYER_ZH.map(([v, zh]) => <option key={v} value={v}>{zh}</option>)}
+        </select>
+        <span className="caption">FMEA 與方案比較依層篩選用；推得出層級時不用填。</span>
+      </label>}
+    </>
+  );
+}
+
 function CustomAttrs({ view, el, cat, busy, call }: { view: View; el: Element; cat: Category | undefined; busy: boolean; call: Call }) {
   const [adding, setAdding] = useState(false);
   const [d, setD] = useState({ name: "", value: "", unit: "" });
