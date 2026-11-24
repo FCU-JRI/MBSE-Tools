@@ -121,7 +121,7 @@ export interface StepStatus {
 /** 還沒完成的原因。id 是有問題的元素；count 是「數量不足」類的條件。 */
 export interface Issue { id: string | null; text: string; count?: { category: string; zh: string; have: number; min: number } }
 
-const STRUCT = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
+const STRUCT = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
 
 export function evaluateProcess(a: Analysis): StepStatus[] {
   const of = (...cats: string[]) => a.elements.filter((e) => e.category !== null && cats.includes(e.category) && e.kind !== "ReferenceUsage" && !e.shared && (STRUCT.has(e.category) ? e.kind === "PartDefinition" : /Usage$/.test(e.kind)));

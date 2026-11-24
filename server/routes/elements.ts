@@ -5,7 +5,7 @@ import { CATEGORIES, CATEGORY, RELATION_LABELS } from "../metamodel.ts";
 import * as store from "../projects.ts";
 import { evaluateProcess, stepOfCategory } from "../process.ts";
 import { paramLines, paramWord } from "../modernize.ts";
-import { attrForm, moveBlockText, setCategoryText, setCustomAttrText, setMethodText, setUsageTypeText, setVerifiesText, nextShortName } from "../edits.ts";
+import { readCondition, setConditionText, attrForm, moveBlockText, setCategoryText, setCustomAttrText, setMethodText, setUsageTypeText, setVerifiesText, nextShortName } from "../edits.ts";
 import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, setCadText, setLayerText, snippetFor } from "../edits.ts";
 import { wrap, author, pid, view, editable, rootFile, inFile, isUserPackage } from "./common.ts";
 import type { An } from "./common.ts";
@@ -22,6 +22,7 @@ function planRelation(before: An, kind: string, from: Element | undefined, to: E
   const kind0 = kind;
   // 標準庫的需求衍生連結兩端都必須是需求（F-36）
   if (kind0 === "derive" && !(/RequirementUsage$/.test(from.kind) && /RequirementUsage$/.test(to.kind))) throw new store.UserError("衍生只能連接需求類的項目（需要、目標、目的、量度、各層需求）。其他項目之間請用「追溯」。");
+  if (kind0 === "basis" && !/RequirementUsage$/.test(from.kind)) throw new store.UserError("設計依據的起點必須是需求。");
   const owner0 = before.elements.find((x) => x.id === from.owner);
   // 寫進某個元素主體的關係用該元素的檔案，其餘寫在根套件
   // 追溯到利害關係人：需求用內建的 stakeholder、使用案例用 actor，寫在起點的主體裡（F-37）
@@ -531,6 +532,39 @@ export function mount(app: Express): void {
     res.json({ saved: true, selected: after.id, ...(await view(id)) });
   }));
 
+  // 需求的數值條件（預算配額、尺寸邊界都用它）：讀與寫。對象是結構定義；選到零件時用它的定義
+  app.get("/api/projects/:id/elements/condition", wrap(async (req, res) => {
+    const id = pid(req);
+    const a = await store.analyzeProject(id);
+    const el = a.elements.find((e) => e.id === String(req.query.id ?? ""));
+    if (!el) throw new store.UserError("找不到這個元素。");
+    res.json({ condition: readCondition(await store.readFile(id, el.file), el) });
+  }));
+  app.post("/api/projects/:id/elements/condition", wrap(async (req, res) => {
+    const id = pid(req);
+    const before = await store.analyzeProject(id);
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
+    const el = before.elements.find((e) => e.id === req.body?.id);
+    if (!el) throw new store.UserError("找不到這個元素。");
+    editable(el);
+    const b = req.body ?? {};
+    let type = "";
+    if (b.subject) {
+      let s = before.elements.find((e) => e.id === b.subject);
+      if (s && /Usage$/.test(s.kind)) s = before.elements.find((e) => s!.typeIds.includes(e.id) && /Definition$/.test(e.kind)) ?? s;
+      if (!s || !/PartDefinition$/.test(s.kind)) throw new store.UserError("條件的對象要選系統、次系統或元件。");
+      type = s.qualifiedName.split("::").map(quote).join("::");
+    }
+    const file = el.file;
+    const content = setConditionText(await store.readFile(id, file), el, { type, attribute: String(b.attribute ?? ""), op: String(b.op ?? ""), value: String(b.value ?? ""), unit: String(b.unit ?? "") });
+    const a = await store.analyzeProject(id, { file, content });
+    if (!a.ok) return broken(res, a, "寫入數值條件");
+    const r = await store.saveFile(id, file, content, author(req), `${type ? "設定" : "清除"}數值條件：${el.name}`);
+    if (!r.saved) return broken(res, r.analysis, "寫入數值條件");
+    const after = a.elements.find((e) => e.qualifiedName === el.qualifiedName && e.kind === el.kind);
+    res.json({ saved: true, selected: after?.id, ...(await view(id)) });
+  }));
+
   // 驗證事件：改方法、增減要驗證的需求
   app.post("/api/projects/:id/verification", wrap(async (req, res) => {
     const id = pid(req);
@@ -576,7 +610,7 @@ export function mount(app: Express): void {
   }));
 
   // 改關係：換對象或換類型。舊的拿掉、新的加上，一次存檔；檢查規則和新增關係相同
-  const TRACE_LIKE = ["derive", "refine", "trace", "satisfy", "allocate"];
+  const TRACE_LIKE = ["derive", "refine", "trace", "basis", "satisfy", "allocate"];
   app.post("/api/projects/:id/relations/change", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);

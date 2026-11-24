@@ -25,7 +25,7 @@ export async function exportWorkbook(project: Project, a: Analysis, gates: GateS
     const e = byId.get(id);
     return e ? (e.shortName ? `${e.shortName} ${e.name}` : e.name) : "";
   };
-  const structural = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
+  const structural = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
   const of = (...cats: string[]) =>
     a.elements.filter((e) => e.category !== null && cats.includes(e.category) && e.kind !== "ReferenceUsage" &&
       (structural.has(e.category) ? e.kind === "PartDefinition" : /Usage$/.test(e.kind)));

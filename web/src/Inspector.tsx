@@ -124,7 +124,7 @@ function NewPanel({ view, meta, setSel, onChanged, category, parentId }: Props &
       <label className="field"><span className="label">類別</span>
         <select className="input" value={cat.id} onChange={(e) => setSel({ type: "new", category: e.target.value, parentId: null })}>
           {Object.entries(meta.pillars).map(([pid, pzh]) => (
-            <optgroup key={pid} label={pzh}>{meta.categories.filter((c) => c.pillar === pid).map((c) => <option key={c.id} value={c.id}>{c.zh} {c.en}</option>)}</optgroup>
+            <optgroup key={pid} label={pzh}>{meta.categories.filter((c) => c.pillar === pid && !c.special).map((c) => <option key={c.id} value={c.id}>{c.zh} {c.en}</option>)}</optgroup>
           ))}
         </select>
       </label>
@@ -179,7 +179,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
     finally { setBusy(false); }
   };
   const save = (ev: FormEvent) => { ev.preventDefault(); call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, name, shortName: sn, doc, attrs, source: src }), "已寫入。"); };
-  const remove = async () => { if (await call(() => api(`/projects/${pid}/elements/delete`, "POST", { id: el.id }))) setSel({ type: "new", category: el.category ?? "SystemRequirement", parentId: null }); };
+  const remove = async () => { if (await call(() => api(`/projects/${pid}/${el.kind === "InterfaceUsage" ? "interfaces" : "elements"}/delete`, "POST", { id: el.id }))) setSel({ type: "new", category: el.category ?? "SystemRequirement", parentId: null }); };
 
   const rels = view.analysis.relations.filter((r) => r.kind !== "succession" && r.kind !== "connect");
   const out = rels.filter((r) => r.from === el.id).map((r) => ({ r, zh: meta.relations[r.kind]?.zh ?? r.kind, other: byId.get(r.to) }));
@@ -215,6 +215,10 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
         {cat?.keyword === "verification" && <VerifyFields view={view} el={el} busy={busy} call={call} setSel={setSel} />}
         <CustomAttrs view={view} el={el} cat={cat} busy={busy} call={call} />
         <DesignTags view={view} el={el} cat={cat} busy={busy} call={call} />
+        {/RequirementUsage$/.test(el.kind) && <ConditionField view={view} el={el} busy={busy} call={call} />}
+        {cat?.id === "DesignAlternative" && <Variants view={view} el={el} busy={busy} call={call} setSel={setSel} />}
+        {el.kind === "PartDefinition" && cat?.keyword === "part def" && <Interfaces view={view} el={el} busy={busy} call={call} setSel={setSel} />}
+        {el.kind === "InterfaceUsage" && <InterfaceStatusField view={view} el={el} busy={busy} call={call} />}
       </div>
 
       <div className="section">
@@ -225,7 +229,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
         {out.length + inn.length === 0 && <p className="caption">還沒有關係。</p>}
         <div className="row" style={{ marginTop: 12 }}>
           <label className="field" style={{ flex: "0 0 5.5rem", minWidth: 0 }}><span className="label">類型</span>
-            <select className="input" value={relKind} onChange={(e) => setRelKind(e.target.value)}>{["derive", "refine", "trace", "satisfy", "allocate"].map((k) => <option key={k} value={k}>{meta.relations[k]?.zh}</option>)}</select>
+            <select className="input" value={relKind} onChange={(e) => setRelKind(e.target.value)}>{["derive", "refine", "trace", "basis", "satisfy", "allocate"].map((k) => <option key={k} value={k}>{meta.relations[k]?.zh}</option>)}</select>
           </label>
           <label className="field"><span className="label">對象</span>
             <select className="input" value={relTo} onChange={(e) => setRelTo(e.target.value)}><option value="">請選擇</option>{targets.map((t) => <option key={t.id} value={t.id}>{label(t)}</option>)}</select>
@@ -289,7 +293,7 @@ function EdgePanel({ view, meta, setSel, onChanged, edge }: Props & { edge: GEdg
 // 做不到的地方直接在畫面上說明原因，不讓人存了才發現。
 
 type Call = (fn: () => Promise<View & { selected?: string }>, done?: string) => Promise<boolean>;
-const TRACE_LIKE = ["derive", "refine", "trace", "satisfy", "allocate"];
+const TRACE_LIKE = ["derive", "refine", "trace", "basis", "satisfy", "allocate"];
 const LOCAL_KINDS = ["succession", "connect", "transition"];
 const CHANGE_KINDS = [...TRACE_LIKE, "include", ...LOCAL_KINDS];
 const KIND_ZH: Record<string, string> = { compose: "組成", connect: "連接", succession: "先後順序", transition: "狀態轉換", include: "包含", verify: "驗證" };
@@ -419,6 +423,125 @@ function VerifyFields({ view, el, busy, call, setSel }: { view: View; el: Elemen
 const splitUnit = (v: string) => { const m = /^(.*?)\s*\[([^\]]+)\]$/.exec(v); return m ? { value: m[1], unit: m[2] } : { value: v, unit: "" }; };
 
 /** 自訂屬性：類別預設欄位以外的屬性（名稱、值、單位），放在屬性欄最下面。 */
+const OPS: [string, string][] = [[">=", "≥"], ["<=", "≤"], ["==", "＝"], [">", "＞"], ["<", "＜"]];
+/** 數值條件：subject＋require constraint。預算配額、尺寸邊界都寫成這種需求；有滿足者時由解析器判定 PASS／FAIL。 */
+function ConditionField({ view, el, busy, call }: { view: View; el: Element; busy: boolean; call: Call }) {
+  const pid = view.project.id;
+  const subjects = listOf(view.analysis.elements, "System", "Subsystem", "Component", "ExternalEntity");
+  const [cur, setCur] = useState<{ subjectType: string; expr: string } | null>(null);
+  const [f, setF] = useState({ subject: "", attribute: "", op: "<=", value: "", unit: "" });
+  useEffect(() => {
+    api<{ condition: { subjectType: string; expr: string } | null }>(`/projects/${pid}/elements/condition?id=${encodeURIComponent(el.id)}`).then((r) => {
+      setCur(r.condition);
+      const m = /^\w+\.(\w+)\s*(>=|<=|==|>|<)\s*(-?[\d.eE]+)\s*(?:\[\s*'?([^'\]]*)'?\s*\])?/.exec(r.condition?.expr ?? "");
+      const subj = subjects.find((x) => r.condition && (x.name === r.condition.subjectType.replace(/'/g, "").split("::").pop()));
+      setF({ subject: subj?.id ?? "", attribute: m?.[1] ?? "", op: m?.[2] ?? "<=", value: m?.[3] ?? "", unit: m?.[4] ?? "" });
+    }).catch(() => setCur(null));
+  }, [el.id, view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const write = (body: Record<string, unknown>, done: string) => call(() => api(`/projects/${pid}/elements/condition`, "POST", { id: el.id, ...body }), done);
+  return (
+    <div className="field">
+      <span className="label">數值條件</span>
+      {cur ? <span className="caption">目前：{cur.subjectType} 的 {cur.expr}</span> : <span className="caption">還沒有數值條件。預算配額、尺寸邊界都寫在這裡。</span>}
+      <select className="input" value={f.subject} onChange={(e) => setF({ ...f, subject: e.target.value })} aria-label="條件的對象">
+        <option value="">（選對象：系統、次系統或元件）</option>
+        {subjects.map((x) => <option key={x.id} value={x.id}>{label(x)}</option>)}
+      </select>
+      <div className="row" style={{ gap: 6, marginTop: 4 }}>
+        <input className="input" style={{ flex: 2 }} value={f.attribute} onChange={(e) => setF({ ...f, attribute: e.target.value })} placeholder="屬性，例如 mass" aria-label="屬性" spellCheck={false} />
+        <select className="input" style={{ flex: 1 }} value={f.op} onChange={(e) => setF({ ...f, op: e.target.value })} aria-label="比較">{OPS.map(([v, zh]) => <option key={v} value={v}>{zh}</option>)}</select>
+        <input className="input" style={{ flex: 1.5 }} value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} placeholder="值" aria-label="值" />
+        <input className="input" style={{ flex: 1 }} value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} placeholder="單位" aria-label="單位" spellCheck={false} />
+      </div>
+      <div className="tbtn-row" style={{ paddingLeft: 0 }}>
+        <button type="button" className="tbtn" disabled={busy || !f.subject || !f.attribute || !f.value} onClick={() => write(f, "已寫入數值條件。")}>寫入條件</button>
+        {cur && <button type="button" className="tbtn" disabled={busy} onClick={() => write({ subject: "" }, "已清除數值條件。")}>清除</button>}
+      </div>
+      <span className="caption">屬性要先存在於對象上（可在對象的「自訂屬性」新增）。要判定 PASS／FAIL，還要用「滿足」關係指定實際的零件。</span>
+    </div>
+  );
+}
+
+/** 設計方案的候選（variant）：列出、加入；點一個候選可以改名或刪除。 */
+function Variants({ view, el, busy, call, setSel }: { view: View; el: Element; busy: boolean; call: Call; setSel: (s: Selection) => void }) {
+  const pid = view.project.id;
+  const [name, setName] = useState("");
+  const vs = view.analysis.elements.filter((e) => e.owner === el.id && e.kind === "PartUsage");
+  return (
+    <div className="field">
+      <span className="label">候選方案（{vs.length}）</span>
+      {vs.length === 0 && <span className="caption">方案分析至少要 2 個候選。</span>}
+      {vs.map((x) => <button key={x.id} type="button" className="tbtn" style={{ justifyContent: "flex-start" }} onClick={() => setSel({ type: "element", id: x.id })}>{label(x)}</button>)}
+      <div className="row" style={{ gap: 6, marginTop: 4 }}>
+        <input className="input" style={{ flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="候選名稱，例如 雙段傘" aria-label="候選名稱" />
+        <button type="button" className="tbtn" disabled={busy || !name.trim()} onClick={async () => { if (await call(() => api(`/projects/${pid}/variants`, "POST", { id: el.id, name }), "已加入候選。")) setName(""); }}>加入候選</button>
+      </div>
+      <span className="caption">選定哪一個，新增一筆「設計決策」並用「追溯到」連到那個候選。</span>
+    </div>
+  );
+}
+
+const IF_KINDS = ["機械", "熱", "電", "流體", "資料", "人"];
+/** 系統（或次系統）裡的介面：列出、新增（選兩端、種類、一個關鍵數字）。介面是這一層設計迴圈的產出。 */
+function Interfaces({ view, el, busy, call, setSel }: { view: View; el: Element; busy: boolean; call: Call; setSel: (s: Selection) => void }) {
+  const pid = view.project.id;
+  const els = view.analysis.elements;
+  const parts = els.filter((e) => e.kind === "PartUsage" && e.owner === el.id);
+  const list = els.filter((e) => e.kind === "InterfaceUsage" && e.owner === el.id);
+  const [f, setF] = useState({ a: "", b: "", name: "", kind: "機械", pname: "", pa: "", pb: "", unit: "" });
+  if (parts.length < 2 && list.length === 0) return null;
+  const add = async () => {
+    const params = f.pname.trim() ? [{ name: f.pname, a: f.pa, b: f.pb, unit: f.unit }] : [];
+    if (await call(() => api(`/projects/${pid}/interfaces`, "POST", { system: el.id, a: f.a, b: f.b, name: f.name, kind: f.kind, params }), "已新增介面。")) setF({ a: "", b: "", name: "", kind: "機械", pname: "", pa: "", pb: "", unit: "" });
+  };
+  return (
+    <div className="field">
+      <span className="label">介面（{list.length}）</span>
+      {list.map((x) => <button key={x.id} type="button" className="tbtn" style={{ justifyContent: "flex-start" }} onClick={() => setSel({ type: "element", id: x.id })}>{label(x)}　<span className="faint">{x.attrs.kind ?? ""}・{({ exists: "存在", tentative: "暫定", frozen: "凍結" } as Record<string, string>)[x.attrs.maturity ?? ""] ?? ""}</span></button>)}
+      {parts.length >= 2 && <>
+        <div className="row" style={{ gap: 6, marginTop: 4 }}>
+          <select className="input" style={{ flex: 1 }} value={f.a} onChange={(e) => setF({ ...f, a: e.target.value })} aria-label="介面 A 端"><option value="">A 端</option>{parts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <select className="input" style={{ flex: 1 }} value={f.b} onChange={(e) => setF({ ...f, b: e.target.value })} aria-label="介面 B 端"><option value="">B 端</option>{parts.filter((p) => p.id !== f.a).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        </div>
+        <div className="row" style={{ gap: 6, marginTop: 4 }}>
+          <input className="input" style={{ flex: 2 }} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="介面名稱，例如 推進—結構 接頭" aria-label="介面名稱" />
+          <select className="input" style={{ flex: 1 }} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })} aria-label="介面種類">{IF_KINDS.map((k) => <option key={k}>{k}</option>)}</select>
+        </div>
+        <div className="row" style={{ gap: 6, marginTop: 4 }}>
+          <input className="input" style={{ flex: 2 }} value={f.pname} onChange={(e) => setF({ ...f, pname: e.target.value })} placeholder="關鍵數字，例如 diameter" aria-label="關鍵數字名稱" spellCheck={false} />
+          <input className="input" style={{ flex: 1 }} value={f.pa} onChange={(e) => setF({ ...f, pa: e.target.value })} placeholder="A 端值" aria-label="A 端值" />
+          <input className="input" style={{ flex: 1 }} value={f.pb} onChange={(e) => setF({ ...f, pb: e.target.value })} placeholder="B 端值" aria-label="B 端值" />
+          <input className="input" style={{ flex: 1 }} value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} placeholder="單位" aria-label="關鍵數字單位" spellCheck={false} />
+        </div>
+        <div className="tbtn-row" style={{ paddingLeft: 0 }}><button type="button" className="tbtn" disabled={busy || !f.a || !f.b || !f.name.trim()} onClick={add}>新增介面</button></div>
+        <span className="caption">兩端各加一個同名連接埠；關鍵數字寫兩端的值，並檢查是否相等。更多數字之後在介面的「自訂屬性」加。</span>
+      </>}
+    </div>
+  );
+}
+
+/** 介面狀態：成熟度（存在、暫定、凍結）與兩端負責人是否同意。 */
+function InterfaceStatusField({ view, el, busy, call }: { view: View; el: Element; busy: boolean; call: Call }) {
+  const pid = view.project.id;
+  const [f, setF] = useState({ maturity: el.attrs.maturity ?? "exists", agreedA: el.attrs.agreedA ?? "", agreedB: el.attrs.agreedB ?? "" });
+  useEffect(() => { setF({ maturity: el.attrs.maturity ?? "exists", agreedA: el.attrs.agreedA ?? "", agreedB: el.attrs.agreedB ?? "" }); }, [el]);
+  const dirty = f.maturity !== (el.attrs.maturity ?? "exists") || f.agreedA !== (el.attrs.agreedA ?? "") || f.agreedB !== (el.attrs.agreedB ?? "");
+  return (
+    <div className="field">
+      <span className="label">介面狀態</span>
+      <select className="input" value={f.maturity} onChange={(e) => setF({ ...f, maturity: e.target.value })} aria-label="介面成熟度">
+        <option value="exists">存在（MDR）</option><option value="tentative">暫定（PDR）</option><option value="frozen">凍結（CDR）</option>
+      </select>
+      <div className="row" style={{ gap: 6, marginTop: 4 }}>
+        <input className="input" style={{ flex: 1 }} value={f.agreedA} onChange={(e) => setF({ ...f, agreedA: e.target.value })} placeholder="A 端同意者" aria-label="A 端同意者" />
+        <input className="input" style={{ flex: 1 }} value={f.agreedB} onChange={(e) => setF({ ...f, agreedB: e.target.value })} placeholder="B 端同意者" aria-label="B 端同意者" />
+      </div>
+      <div className="tbtn-row" style={{ paddingLeft: 0 }}><button type="button" className="tbtn" disabled={busy || !dirty} onClick={() => call(() => api(`/projects/${pid}/interfaces/status`, "POST", { id: el.id, ...f }), "已更新介面狀態。")}>寫入狀態</button></div>
+      <span className="caption">刪除介面會連同兩端的連接埠一起刪掉。</span>
+    </div>
+  );
+}
+
 const LAYER_ZH: [string, string][] = [["", "（自動判斷）"], ["mission", "任務"], ["system", "系統"], ["subsystem", "次系統"], ["component", "元件"]];
 
 /** 設計資料標記：結構元素的 CAD 連結（設計迴圈第 5 步），需求、風險、決策的層級（推不出層級時才手填）。 */

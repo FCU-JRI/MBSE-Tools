@@ -47,6 +47,9 @@ package JRI {
     // 一般追溯在標準庫沒有對應的標記，沿用自訂的：
     //   #trace dependency from 下層 to 上層;
     metadata def <trace> TraceLink;
+    // 設計依據：下一層需求根據上一層設計迴圈的哪個產出（介面、邊界、配額、選定方案、決策）推出來
+    //   #basis dependency from 下層需求 to 設計產出;
+    metadata def <basis> BasisLink;
 
     /* 出處：這個項目來自哪一份文件的哪一節。文件清單在專案的 pm.json（docs）。
        用法：@Source { sourceDoc = "DOC-001"; sourceRef = "3.2"; } */
@@ -76,6 +79,26 @@ package JRI {
     part def Component;
     /* 系統脈絡中的外部對象 */
     part def ExternalEntity;
+
+    /* 介面：兩個次系統之間的連接，屬於上一層（系統）的設計產出。
+       kind：機械、熱、電、流體、資料、人。兩端的關鍵數字寫在介面上（名稱A、名稱B），用 assert constraint 檢查是否對得上。
+       兩端各有一個同名的連接埠：port <'IF-001-A'> 'IF-001' : InterfacePort; */
+    port def InterfacePort;
+    interface def Interface {
+        attribute kind : String;
+        end a : InterfacePort;
+        end b : InterfacePort;
+    }
+    /* 介面狀態：maturity＝exists（存在）、tentative（暫定）、frozen（凍結）；agreedA／agreedB：兩端負責人是否同意 */
+    metadata def InterfaceStatus {
+        attribute maturity : String;
+        attribute agreedA : String[0..1];
+        attribute agreedB : String[0..1];
+    }
+
+    /* 設計方案：用 SysML v2 的 variation／variant 列出候選，例如
+       variation part def <'ALT-001'> '回收方案' :> DesignAlternative { variant part <'ALT-001-1'> '單段傘'; } */
+    part def DesignAlternative;
 
     // ───────── 行為支柱 Behavior ─────────
 

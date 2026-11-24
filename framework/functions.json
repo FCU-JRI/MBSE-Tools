@@ -1174,11 +1174,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：方案比較用標準寫法",
    "framework": "designLoop.proposal",
    "verify": "每層至少能建 2 個候選並標選定",
-   "note": "2026-11-24 實測：variation／variant 與 TradeStudy 可解析；TradeStudy 跑得動但 selectedAlternative 沒回傳"
+   "note": "WP1：DesignAlternative（variation part def）＋右欄加候選（variant）；候選可改名、刪除；選定用設計決策「追溯到」候選。TradeStudy 求選定結果在 TAB-12"
   },
   {
    "id": "MOD-24",
@@ -1193,11 +1193,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "框架 elementTypes；METHOD 第 4 節",
    "framework": "designLoop.outputs",
    "verify": "建介面、兩端數字、存在／暫定／凍結",
-   "note": ""
+   "note": "WP1：系統右欄新增介面（兩端連接埠＋interface connect、kind、兩端數字＋assert 相等、@InterfaceStatus）；狀態可改、數字可改、刪除連同連接埠。圖上與 N² 顯示在 WP5，衝突判定在 WP4"
   },
   {
    "id": "MOD-25",
@@ -1212,11 +1212,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "框架 F1 第 8 步",
    "framework": "designLoop.outputs",
    "verify": "系統對次系統下配額，加總檢查",
-   "note": ""
+   "note": "WP1：需求右欄「數值條件」（對象、屬性、比較、值、單位）可寫、改、清；有滿足者時判定 PASS／FAIL。限制：滿足者要是實例（頂層零件），次系統配額的實例路徑在 WP4 處理"
   },
   {
    "id": "MOD-26",
@@ -1231,11 +1231,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：下一層需求有兩個來源",
    "framework": "principles.twoSources",
    "verify": "右欄可選設計產出、可改可刪",
-   "note": ""
+   "note": "WP1：關係「設計依據」（#basis dependency），起點限需求；可建、可改類型、可刪"
   },
   {
    "id": "MOD-27",
@@ -2164,16 +2164,12 @@
     "FW-04"
    ],
    "gaps": [
-    "MOD-23",
     "TAB-12",
     "TAB-04",
     "FW-07",
     "ANA-09",
     "FW-08",
-    "MOD-24",
-    "MOD-25",
     "FW-02",
-    "MOD-26",
     "FW-04"
    ]
   },
@@ -2206,7 +2202,6 @@
     "FW-09"
    ],
    "gaps": [
-    "MOD-24",
     "ANA-09",
     "FW-05",
     "TAB-14",

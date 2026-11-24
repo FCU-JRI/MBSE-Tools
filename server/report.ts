@@ -17,7 +17,7 @@ interface Section { heading: string; level: 1 | 2; paragraphs: string[]; table?:
 export interface Report { title: string; subtitle: string; meta: [string, string][]; sections: Section[] }
 
 const METHOD: Record<string, string> = { "VerificationMethodKind::test": "測試", "VerificationMethodKind::analyze": "分析", "VerificationMethodKind::inspect": "檢查", "VerificationMethodKind::demo": "展示" };
-const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
+const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
 
 function diagramSvg(_title: string, a: Analysis, id: string): string | null {
   const def = diagramsOf(a as any).find((d) => d.id === id || d.kind === id);

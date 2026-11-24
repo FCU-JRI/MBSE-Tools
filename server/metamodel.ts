@@ -12,6 +12,8 @@ export interface Category {
   help: string;
   example: string;
   fields?: { name: string; zh: string; type: "text" | "int" | "real" }[];
+  /** 不用一般的新增表單建立（例如介面要選兩端），由專門的入口建立 */
+  special?: boolean;
 }
 
 export const PILLARS: Record<Category["pillar"], string> = {
@@ -57,6 +59,10 @@ export const CATEGORIES: Category[] = [
     help: "次系統底下可以單獨設計、製造或採購的東西。", example: "燃燒室、噴嘴、飛行電腦" },
   { id: "ExternalEntity", zh: "外部對象", en: "External Entity", pillar: "structure", prefix: "EXT", pkg: "Structure", keyword: "part def",
     help: "不屬於系統、但會與系統互動的東西，用來畫系統脈絡。", example: "發射架、地面站、大氣環境" },
+  { id: "DesignAlternative", zh: "設計方案", en: "Design Alternative", pillar: "structure", prefix: "ALT", pkg: "Design", keyword: "variation part def",
+    help: "設計迴圈的提案與方案分析：列出要比較的候選方案（variant）。選定哪一個寫成設計決策。", example: "回收方案：單段傘、雙段傘" },
+  { id: "Interface", zh: "介面", en: "Interface", pillar: "structure", prefix: "IF", pkg: "Structure", keyword: "interface", special: true,
+    help: "兩個次系統之間的連接，由系統的設計迴圈產出。在系統的右欄「介面」新增：選兩端、種類與關鍵數字。", example: "推進—結構 接頭" },
   { id: "MissionPhase", zh: "任務階段", en: "Mission Phase", pillar: "behavior", prefix: "PH", pkg: "Behavior", keyword: "action",
     help: "任務從開始到結束依序經過的階段。", example: "發射、動力飛行、滑行、回收" },
   { id: "Function", zh: "功能", en: "Function", pillar: "behavior", prefix: "FN", pkg: "Behavior", keyword: "action",
@@ -115,6 +121,7 @@ export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
   derive: { zh: "衍生自", help: "這條需求是從哪一條上層需求或目的推導出來的。" },
   refine: { zh: "細化", help: "這個量度或需求把哪一個上層項目說得更具體。" },
   trace: { zh: "追溯到", help: "一般性的關聯。連到利害關係人時，期望會寫成 stakeholder、使用案例會寫成 actor（SysML v2 內建的寫法）。" },
+  basis: { zh: "設計依據", help: "這條需求是根據上一層設計迴圈的哪個產出推出來的：介面、尺寸或質量邊界、預算配額、選定方案或設計決策。下一層需求要同時有「衍生自」與「設計依據」。" },
   satisfy: { zh: "滿足", help: "哪個系統或元件負責做到這條需求。" },
   verify: { zh: "驗證", help: "哪個驗證事件用來證明這條需求。" },
   allocate: { zh: "分配給", help: "這個功能由哪個次系統或元件執行。" },

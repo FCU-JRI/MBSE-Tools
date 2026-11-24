@@ -8,7 +8,7 @@
 //   「零件由哪個定義所定義」為實線、定義端空心三角形加兩點；起始為實心圓、完成為牛眼。
 import type { Analysis, Diagrams, Element } from "./api.ts";
 
-const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
+const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
 
 export const label = (e: Element) => (e.shortName ? `${e.shortName} ${e.name}` : e.name);
 
@@ -68,7 +68,7 @@ export const stereotype = (e: Element) => {
   const k = KEYWORD[e.kind] ?? e.kind.replace(/(Usage|Definition)$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() + (e.kind.endsWith("Definition") ? " def" : "");
   return `«${k}»`;
 };
-const EDGE_LABEL: Record<string, string> = { derive: "«#derivation»", refine: "«#refinement»", trace: "«#trace»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»", include: "«include»" };
+const EDGE_LABEL: Record<string, string> = { derive: "«#derivation»", refine: "«#refinement»", trace: "«#trace»", basis: "«#basis»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»", include: "«include»" };
 
 /** 依寬度折行：中日韓字算 2、其餘算 1。 */
 export function wrap(text: string, units: number, maxLines: number): string[] {
