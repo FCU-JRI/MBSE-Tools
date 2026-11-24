@@ -35,6 +35,9 @@ async function conn() {
   return connection;
 }
 
+/** 供 calc.ts 取值用：與 analyze 共用同一條解析器連線。 */
+export const parserConnection = conn;
+
 export async function shutdown(): Promise<void> {
   await connection?.close();
   connection = undefined;

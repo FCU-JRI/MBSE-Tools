@@ -10,7 +10,7 @@ export function mount(app: Express): void {
   // 各輸出回寫時嘗試的單位寫法；解析器接受哪一種就用哪一種，都不接受就不寫入
   const UNIT_FORMS: Record<string, string[]> = { m: ["[m]"], kg: ["[kg]"], s: ["[s]"], "m/s": ["['m/s']", "[m/s]"], "N*s": ["[N*s]", "['N⋅s']", "['N·s']"], "m/s^2": ["['m/s²']", "[m/s^2]", "['m/s^2']"], cal: [""], "": [""] };
   app.get("/api/projects/:id/sim", wrap(async (req, res) => res.json({ ...(await sim.readSim(pid(req))), available: await sim.available() })));
-  app.put("/api/projects/:id/sim/inputs", wrap(async (req, res) => res.json(await sim.saveInputs(pid(req), req.body?.inputs, author(req)))));
+  app.put("/api/projects/:id/sim/inputs", wrap(async (req, res) => res.json(await sim.saveInputs(pid(req), req.body?.inputs, author(req), req.body?.links))));
   app.post("/api/projects/:id/sim/thrust", wrap(async (req, res) => res.json({ curve: sim.parseThrust(String(req.body?.text ?? "")) })));
   app.post("/api/projects/:id/sim/import-ork", wrap(async (req, res) => res.json(await sim.importOrk(pid(req), Buffer.from(String(req.body?.base64 ?? ""), "base64"), author(req)))));
   app.get("/api/projects/:id/sim/export.ork", wrap(async (req, res) => {
@@ -26,6 +26,11 @@ export function mount(app: Express): void {
     const s = await sim.readSim(id);
     if (!s.result) throw new store.UserError("還沒有模擬結果。");
     const bindings: sim.Binding[] = Array.isArray(req.body?.bindings) ? req.body.bindings : [];
+    // 空的對應表＝取消所有對應：只清掉對應，模型維持現狀（ANA-04，#35）
+    if (bindings.length === 0) {
+      await sim.saveBindings(id, []);
+      return res.json({ saved: true, applied: [], cleared: true, ...(await view(id)) });
+    }
     let a = await store.analyzeProject(id);
     if (!a.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
     const contents = new Map<string, string>();
