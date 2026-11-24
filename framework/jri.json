@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "name": "JRI 系統工程框架",
+  "source": "JRI 建模路徑圖白板（Mars 定案，2026-11-24）；決定紀錄見 PR 說明",
+  "principles": [
+    { "id": "alternate", "zh": "需求與設計交替：每一層＝需求進來 → 設計迴圈 → 設計限制 → 推導下一層需求；下一層需求不得直接從上一層需求拆出" },
+    { "id": "holdPoint", "zh": "遇到設計就喊卡：該層迴圈未到「是否符合需求＝是」，不得推導下一層需求" },
+    { "id": "twoSources", "zh": "下一層需求有兩個來源：上一層需求（#derivation）＋上一層設計產出（#basis）" },
+    { "id": "escalate", "zh": "互卡往上交：介面、共用預算、整體性能、環境影響、時序的衝突由工具從 constraint 檢出，交總工程師裁決，結果留決策紀錄" },
+    { "id": "standardSource", "zh": "原始碼一律標準 SysML v2；自訂資訊只用標準 metadata" },
+    { "id": "frameworkAsData", "zh": "框架寫成資料：工具讀這份檔案執行卡點與檢查；改流程改這份檔案，不改程式" },
+    { "id": "filePerSubsystem", "zh": "每個次系統的模型放在自己的檔案" },
+    { "id": "passFail", "zh": "pass／fail 只由 constraint 與模擬決定" }
+  ],
+
+  "roles": [
+    { "id": "chiefEngineer", "zh": "總工程師", "defaultRank": "D-VII" },
+    { "id": "subsystemLead", "zh": "次系統負責人", "defaultRank": "O-V" },
+    { "id": "componentLead", "zh": "元件負責人", "defaultRank": "O-IV" },
+    { "id": "reviewer", "zh": "組長（PR 核准）", "defaultRank": "D-VII" },
+    { "id": "gateApprover", "zh": "節點核可者", "defaultRank": null, "note": "依 server/gates.ts 各節點的 approver" }
+  ],
+
+  "settings": [
+    { "id": "fmeaThreshold", "zh": "FMEA 門檻（S×O）", "type": "int", "default": 15, "note": "本層有 S×O 達到門檻且未緩解的風險，「是否被解決」就是否" },
+    { "id": "budgetMargin", "zh": "預算餘裕", "type": "percent", "default": null, "note": "每個專案自己設定；未設定時不檢查餘裕，只檢查加總不超過上限" },
+    { "id": "minAlternatives", "zh": "方案分析最少候選數", "type": "int", "default": 2 },
+    { "id": "tradeWeights", "zh": "方案比較要不要權重", "type": "bool", "default": false, "note": "false＝可給可不給" },
+    { "id": "owners", "zh": "各步負責人", "type": "roleMap", "default": "見各步 owner", "note": "每個專案可改" }
+  ],
+
+  "elementTypes": [
+    { "id": "Doc", "zh": "來源文件", "status": "record", "note": "來源文件登記，存在 pm.json，不是模型元素" },
+    { "id": "Stakeholder", "status": "existing" },
+    { "id": "Expectation", "status": "existing" },
+    { "id": "UseCase", "status": "existing" },
+    { "id": "Need", "status": "existing" },
+    { "id": "Goal", "status": "existing" },
+    { "id": "Objective", "status": "existing" },
+    { "id": "MOE", "status": "existing", "planned": "加 attribute level : SuccessLevel（最低、完全、額外）" },
+    { "id": "MOP", "status": "existing" },
+    { "id": "SystemRequirement", "status": "existing" },
+    { "id": "SubsystemRequirement", "status": "existing" },
+    { "id": "ComponentRequirement", "status": "existing" },
+    { "id": "System", "status": "existing" },
+    { "id": "Subsystem", "status": "existing" },
+    { "id": "Component", "status": "existing" },
+    { "id": "ExternalEntity", "status": "existing" },
+    { "id": "MissionPhase", "status": "existing" },
+    { "id": "Function", "status": "existing" },
+    { "id": "Mode", "status": "existing" },
+    { "id": "VerificationEvent", "status": "existing" },
+    { "id": "ValidationEvent", "status": "existing" },
+    { "id": "Risk", "status": "existing", "planned": "加 attribute kind（技術、時程、預算、場地、人員）供風險登錄" },
+    { "id": "SafetyFactor", "status": "existing" },
+    { "id": "SOP", "status": "existing" },
+    { "id": "RosterEntry", "status": "existing" },
+    { "id": "Anomaly", "status": "existing" },
+    { "id": "QCRecord", "status": "existing" },
+    { "id": "MissionRequirement", "zh": "任務需求", "status": "planned", "sysml": "requirement def MissionRequirement" },
+    { "id": "DesignAlternative", "zh": "設計方案", "status": "planned", "sysml": "variation part def ＋ variant（SysML v2 標準）" },
+    { "id": "TradeStudy", "zh": "方案比較", "status": "planned", "sysml": "標準庫 TradeStudies：TradeStudy、EvaluationFunction、TradeStudyObjective" },
+    { "id": "Interface", "zh": "介面", "status": "planned", "sysml": "port def（帶物理量）＋ interface def；兩端數字用 assert constraint" },
+    { "id": "BudgetAllocation", "zh": "預算配額與邊界", "status": "planned", "sysml": "上一層對下一層的 require constraint；加總用 assert constraint" },
+    { "id": "Calculation", "zh": "計算公式", "status": "planned", "sysml": "calc def、constraint def（共用計算庫）" },
+    { "id": "DesignDecision", "zh": "決策紀錄", "status": "planned", "sysml": "item def DesignDecision（理由、裁決者、日期，連到選定 variant 與受影響需求）" }
+  ],
+
+  "metadata": [
+    { "id": "layer", "zh": "層級", "values": ["mission", "system", "subsystem", "component"], "note": "推不出層級時才手填" },
+    { "id": "cad", "zh": "CAD 連結", "fields": ["url", "version", "tool"] },
+    { "id": "basis", "zh": "設計產出來源", "note": "下一層需求指向上一層的設計產出" },
+    { "id": "interfaceStatus", "zh": "介面狀態", "fields": ["maturity", "agreedBy"], "maturity": ["exists", "tentative", "frozen"] }
+  ],
+
+  "designLoop": {
+    "id": "designLoop",
+    "zh": "設計迴圈",
+    "steps": [
+      { "id": "proposal", "zh": "設計提案", "produces": ["DesignAlternative"], "where": "model", "owner": "layerOwner",
+        "done": { "check": "hasAlternative", "zh": "至少一個提案，且標出它要滿足哪些需求" } },
+      { "id": "tradeStudy", "zh": "方案分析", "produces": ["TradeStudy", "DesignDecision"], "where": "analysis", "owner": "layerOwner",
+        "done": { "check": "tradeSelected", "zh": "至少 minAlternatives 個候選；每個準則連回需求；有選定與否決理由" } },
+      { "id": "fmea", "zh": "本層 FMEA", "produces": ["Risk"], "where": "tables", "owner": "layerOwner",
+        "done": { "check": "fmeaCoversLayer", "zh": "本層每個功能／零件都有失效模式列" } },
+      { "id": "resolved", "zh": "是否被解決", "decision": true, "where": "auto", "owner": "layerOwner",
+        "done": { "check": "noOpenRiskAboveThreshold", "zh": "本層沒有 S×O ≥ fmeaThreshold 且未緩解的風險" }, "onNo": "tradeStudy" },
+      { "id": "cad", "zh": "CAD 建模", "produces": [], "metadata": ["cad"], "where": "model", "owner": "layerOwner",
+        "done": { "check": "hasCadLink", "zh": "有 CAD 連結與版本" } },
+      { "id": "calc", "zh": "計算與模擬", "produces": ["Calculation"], "where": "analysis", "owner": "layerOwner",
+        "done": { "check": "requirementsHaveValues", "zh": "本層需求的數值條件都有算出值" } },
+      { "id": "meets", "zh": "是否符合需求", "decision": true, "where": "auto", "owner": "reviewer",
+        "done": { "check": "constraintsPassAndApproved", "zh": "本層需求的 constraint 與模擬全部 PASS，且組長在 PR 核准" }, "onNo": "tradeStudy" },
+      { "id": "outputs", "zh": "產出設計限制", "holdPoint": true, "produces": ["Interface", "BudgetAllocation", "DesignDecision"], "where": "model", "owner": "chiefEngineer",
+        "done": { "check": "meetsIsYes", "zh": "「是否符合需求」為是才解鎖；下一層需求只能從這裡推導" } }
+    ]
+  },
+
+  "layers": [
+    { "id": "missionDefinition", "order": 1, "zh": "任務定義", "kind": "chain", "subject": "mission",
+      "steps": [
+        { "id": "sources", "zh": "來源文件", "produces": ["Doc"], "where": "tables", "owner": "chiefEngineer", "done": { "check": "hasDoc", "zh": "有登記" } },
+        { "id": "stakeholders", "zh": "利害關係人與期望", "produces": ["Stakeholder", "Expectation"], "where": "model", "owner": "chiefEngineer", "done": { "check": "expectationTracesStakeholder", "zh": "每項期望都追溯到提出者" } },
+        { "id": "usecases", "zh": "使用情境", "produces": ["UseCase"], "where": "model", "owner": "chiefEngineer", "done": { "check": "stakeholderInUseCase", "zh": "每個利害關係人至少參與一個情境" } },
+        { "id": "needs", "zh": "需要", "produces": ["Need"], "where": "model", "owner": "chiefEngineer", "done": { "check": "atLeastOne:Need", "zh": "至少一個需要" } },
+        { "id": "goals", "zh": "目標與目的", "produces": ["Goal", "Objective"], "where": "model", "owner": "chiefEngineer", "done": { "check": "objectiveMeasurable", "zh": "每個目的都可量測" } },
+        { "id": "proposalGate", "zh": "計畫提案", "gate": "proposal", "onNo": "goals" },
+        { "id": "moe", "zh": "成功判準（MOE）", "produces": ["MOE"], "where": "model", "owner": "chiefEngineer", "done": { "check": "moeThreeLevels", "zh": "每個目的有 MOE 與三級數字" } },
+        { "id": "missionReqs", "zh": "任務需求", "produces": ["MissionRequirement"], "where": "model", "owner": "chiefEngineer",
+          "derivedFrom": ["MOE", "Doc"], "done": { "check": "tracedAndVerifiable", "zh": "每條都追溯到 MOE 或來源文件，且有驗證方法" } }
+      ] },
+
+    { "id": "missionProfile", "order": 2, "zh": "任務剖面", "kind": "loop", "subject": "mission",
+      "inputs": ["MissionRequirement"],
+      "loopSteps": ["proposal", "tradeStudy", "fmea", "resolved", "outputs"],
+      "loopProduces": ["MissionPhase", "Mode", "Function"],
+      "loopOwner": "chiefEngineer",
+      "outputsZh": "任務剖面、階段、模式的圖；功能清單",
+      "gate": null },
+
+    { "id": "system", "order": 3, "zh": "系統層級", "kind": "loop", "subject": "System", "forEach": true,
+      "before": [
+        { "id": "functions", "zh": "功能拆解", "produces": ["Function"], "where": "model", "owner": "chiefEngineer", "done": { "check": "phaseHasFunction", "zh": "每個任務階段的功能都列出" } },
+        { "id": "allocateSystems", "zh": "分配到各系統", "produces": ["System", "ExternalEntity"], "where": "model", "owner": "chiefEngineer", "done": { "check": "functionAllocated", "zh": "每個功能都分配到某個系統；外部提供的系統只管介面" } },
+        { "id": "systemReqs", "zh": "系統需求", "produces": ["SystemRequirement", "MOP"], "where": "model", "owner": "chiefEngineer",
+          "derivedFrom": ["MissionRequirement"], "basisFrom": "missionProfile", "done": { "check": "tracedAndVerifiable", "zh": "每條追溯到任務需求，且有驗證方法" } }
+      ],
+      "loopSteps": ["proposal", "tradeStudy", "fmea", "resolved", "cad", "calc", "meets", "outputs"],
+      "loopOwner": "chiefEngineer",
+      "outputsZh": "系統簡圖、次系統架構、介面、尺寸限制邊界、各次系統的預算配額",
+      "gate": "mdr", "onGateFail": "proposal" },
+
+    { "id": "subsystem", "order": 4, "zh": "次系統層級", "kind": "loop", "subject": "Subsystem", "forEach": true,
+      "before": [
+        { "id": "allocateSubsystems", "zh": "分配到各次系統", "produces": ["Subsystem"], "where": "model", "owner": "chiefEngineer", "done": { "check": "functionAllocated", "zh": "每個系統功能都分配到次系統" } },
+        { "id": "subsystemReqs", "zh": "次系統需求", "produces": ["SubsystemRequirement", "MOP"], "where": "model", "owner": "subsystemLead",
+          "derivedFrom": ["SystemRequirement"], "basisFrom": "system", "done": { "check": "twoSources", "zh": "每條同時追溯到系統需求與一個系統設計產出，且有驗證方法" } }
+      ],
+      "loopSteps": ["proposal", "tradeStudy", "fmea", "resolved", "cad", "calc", "meets", "outputs"],
+      "loopOwner": "subsystemLead",
+      "extraMeets": { "check": "noInterfaceConflict", "zh": "本次系統所有介面無衝突" },
+      "outputsZh": "細化到元件層級的架構、元件需求、介面細化（兩端同意）",
+      "after": [
+        { "id": "componentReqs", "zh": "元件需求", "produces": ["Component", "ComponentRequirement", "MOP"], "where": "model", "owner": "subsystemLead",
+          "derivedFrom": ["SubsystemRequirement"], "basisFrom": "subsystem", "done": { "check": "twoSources", "zh": "每條同時追溯到次系統需求與一個次系統設計產出" } },
+        { "id": "interfaceAgreed", "zh": "介面細化（兩端同意）", "produces": ["Interface"], "metadata": ["interfaceStatus"], "where": "model", "owner": "chiefEngineer", "done": { "check": "interfacesAgreed", "zh": "每個介面兩端都同意" } }
+      ],
+      "gate": "pdr", "onGateFail": "proposal" },
+
+    { "id": "detailDesign", "order": 5, "zh": "細部設計", "kind": "loop", "subject": "Component", "forEach": true,
+      "inputs": ["ComponentRequirement"],
+      "loopSteps": ["proposal", "tradeStudy", "fmea", "resolved", "cad", "calc", "meets", "outputs"],
+      "loopOwner": "componentLead",
+      "after": [
+        { "id": "manufacturingPlan", "zh": "製造設計與規劃", "produces": [], "where": "tables", "owner": "componentLead", "done": { "check": "componentHasMakeOrBuy", "zh": "每個元件都有製造或採購方式" } }
+      ],
+      "outputsZh": "製造設計與規劃；介面凍結",
+      "gate": "cdr", "onGateFail": "proposal" },
+
+    { "id": "buildTest", "order": 6, "zh": "製造、整合與測試", "kind": "chain", "subject": "Subsystem",
+      "steps": [
+        { "id": "fabricate", "zh": "採購／加工", "produces": ["QCRecord"], "where": "tables", "owner": "componentLead", "done": { "check": "componentHasQC", "zh": "每個元件都有 QC 紀錄" } },
+        { "id": "integrate", "zh": "組裝整合／介面檢查", "produces": [], "where": "tables", "owner": "subsystemLead", "done": { "check": "interfacesChecked", "zh": "每個介面都檢查過" } },
+        { "id": "verificationPlan", "zh": "驗證實驗或測試設計與規劃", "produces": ["VerificationEvent"], "where": "tables", "owner": "subsystemLead", "done": { "check": "requirementHasEvent", "zh": "每條需求都有驗證事件（以次系統為單位）" } },
+        { "id": "trrGate", "zh": "TRR＋驗證是否達標", "gate": "trr", "decision": true, "onNo": "anomaly", "onNoZh": "異常事故或檢討會議 → 跳回任何一個環節修改（走變更控制）" }
+      ] },
+
+    { "id": "launch", "order": 7, "zh": "發射與收束", "kind": "chain", "subject": "mission",
+      "steps": [
+        { "id": "prelaunch", "zh": "發射前準備", "produces": ["SOP", "RosterEntry"], "where": "tables", "owner": "chiefEngineer",
+          "done": { "check": "prelaunchChecklist", "zh": "場地許可、天氣 Go／No-Go、落點散布與安全區、SOP 與檢查表定版、名冊與職責、全系統彩排、倒數" } },
+        { "id": "frrGate", "zh": "FRR", "gate": "frr" },
+        { "id": "execute", "zh": "任務執行、回收與資料下載", "produces": [], "where": "manage", "owner": "chiefEngineer" },
+        { "id": "moeCheck", "zh": "對照成功判準（MOE 三級）", "produces": [], "where": "manage", "owner": "chiefEngineer", "done": { "check": "moeEvaluated", "zh": "每個 MOE 都標出達成哪一級" } },
+        { "id": "anomalyGate", "zh": "異常審查", "gate": "anomaly", "produces": ["Anomaly"] },
+        { "id": "closeoutGate", "zh": "計畫收束（白皮書）", "gate": "closeout" }
+      ] }
+  ],
+
+  "crossCutting": [
+    { "id": "verificationWithReq", "zh": "驗證方法隨需求寫", "check": "requirementHasMethod", "from": "mdr" },
+    { "id": "riskRegister", "zh": "風險登錄（非技術風險，可能性 × 後果 1～5）", "produces": ["Risk"] },
+    { "id": "tpm", "zh": "TPM 追蹤：每個節點更新估計值", "check": "tpmUpdatedPerGate" },
+    { "id": "changeControl", "zh": "變更控制：節點核可後改需求或介面要走審查，介面兩端都同意", "mechanism": "pr" },
+    { "id": "conflicts", "zh": "互卡往上交", "detect": ["interfaceMismatch", "budgetOverrun"], "resolver": "chiefEngineer", "record": "DesignDecision",
+      "blocks": "meets", "note": "衝突不存成元素，由 constraint 算出" }
+  ],
+
+  "open": [
+    "第 8 步「設計限制」先用四種：介面、尺寸與質量邊界、預算配額、選定方案（Mars 尚未在框架草稿確認）",
+    "任務剖面（第 2 層）沒有自己的審查節點",
+    "check 名稱是工具要實作的檢查；這份檔案只定義，尚未接上工具"
+  ]
+}
