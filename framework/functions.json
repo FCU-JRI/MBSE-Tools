@@ -302,11 +302,11 @@
     "model",
     "git"
    ],
-   "status": "partial",
+   "status": "ok",
    "sources": "既有",
    "framework": "layers",
    "verify": "三種範本可建",
-   "note": "流程範本的順序鎖依舊 17 步，不是框架（見 PROC-06）"
+   "note": "WP3 #46：流程範本預設強制卡點"
   },
   {
    "id": "PRJ-03",
@@ -358,11 +358,11 @@
    "writes": [
     "project"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：預算餘裕不釘死、負責人每專案可改",
    "framework": "settings",
    "verify": "每項可設、預設值來自框架檔",
-   "note": ""
+   "note": "WP3 #46：專案設定加門檻、餘裕、候選數、負責人、是否強制卡點"
   },
   {
    "id": "PRJ-06",
@@ -392,11 +392,11 @@
     "framework"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "D：框架寫成資料",
    "framework": "全部",
    "verify": "npm test 檢查通過",
-   "note": "PR #39，尚未接上任何畫面"
+   "note": "WP3 #46：讀框架檔並接上"
   },
   {
    "id": "FW-02",
@@ -410,11 +410,11 @@
     "git"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：遇到設計就喊卡",
    "framework": "designLoop.outputs",
    "verify": "系統迴圈未過時，新增次系統需求被擋並說明原因",
-   "note": ""
+   "note": "WP3 #46：卡點擋下一層需求（流程範本預設強制，範本／空白可在設定打開）"
   },
   {
    "id": "FW-03",
@@ -428,11 +428,11 @@
     "git"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "框架 F1",
    "framework": "designLoop",
    "verify": "每個系統、次系統、元件顯示目前步驟",
-   "note": "由證據算出，不存"
+   "note": "WP3 #46：迴圈進度由證據算出"
   },
   {
    "id": "FW-04",
@@ -445,11 +445,11 @@
     "framework"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：下一層需求有兩個來源",
    "framework": "principles.twoSources",
    "verify": "缺 #basis 的需求標「缺設計產出來源」",
-   "note": ""
+   "note": "WP3 #46：缺 #basis 標「兩個來源不齊」"
   },
   {
    "id": "FW-05",
@@ -461,11 +461,11 @@
     "model"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：互卡往上交",
    "framework": "crossCutting.conflicts",
    "verify": "故意改錯一端數字，出現一筆衝突",
-   "note": "2026-11-24 實測：validateInstance 能判出介面兩端不合與預算超支"
+   "note": "WP4 #44：validateInstance 判介面不合與預算超過；整合後實測 100 vs 98 mm 出現衝突"
   },
   {
    "id": "FW-06",
@@ -480,11 +480,11 @@
     "model",
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：裁決者＝總工程師",
    "framework": "crossCutting.conflicts",
    "verify": "裁決後衝突消失、留 DesignDecision",
-   "note": ""
+   "note": "WP4 #44：總工程師以上裁決，留 DesignDecision 並 #trace 到衝突與需求；整合後實點通過（DEC-001）"
   },
   {
    "id": "FW-07",
@@ -497,11 +497,11 @@
     "project"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：6 個預設",
    "framework": "designLoop.resolved",
    "verify": "本層有超門檻未緩解風險時判否",
-   "note": ""
+   "note": "WP3 #46：是否被解決依專案門檻"
   },
   {
    "id": "FW-08",
@@ -519,7 +519,7 @@
    "sources": "既有判定＋D",
    "framework": "designLoop.meets",
    "verify": "全 PASS 且 PR 核准才判是",
-   "note": "constraint 判定已有；尚未綁 PR 核准與層"
+   "note": "WP3 #46：constraint 判定已接；「PR 核准」暫用「無未合併分支」代替（待 Mars 決定）"
   },
   {
    "id": "FW-09",
@@ -532,11 +532,11 @@
     "project"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "白板 貫穿全程",
    "framework": "crossCutting.changeControl",
    "verify": "核可後改需求，送審時標出",
-   "note": "目前所有修改一樣走分支，沒有特別標出"
+   "note": "WP4 #44：節點核可後修改需求或介面，送審與差異標「核可後變更」"
   },
   {
    "id": "FW-10",
@@ -584,11 +584,11 @@
     "model"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "SPEC 首頁",
    "framework": "",
    "verify": "顯示算出值、門檻、餘裕",
-   "note": "沒有門檻值，只顯示 PASS/FAIL 件數（#32）"
+   "note": "WP5a #45：從數值條件取門檻顯示餘裕；只算單純條件"
   },
   {
    "id": "HOME-03",
@@ -635,11 +635,11 @@
     "model"
    ],
    "writes": [],
-   "status": "wrong",
+   "status": "ok",
    "sources": "SPEC 流程；PR #36",
    "framework": "layers",
    "verify": "—",
-   "note": "步驟是「系統需求 → 結構分解 → 功能分配 → 次系統需求」，中間沒有設計迴圈，違反框架；要改成照框架檔的 7 層"
+   "note": "WP3 #46：流程頁改成照框架檔 7 層"
   },
   {
    "id": "PROC-02",
@@ -651,11 +651,11 @@
     "model"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "PR #36",
    "framework": "layers",
    "verify": "—",
-   "note": "形式可用，內容要依框架改寫"
+   "note": "WP3 #46：每步要做什麼／怎麼做／還缺"
   },
   {
    "id": "PROC-03",
@@ -681,11 +681,11 @@
     "model"
    ],
    "writes": [],
-   "status": "ok",
+   "status": "partial",
    "sources": "TR-09",
    "framework": "",
    "verify": "複製出提示",
-   "note": ""
+   "note": "WP3 #46 換成框架版時拿掉了，已請 WP3 補回"
   },
   {
    "id": "PROC-05",
@@ -716,11 +716,11 @@
     "model"
    ],
    "writes": [],
-   "status": "wrong",
+   "status": "partial",
    "sources": "既有",
    "framework": "designLoop.outputs",
    "verify": "—",
-   "note": "鎖的是 17 步順序，不是框架卡點；要由 FW-02 取代"
+   "note": "WP3 #46：框架卡點已加；舊 17 步順序鎖因既有測試依賴仍保留（待 Mars 決定）"
   },
   {
    "id": "PROC-07",
@@ -1121,7 +1121,7 @@
    "sources": "S1；PR #35",
    "framework": "",
    "verify": "全部關係種類都能改",
-   "note": "分配、連接、狀態轉換只靠共用邏輯，沒在畫面逐一實測"
+   "note": "WP5a #45：實測後回報 Inspector 關係列標籤與連接在圖上選線改的問題，屬共用檔，未修"
   },
   {
    "id": "MOD-21",
@@ -1352,11 +1352,11 @@
     "model"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：全專案一張但要分層",
    "framework": "designLoop.fmea",
    "verify": "依層篩選",
-   "note": ""
+   "note": "WP5a #45：FMEA 加層級欄與篩選"
   },
   {
    "id": "TAB-05",
@@ -1466,11 +1466,11 @@
     "pm"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "TR-06",
    "framework": "",
    "verify": "整本下載",
-   "note": "不含公式清單與驗證矩陣工作表（#33 待決）"
+   "note": "WP5a #45：Excel 加公式清單與驗證矩陣工作表"
   },
   {
    "id": "TAB-12",
@@ -1482,11 +1482,11 @@
     "model"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "partial",
    "sources": "框架 F1 第 2 步；METHOD 圖 9",
    "framework": "designLoop.tradeStudy",
    "verify": "準則、權重、分數、選定與否決",
-   "note": "依賴 MOD-23"
+   "note": "WP5a #45：唯讀方案比較表；權重與分數暫用屬性約定、沒有表單（待 Mars 決定資料模型）"
   },
   {
    "id": "TAB-13",
@@ -1517,11 +1517,11 @@
     "model"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：互卡往上交",
    "framework": "crossCutting.conflicts",
    "verify": "列出未裁決的衝突",
-   "note": "依賴 FW-05"
+   "note": "WP4 #44：表格頁衝突表（未裁決／已裁決）"
   },
   {
    "id": "TAB-15",
@@ -1533,11 +1533,11 @@
     "model"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "METHOD 第 4 節；TR-06 介面圖",
    "framework": "designLoop.outputs",
    "verify": "對角線次系統、格子是介面",
-   "note": "依賴 MOD-24"
+   "note": "WP5a #45：N² 矩陣；介面無方向，上下兩側相同"
   },
   {
    "id": "ANA-01",
@@ -1552,11 +1552,11 @@
     "sim",
     "git"
    ],
-   "status": "partial",
+   "status": "ok",
    "sources": "既有",
    "framework": "designLoop.calc",
    "verify": "可改可存",
-   "note": "輸入存在 sim.json，和模型是兩份，違反 TR-01「模型為唯一來源」（見 ANA-10）"
+   "note": "WP2 #43：輸入以模型為準"
   },
   {
    "id": "ANA-02",
@@ -1609,11 +1609,11 @@
     "model",
     "git"
    ],
-   "status": "partial",
+   "status": "ok",
    "sources": "TR-04",
    "framework": "designLoop.calc",
    "verify": "對應可設、可取消",
-   "note": "最後一個對應無法取消（#35）"
+   "note": "WP2 #43：最後一個對應也能取消"
   },
   {
    "id": "ANA-05",
@@ -1644,11 +1644,11 @@
     "sim"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "SPEC 分析 R5",
    "framework": "designLoop.meets",
    "verify": "每條有判定的需求一列",
-   "note": ""
+   "note": "WP2 #43：分析頁判定總覽"
   },
   {
    "id": "ANA-07",
@@ -1696,11 +1696,11 @@
     "library"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "框架 elementTypes.Calculation",
    "framework": "designLoop.calc",
    "verify": "每條公式有合成數值驗算測試",
-   "note": "2026-11-24 實測：解析器 instantiate／calc 會算值並換單位（600 cm、50 m/s² → 24.49 m/s），不用自己寫；要接上並寫驗算測試"
+   "note": "WP2 #43：server/calc.ts 用解析器 instantiate 求值，含合成驗算測試"
   },
   {
    "id": "ANA-10",
@@ -1714,11 +1714,11 @@
    "writes": [
     "sim"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "TR-01",
    "framework": "designLoop.calc",
    "verify": "改模型屬性後模擬輸入跟著變",
-   "note": ""
+   "note": "WP2 #43：模擬輸入改從模型屬性讀，sim.json 只留模型沒有的設定"
   },
   {
    "id": "ANA-11",
@@ -1730,11 +1730,11 @@
     "model"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "TR-04",
    "framework": "designLoop.calc",
    "verify": "子項質量加總、超過上限判 FAIL",
-   "note": "可用 MOD-25 的配額＋ANA-09"
+   "note": "WP2 #43：零件有 massLimit／massBudget 時加總比較，超過判 FAIL"
   },
   {
    "id": "ANA-12",
@@ -1799,11 +1799,11 @@
     "project"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "SPEC 專案管理；server/gates.ts",
    "framework": "layers.gate",
    "verify": "節點檢查來自框架",
-   "note": "檢查項寫死在 gates.ts，不是從框架檔來；也沒有檢查各層迴圈是否走完"
+   "note": "WP3 #46：節點卡加框架檢查（另列、不計入完成數）"
   },
   {
    "id": "MGT-03",
@@ -2142,9 +2142,7 @@
     "MGT-02",
     "MGT-05"
    ],
-   "gaps": [
-    "MGT-02"
-   ]
+   "gaps": []
   },
   {
    "id": "FLOW-2",
@@ -2165,12 +2163,7 @@
    ],
    "gaps": [
     "TAB-12",
-    "TAB-04",
-    "FW-07",
-    "ANA-09",
-    "FW-08",
-    "FW-02",
-    "FW-04"
+    "FW-08"
    ]
   },
   {
@@ -2201,13 +2194,7 @@
     "MOD-29",
     "FW-09"
    ],
-   "gaps": [
-    "ANA-09",
-    "FW-05",
-    "TAB-14",
-    "FW-06",
-    "FW-09"
-   ]
+   "gaps": []
   },
   {
    "id": "FLOW-5",
@@ -2222,12 +2209,7 @@
     "MGT-02"
    ],
    "gaps": [
-    "ANA-10",
-    "ANA-01",
-    "ANA-04",
-    "FW-08",
-    "HOME-02",
-    "MGT-02"
+    "FW-08"
    ]
   }
  ]
