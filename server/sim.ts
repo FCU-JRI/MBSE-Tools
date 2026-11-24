@@ -6,7 +6,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
-import { commit, dirOf, git, HOME_DIR, readProject, UserError } from "./projects.ts";
+import { commit, dirOf, git, HOME_DIR, readProject, sources, UserError } from "./projects.ts";
+import { instanceValues } from "./calc.ts";
+import type { Val } from "./calc.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "sim", "run_sim.py");
@@ -24,7 +26,21 @@ export interface SimInputs {
 export interface SimOutput { key: string; zh: string; value: number; unit: string }
 export interface SimResult { at: string; by: string; commit: string; inputsHash: string; engine: string; outputs: SimOutput[]; trajectory: [number, number][]; warnings: string[] }
 export interface Binding { output: string; element: string; attribute: string }
-export interface SimFile { inputs: SimInputs; result: SimResult | null; bindings: Binding[] }
+/** 模擬輸入對應到模型屬性：鍵是「群組.欄位」，例如 rocket.mass_kg。有對應的欄位以模型為準（TR-01）。 */
+export interface InputLink { element: string; attribute: string }
+export interface SimFile {
+  /** 已套用模型屬性後的輸入 */
+  inputs: SimInputs;
+  result: SimResult | null;
+  bindings: Binding[];
+  /** 寫回對應是否被設定過（設定過就不再自動帶預設屬性，這樣最後一個對應取消後不會又冒出來） */
+  bound: boolean;
+  links: Record<string, InputLink>;
+  /** 對應失敗的欄位（找不到屬性、單位不合）；這些欄位退回 sim.json 的值 */
+  linkIssues: { path: string; reason: string }[];
+}
+/** sim.json 實際存的內容：只有模型沒有的設定，以及對應表 */
+interface StoredSim { inputs?: Partial<Record<string, any>>; result?: SimResult | null; bindings?: Binding[]; links?: Record<string, InputLink> }
 
 export const DEFAULT_INPUTS: SimInputs = {
   rocket: { radius_m: 0.065, mass_kg: 14, length_m: 2.6, cm_from_nose_m: 1.45, drag_cd: 0.5 },
@@ -38,14 +54,70 @@ export const DEFAULT_INPUTS: SimInputs = {
 const NOSE_KINDS = ["vonKarman", "ogive", "conical", "lvhaack", "tangent", "parabolic"];
 const file = (id: string) => path.join(dirOf(id), "sim.json");
 
-export async function readSim(id: string): Promise<SimFile> {
-  await readProject(id);
-  try {
-    const s = JSON.parse(await fs.readFile(file(id), "utf8")) as Partial<SimFile>;
-    return { inputs: s.inputs ?? DEFAULT_INPUTS, result: s.result ?? null, bindings: s.bindings ?? [] };
-  } catch { return { inputs: DEFAULT_INPUTS, result: null, bindings: [] }; }
+const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
+/** 欄位名稱的尾碼決定可對應的單位；沒有尾碼的數字欄位（片數、Cd）當純數字。角度、經緯度不開放對應。 */
+const LINK_DIM: Record<string, string> = { _m: JSON.stringify([["metre", 1]]), _kg: JSON.stringify([["gram", 1]]), _s: JSON.stringify([["second", 1]]), _m2: JSON.stringify([["metre", 2]]) };
+const PLAIN_LINKABLE = new Set(["fins.n", "rocket.drag_cd"]);
+export function linkableFields(): string[] {
+  const out: string[] = [];
+  for (const [g, o] of Object.entries(DEFAULT_INPUTS)) for (const k of Object.keys(o)) {
+    const suf = Object.keys(LINK_DIM).find((x) => k.endsWith(x));
+    if (suf || PLAIN_LINKABLE.has(`${g}.${k}`)) out.push(`${g}.${k}`);
+  }
+  return out;
 }
-const writeSim = (id: string, s: SimFile) => fs.writeFile(file(id), JSON.stringify(s, null, 1) + "\n", "utf8");
+function convert(path: string, v: Val | undefined): number {
+  if (!v) throw new Error("模型裡沒有這個屬性的值");
+  const k = path.split(".")[1];
+  const suf = Object.keys(LINK_DIM).find((x) => k.endsWith(x));
+  if (!suf) { if ("value" in v && typeof v.value === "number") return v.value; throw new Error("不是數字"); }
+  if (!("dim" in v) || v.dim !== LINK_DIM[suf]) throw new Error(`單位量綱不符（需要 ${suf.slice(1)}）`);
+  return suf === "_kg" ? v.base / 1000 : v.base;
+}
+/** 依對應表從模型取值。回傳 { 路徑: 值 } 與失敗清單。 */
+async function resolveLinks(id: string, links: Record<string, InputLink>): Promise<{ values: Record<string, number>; issues: { path: string; reason: string }[] }> {
+  const values: Record<string, number> = {}, issues: { path: string; reason: string }[] = [];
+  const entries = Object.entries(links);
+  if (!entries.length) return { values, issues };
+  const src = await sources(id);
+  const cache = new Map<string, Record<string, Val> | string>();
+  for (const [path, l] of entries) {
+    if (!cache.has(l.element)) cache.set(l.element, await instanceValues(src, l.element).catch((e: Error) => e.message));
+    const got = cache.get(l.element)!;
+    if (typeof got === "string") { issues.push({ path, reason: got }); continue; }
+    try { values[path] = convert(path, got[l.attribute]); } catch (e) { issues.push({ path, reason: `${l.element}.${l.attribute}：${(e as Error).message}` }); }
+  }
+  return { values, issues };
+}
+const setPath = (inp: any, path: string, v: unknown) => { const [g, k] = path.split("."); inp[g][k] = v; };
+const delPath = (inp: any, path: string) => { const [g, k] = path.split("."); delete inp[g]?.[k]; };
+
+async function readStored(id: string): Promise<StoredSim> {
+  await readProject(id);
+  try { return JSON.parse(await fs.readFile(file(id), "utf8")) as StoredSim; } catch { return {}; }
+}
+/** 讀取：預設值 ← sim.json 的值 ← 模型屬性（有對應的欄位以模型為準）。 */
+export async function readSim(id: string): Promise<SimFile> {
+  const s = await readStored(id);
+  const inputs: any = clone(DEFAULT_INPUTS);
+  for (const [g, o] of Object.entries(s.inputs ?? {})) if (inputs[g] && o && typeof o === "object") Object.assign(inputs[g], o);
+  const links = s.links ?? {};
+  const { values, issues } = await resolveLinks(id, links);
+  for (const [path, v] of Object.entries(values)) setPath(inputs, path, v);
+  return { inputs, result: s.result ?? null, bindings: s.bindings ?? [], bound: Array.isArray(s.bindings), links, linkIssues: issues };
+}
+/** 只存模型沒有的設定：有對應且解析成功的欄位不存。 */
+async function writeSim(id: string, s: { inputs: SimInputs; result: SimResult | null; bindings?: Binding[]; links: Record<string, InputLink> }, linked: string[]) {
+  const inputs: any = clone(s.inputs);
+  for (const p of linked) delPath(inputs, p);
+  const out: StoredSim = { inputs, result: s.result, ...(s.bindings ? { bindings: s.bindings } : {}), links: s.links };
+  await fs.writeFile(file(id), JSON.stringify(out, null, 1) + "\n", "utf8");
+}
+/** 寫回目前狀態（links 內且已成功解析的欄位不存值）。 */
+async function persist(id: string, s: SimFile) {
+  const failed = new Set(s.linkIssues.map((x) => x.path));
+  await writeSim(id, { ...s, bindings: s.bound ? s.bindings : undefined }, Object.keys(s.links).filter((p) => !failed.has(p)));
+}
 
 function num(v: unknown, name: string, min: number, max: number): number {
   const n = Number(v);
@@ -77,10 +149,29 @@ export function cleanInputs(b: any): SimInputs {
   return out;
 }
 
-export async function saveInputs(id: string, body: unknown, author: string): Promise<SimFile> {
+/** 整理對應表：欄位要是可對應的欄位，元素與屬性名稱要合法。 */
+export function cleanLinks(raw: unknown): Record<string, InputLink> {
+  const out: Record<string, InputLink> = {};
+  if (raw == null) return out;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new UserError("對應表格式不對。");
+  const ok = new Set(linkableFields());
+  for (const [path, l] of Object.entries(raw as Record<string, any>)) {
+    if (!ok.has(path)) throw new UserError(`「${path}」不能對應到模型屬性。`);
+    if (!l || typeof l.element !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(l.attribute))) throw new UserError(`「${path}」的對應不完整。`);
+    out[path] = { element: l.element, attribute: l.attribute };
+  }
+  return out;
+}
+
+export async function saveInputs(id: string, body: unknown, author: string, links?: unknown): Promise<SimFile> {
   const s = await readSim(id);
+  if (links !== undefined) s.links = cleanLinks(links);
   s.inputs = cleanInputs(body);
-  await writeSim(id, s);
+  // 重新解析：有對應的欄位以模型為準，畫面與後續執行都用模型的值
+  const r = await resolveLinks(id, s.links);
+  for (const [p, v] of Object.entries(r.values)) setPath(s.inputs, p, v);
+  s.linkIssues = r.issues;
+  await persist(id, s);
   await commit(dirOf(id), author, "更新模擬參數");
   return s;
 }
@@ -180,7 +271,7 @@ export async function importOrk(id: string, buf: Buffer, author: string): Promis
   skipped.push("質量與質心（OpenRocket 檔案不直接記錄，請依實測填入）", "引擎與推力曲線");
   if (inp.rocket.cm_from_nose_m >= inp.rocket.length_m) inp.rocket.cm_from_nose_m = Number((inp.rocket.length_m * 0.55).toFixed(3));
   s.inputs = cleanInputs(inp);
-  await writeSim(id, s);
+  await persist(id, s);
   await commit(dirOf(id), author, "從 OpenRocket 檔匯入幾何");
   return { sim: s, imported, skipped };
 }
@@ -297,7 +388,7 @@ export async function runSim(id: string, author: string): Promise<SimFile> {
     at: new Date().toISOString(), by: author, commit: await git(dirOf(id), "rev-parse", "--short", "HEAD"),
     inputsHash: createHash("sha256").update(JSON.stringify(inputs)).digest("hex").slice(0, 12), engine: r.engine, outputs: r.outputs, trajectory: r.trajectory, warnings: r.warnings ?? [],
   };
-  await writeSim(id, s);
+  await persist(id, s);
   await commit(dirOf(id), author, `執行飛行模擬（${r.engine}）`);
   return s;
 }
@@ -305,6 +396,7 @@ export async function runSim(id: string, author: string): Promise<SimFile> {
 export async function saveBindings(id: string, bindings: Binding[]): Promise<SimFile> {
   const s = await readSim(id);
   s.bindings = bindings.filter((b) => b.output && b.element && /^[A-Za-z_][A-Za-z0-9_]*$/.test(b.attribute));
-  await writeSim(id, s);
+  s.bound = true; // 即使清成空的，也記得「使用者設定過」，不再自動帶預設屬性
+  await persist(id, s);
   return s;
 }

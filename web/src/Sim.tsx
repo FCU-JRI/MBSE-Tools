@@ -6,7 +6,10 @@ type Inputs = Record<string, Record<string, any>>;
 interface Output { key: string; zh: string; value: number; unit: string }
 interface Result { at: string; by: string; commit: string; inputsHash: string; engine: string; outputs: Output[]; trajectory: [number, number][]; warnings: string[] }
 interface Binding { output: string; element: string; attribute: string }
-interface SimData { inputs: Inputs; result: Result | null; bindings: Binding[]; available: { ok: boolean; reason: string } }
+interface Link { element: string; attribute: string }
+interface SimData { inputs: Inputs; result: Result | null; bindings: Binding[]; bound?: boolean; links: Record<string, Link>; linkIssues: { path: string; reason: string }[]; available: { ok: boolean; reason: string } }
+/** 可以對應到模型屬性的欄位：長度、質量、時間、面積，以及片數與 Cd（角度與經緯度不開放） */
+const linkable = (g: string, k: string) => /_(m|kg|s|m2)$/.test(k) || ["fins.n", "rocket.drag_cd"].includes(`${g}.${k}`);
 
 const GROUPS: { key: string; zh: string; help: string; fields: [string, string][] }[] = [
   { key: "rocket", zh: "箭體", help: "位置都從鼻錐尖端量起，往尾端為正。質量不含引擎。", fields: [["radius_m", "半徑 m"], ["length_m", "全長 m"], ["mass_kg", "質量（不含引擎）kg"], ["cm_from_nose_m", "質心位置 m"], ["drag_cd", "阻力係數 Cd"]] },
@@ -48,6 +51,7 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [target, setTarget] = useState("");
   const [picked, setPicked] = useState<Record<string, string>>({});
+  const [links, setLinks] = useState<Record<string, Link>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
   const usages = view.analysis.elements.filter((e) => e.kind === "PartUsage" && !e.shared && view.analysis.elements.find((o) => o.id === e.owner)?.kind === "Package");
@@ -62,7 +66,7 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
     try { await fn(); if (done) setMsg({ ok: true, text: done }); } catch (e) { setMsg({ ok: false, text: (e as Error).message }); } finally { setBusy(""); }
   };
   const accept = (d: SimData) => {
-    setData(d); setInputs(JSON.parse(JSON.stringify(d.inputs)));
+    setData(d); setInputs(JSON.parse(JSON.stringify(d.inputs))); setLinks(d.links ?? {});
     setPicked((p) => ({ ...Object.fromEntries(d.bindings.map((b) => [b.output, b.attribute])), ...p }));
     if (d.bindings[0]) setTarget((t) => t || d.bindings[0].element);
   };
@@ -71,8 +75,8 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
 
   if (!data) return <p className="label">讀取中</p>;
   const set = (g: string, k: string, v: string) => setInputs((i) => ({ ...i, [g]: { ...i[g], [k]: v === "" ? "" : Number.isNaN(Number(v)) ? v : Number(v) } }));
-  const dirty = JSON.stringify(inputs) !== JSON.stringify(data.inputs);
-  const saveInputs = async () => { const s = await api<SimData>(`/projects/${id}/sim/inputs`, "PUT", { inputs }); accept({ ...data, ...s }); };
+  const dirty = JSON.stringify(inputs) !== JSON.stringify(data.inputs) || JSON.stringify(links) !== JSON.stringify(data.links ?? {});
+  const saveInputs = async () => { const s = await api<SimData>(`/projects/${id}/sim/inputs`, "PUT", { inputs, links }); accept({ ...data, ...s }); };
   const simulate = () => run("模擬中", async () => { if (dirty) await saveInputs(); accept(await api<SimData>(`/projects/${id}/sim/run`, "POST", {})); }, "模擬完成。");
   const applyThrust = () => run("解析", async () => { const r = await api<{ curve: [number, number][] }>(`/projects/${id}/sim/thrust`, "POST", { text: thrustText }); setInputs((i) => ({ ...i, motor: { ...i.motor, thrust_curve: r.curve } })); setThrustText(""); }, "已讀入推力曲線，按「執行模擬」會一併儲存。");
   const importOrk = (f: File) => run("匯入", async () => {
@@ -82,13 +86,14 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
     setMsg({ ok: true, text: `已匯入：${r.imported.join("、")}。未匯入：${r.skipped.join("、")}。` });
   });
   const attrs = attrsOf(target);
-  const chosen = (o: Output) => picked[o.key] ?? (attrs.includes(DEFAULT_ATTR[o.key] ?? "") ? DEFAULT_ATTR[o.key] : "");
+  // 設定過對應（含全部取消）就不再自動帶預設屬性，否則取消後重新整理又會冒出來
+  const chosen = (o: Output) => picked[o.key] ?? (!data.bound && !data.bindings.length && attrs.includes(DEFAULT_ATTR[o.key] ?? "") ? DEFAULT_ATTR[o.key] : "");
   const apply = () => run("寫回", async () => {
     const bindings = (data.result?.outputs ?? []).map((o) => ({ output: o.key, element: target, attribute: chosen(o) })).filter((b) => b.attribute);
-    if (bindings.length === 0) throw new Error("請先替至少一個結果選擇要寫入的屬性。");
-    const v = await api<View & { applied: string[] }>(`/projects/${id}/sim/apply`, "POST", { bindings });
+    const v = await api<View & { applied: string[]; cleared?: boolean }>(`/projects/${id}/sim/apply`, "POST", { bindings });
     onChanged(v);
-    setMsg({ ok: true, text: `已寫回模型：${v.applied.join("；")}。到「追溯」看需求是否滿足。` });
+    setData((d) => d && { ...d, bindings, bound: true });
+    setMsg({ ok: true, text: v.cleared ? "已取消所有對應；模型裡原有的值不變。" : `已寫回模型：${v.applied.join("；")}。到「追溯」看需求是否滿足。` });
   });
   const curve: [number, number][] = inputs.motor?.thrust_curve ?? [];
   const impulse = curve.reduce((s, p, i) => (i ? s + ((p[0] - curve[i - 1][0]) * (p[1] + curve[i - 1][1])) / 2 : 0), 0);
@@ -100,7 +105,7 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
 
       <section className="section">
         <div className="section-head"><h1 className="section-title">飛行模擬</h1><span className="label">{data.result ? data.result.engine : "尚未執行"}</span></div>
-        <p className="body muted" style={{ marginBottom: 12 }}>填入火箭參數，由 RocketPy 計算飛行。結果可以寫回模型的屬性，需求裡的數值條件就會自動重新判定。</p>
+        <p className="body muted" style={{ marginBottom: 12 }}>填入火箭參數，由 RocketPy 計算飛行。欄位的「來源」選模型屬性時，數值以模型為準（模型為唯一來源）。結果可以寫回模型的屬性，需求裡的數值條件就會自動重新判定。</p>
         {!ro && (
           <div className="tbtn-row" style={{ paddingLeft: 0, marginBottom: 8 }}>
             <button className="btn" disabled={!!busy || !data.available.ok} onClick={simulate}>{busy === "模擬中" ? "模擬中" : "執行模擬"}</button>
@@ -133,7 +138,7 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
               </tr>
             ))}</tbody>
           </table>
-          {!ro && <div style={{ marginTop: 8 }}><button className="tbtn primary" disabled={!!busy || dirty} onClick={apply}>寫回模型</button>
+          {!ro && <div style={{ marginTop: 8 }}><button className="tbtn primary" disabled={!!busy || dirty} onClick={apply}>{(data.result?.outputs ?? []).some((o) => chosen(o)) ? "寫回模型" : "取消所有對應"}</button>
             <p className="caption">只能寫入這個零件的定義裡已有的屬性。沒有對應的屬性時，先到結構分解加上（例如 attribute maxSpeed : SpeedValue）。</p></div>}
         </section>
       )}
@@ -154,8 +159,15 @@ export function SimView({ view, user, onChanged }: { view: View; user: Me; onCha
           {g.help && <p className="caption" style={{ marginBottom: 8 }}>{g.help}</p>}
           <div className="row">
             {g.fields.map(([k, zh]) => (
-              <label className="field" key={k} style={{ minWidth: "9rem" }}><span className="label">{zh}</span>
-                <input className="input" inputMode="decimal" readOnly={ro} value={inputs[g.key]?.[k] ?? ""} onChange={(e) => set(g.key, k, e.target.value)} /></label>
+              <label className="field" key={k} style={{ minWidth: "9rem" }}><span className="label">{zh}{links[`${g.key}.${k}`] && <span className="tag"> 模型</span>}</span>
+                <input className="input" inputMode="decimal" readOnly={ro || !!links[`${g.key}.${k}`]} value={inputs[g.key]?.[k] ?? ""} onChange={(e) => set(g.key, k, e.target.value)} />
+                {linkable(g.key, k) && !ro && (
+                  <select className="input" style={{ height: 24, fontSize: 12 }} aria-label={`${zh} 的來源`} value={links[`${g.key}.${k}`] ? `${links[`${g.key}.${k}`].element}|${links[`${g.key}.${k}`].attribute}` : ""}
+                    onChange={(e) => { const v = e.target.value; setLinks((l) => { const n = { ...l }; if (!v) delete n[`${g.key}.${k}`]; else { const [element, attribute] = v.split("|"); n[`${g.key}.${k}`] = { element, attribute }; } return n; }); }}>
+                    <option value="">手填</option>
+                    {usages.map((u) => attrsOf(u.qualifiedName).map((a) => <option key={`${u.id}|${a}`} value={`${u.qualifiedName}|${a}`}>{u.name}.{a}</option>))}
+                  </select>)}
+                {data.linkIssues.find((x) => x.path === `${g.key}.${k}`) && <span className="caption">{data.linkIssues.find((x) => x.path === `${g.key}.${k}`)!.reason}（改用手填值）</span>}</label>
             ))}
             {g.key === "nose" && <label className="field"><span className="label">外形</span><select className="input" disabled={ro} value={inputs.nose?.kind ?? "vonKarman"} onChange={(e) => setInputs((i) => ({ ...i, nose: { ...i.nose, kind: e.target.value } }))}>{NOSES.map(([k, zh]) => <option key={k} value={k}>{zh}</option>)}</select></label>}
           </div>
