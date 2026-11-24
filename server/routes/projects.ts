@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { GATES } from "../gates.ts";
+import { ownerSlots } from "../framework.ts";
+import { framework } from "../process.ts";
 import { CATEGORIES, PILLARS, RELATION_LABELS } from "../metamodel.ts";
 import * as store from "../projects.ts";
 import * as auth from "../auth.ts";
@@ -12,6 +14,8 @@ export function mount(app: Express): void {
       categories: CATEGORIES,
       pillars: PILLARS,
       relations: RELATION_LABELS,
+      // 框架（PRJ-05 設定頁用）：可設定的參數、角色、各步負責人的預設
+      framework: { settings: framework().settings, roles: framework().roles, owners: ownerSlots(framework()) },
       gates: GATES.map((g) => ({ id: g.id, zh: g.zh, en: g.en, deadline: g.deadline, approver: g.approver, purpose: g.purpose, perSubsystem: g.perSubsystem })),
     });
   });
@@ -39,10 +43,10 @@ export function mount(app: Express): void {
 
   app.get("/api/projects/:id", wrap(async (req, res) => res.json(await view(pid(req)))));
 
-  // 專案設定：名稱、類型、節點。代號（儲存庫名稱）不能改。
+  // 專案設定：名稱、類型、節點、框架參數（settings）。代號（儲存庫名稱）不能改。
   app.patch("/api/projects/:id", auth.need(auth.can.confirm, "修改專案設定需要責任工程師以上的權限。"), wrap(async (req, res) => {
     const b = req.body ?? {};
-    await store.updateProject(pid(req), { name: b.name, kind: b.kind, gates: b.gates, author: author(req) });
+    await store.updateProject(pid(req), { name: b.name, kind: b.kind, gates: b.gates, settings: b.settings, author: author(req) });
     res.json(await view(pid(req)));
   }));
 

@@ -1,7 +1,13 @@
 // 分析流程：依 NASA-HDBK-1009A 第 8 章的順序，從利害關係人開始逐步拆解。
 // 每一步都有「要回答的問題」與「完成條件」；前一步沒完成，後面的步驟不開放。
 // 同一份定義供網頁的引導流程、伺服器的順序檢查與給 AI 的 skill 使用。
+// WP3 起：流程頁與卡點改照框架檔（framework/jri.json）執行，見下方 frameworkView／holdPoint。
+// 這 17 步仍留在 API 的 view.process（既有測試與流程範本的教學順序鎖依賴它，移除要 Mars 核准改測試）。
 import type { Analysis } from "./engine.ts";
+import * as fw from "./framework.ts";
+import { CATEGORIES as CATS } from "./metamodel.ts";
+import { dirOf, git, parseRef } from "./projects.ts";
+import type { Project } from "./projects.ts";
 import type { Element } from "./extract.ts";
 import { CATEGORIES } from "./metamodel.ts";
 
@@ -224,7 +230,70 @@ export function evaluateProcess(a: Analysis): StepStatus[] {
   });
 }
 
-/** 某個類別屬於哪一步；流程專案用來擋掉跳步驟的新增。 */
+/**
+ * 某個類別屬於哪一步；流程專案用來擋掉跳步驟的新增（舊 17 步順序鎖，PROC-06）。
+ * 框架設計迴圈要產出的類別（設計方案、決策、風險、介面…）不受舊順序鎖：
+ * 否則「風險」被鎖到第 15 步，任務剖面迴圈走不完，系統需求永遠過不了卡點。
+ */
 export function stepOfCategory(category: string): StepDef | undefined {
+  if (framework().designLoop.steps.some((s) => (s.produces ?? []).includes(category))) return undefined;
   return STEPS.find((s) => s.categories.includes(category));
+}
+
+// ───────── 框架（WP3）─────────
+let cached: fw.Framework | null = null;
+/** 框架檔；測試或改檔時可呼叫 reloadFramework 重讀。 */
+export const framework = (): fw.Framework => (cached ??= fw.loadFramework());
+export const reloadFramework = () => { cached = null; };
+
+/** 專案設定：框架檔預設值＋專案自己改過的值。 */
+export function settingsOf(p: Pick<Project, "template" | "settings">): fw.FwSettings {
+  const base = fw.defaultSettings(framework(), p.template);
+  const s = p.settings ?? {};
+  return { ...base, ...s, owners: { ...base.owners, ...(s.owners ?? {}) } } as fw.FwSettings;
+}
+
+/**
+ * 「組長在 PR 核准」目前沒有資料來源（GitHub 審查狀態沒有接進工具），先用「沒有未合併的分支」代替：
+ * 在分支上看＝這個分支還沒合併；在 main 看＝專案裡還有領先 main 的本機分支。要 Mars 決定正式來源。
+ */
+export async function approvalState(ref: string): Promise<fw.Approval> {
+  try {
+    const { id, branch } = parseRef(ref);
+    const dir = dirOf(ref);
+    if (branch) {
+      const [, ahead] = (await git(dir, "rev-list", "--left-right", "--count", "main...HEAD")).split(/\s+/).map(Number);
+      return ahead > 0 ? { ok: false, source: "branches", detail: `這個分支有 ${ahead} 個提交還沒合併到 main（待組長核准）。` } : { ok: true, source: "branches", detail: "分支已合併。" };
+    }
+    const names = (await git(dirOf(id), "for-each-ref", "--format=%(refname:short)", "refs/heads")).split("\n").filter((n) => n && n !== "main");
+    let open = 0;
+    for (const n of names) {
+      const [, ahead] = (await git(dir, "rev-list", "--left-right", "--count", `main...${n}`)).split(/\s+/).map(Number);
+      if (ahead > 0) open++;
+    }
+    return open ? { ok: false, source: "branches", detail: `還有 ${open} 個未合併的分支（待組長核准）。` } : { ok: true, source: "branches", detail: "沒有未合併的分支。" };
+  } catch {
+    return { ok: false, source: "branches", detail: "無法讀取分支狀態。" };
+  }
+}
+
+const catZh = (id: string) => CATS.find((c) => c.id === id)?.zh ?? id;
+
+/** 畫面資料用：框架執行結果。模型有錯時回傳 null。 */
+export async function frameworkView(ref: string, project: Project, a: Analysis, docs: number): Promise<fw.FrameworkEval | null> {
+  if (!a.ok) return null;
+  return fw.evaluateFramework(framework(), { a, settings: settingsOf(project), docs, approval: await approvalState(ref), catZh });
+}
+
+/** 新增元素前的卡點（FW-02）。專案設定 enforceHoldPoint 為真才擋；回傳要顯示的原因，null＝不擋。 */
+export async function holdPoint(ref: string, project: Project, a: Analysis, docs: number, category: string): Promise<string | null> {
+  if (!settingsOf(project).enforceHoldPoint || !a.ok) return null;
+  const ev = await frameworkView(ref, project, a, docs);
+  return ev ? fw.holdPointBlock(ev, category) : null;
+}
+
+/** 審查節點加上框架檢查（MGT-02）；既有檢查與 done／total 不動。 */
+export function withFrameworkChecks<G extends { id: string }>(gates: G[], ev: fw.FrameworkEval | null, a: Analysis): (G & { framework: fw.FwGateCheck[] })[] {
+  const name = (id: string) => { const e = a.elements.find((x) => x.id === id); return e ? (e.shortName ? `${e.shortName} ${e.name}` : e.name) : id; };
+  return gates.map((g) => ({ ...g, framework: ev ? fw.gateChecks(ev, g.id, name) : [] }));
 }
