@@ -1748,11 +1748,11 @@
     "git"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "TR-04；RFP F3",
    "framework": "designLoop.meets",
    "verify": "開 PR 時自動跑並把結果貼在 PR",
-   "note": "repo 沒有 .github 工作流程"
+   "note": "WP6 #49：送審時伺服器預跑 constraint、衝突、框架檢查、質量預算；無 RocketPy 標未跑"
   },
   {
    "id": "ANA-13",
@@ -2023,7 +2023,7 @@
    "sources": "TR-03",
    "framework": "",
    "verify": "責任工程師以上可合併",
-   "note": "TR-03 寫「次系統負責人核准」；目前是職級門檻，沒有綁到次系統"
+   "note": "WP6 #49：核准者照 reviews/approvers.json（受影響次系統負責人或總工程師以上）；目前只有 API 沒有管理畫面"
   },
   {
    "id": "VER-05",
@@ -2090,11 +2090,11 @@
    "writes": [
     "git"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "CLAUDE.md：所有模型變更以 PR 提出",
    "framework": "designLoop.meets",
    "verify": "送審時在 GitHub 開 PR",
-   "note": "待決：要不要改成真的開 PR"
+   "note": "WP6 #49：工具內送審／撤回送審，紀錄存 reviews/<分支>.json（Mars 決定不開 GitHub PR）"
   },
   {
    "id": "AI-01",
@@ -2108,11 +2108,11 @@
    "writes": [
     "git"
    ],
-   "status": "partial",
+   "status": "ok",
    "sources": "TR-09",
    "framework": "",
    "verify": "Claude 能依 skill 操作",
-   "note": "內容要依框架更新"
+   "note": "WP6 #49：SKILL.md 依框架改寫"
   },
   {
    "id": "AI-02",
@@ -2124,11 +2124,11 @@
     "git"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "TR-10",
    "framework": "",
    "verify": "Claude 讀得到模型、模擬結果、白板",
-   "note": "PR 討論與審查留言還沒整理成 Claude 讀得到的位置"
+   "note": "WP6 #49：送審說明與審查留言存在專案儲存庫，Claude 讀得到"
   }
  ],
  "flows": [
@@ -2174,10 +2174,7 @@
     "VER-04",
     "MGT-05"
    ],
-   "gaps": [
-    "ANA-12",
-    "VER-08"
-   ]
+   "gaps": []
   },
   {
    "id": "FLOW-4",
