@@ -33,6 +33,15 @@ function on(pid: string) {
       return r.data;
     },
     async load() { v = (await call(base)).data; return v; },
+    /** 新增後立刻刪掉，回傳卡點警告（卡點只警告不擋，照常建立） */
+    async probe(category: string, name: string): Promise<string | undefined> {
+      const x = await call(`${base}/elements`, "POST", { category, name });
+      assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 200));
+      const e = x.data.analysis.elements.find((q: any) => q.name === name);
+      assert.equal((await call(`${base}/elements/delete`, "POST", { id: e.id })).status, 200);
+      await this.load();
+      return x.data.holdWarning;
+    },
   };
 }
 
@@ -66,7 +75,7 @@ test("畫面資料帶框架執行結果：7 層、每個系統與次系統各有
   assert.deepEqual(layer("subsystem").objects.map((o: any) => o.name).sort(), ["回收次系統", "推進次系統", "航電次系統"].sort());
   assert.equal(v.framework.settings.fmeaThreshold, f.settings.find((x) => x.id === "fmeaThreshold")?.default);
   assert.equal(v.framework.settings.minAlternatives, f.settings.find((x) => x.id === "minAlternatives")?.default);
-  assert.equal(v.framework.settings.enforceHoldPoint, false, "範本專案預設不強制卡點");
+  assert.equal("enforceHoldPoint" in v.framework.settings, false, "卡點只警告，沒有強制開關");
   // 舊 17 步仍在（相容）
   assert.equal(v.process.length, 17);
   // FW-04：範本的次系統需求沒有 #basis
@@ -97,13 +106,12 @@ test("專案設定：可改 FMEA 門檻、預算餘裕、最少候選數、負�
   assert.deepEqual(v.project.settings, {});
 });
 
-test("範本專案打開卡點：系統迴圈沒過，不能新增次系統需求；迴圈走完（含是否被解決、是否符合需求）才放行", async () => {
+test("範本專案：系統迴圈沒過時新增次系統需求照常建立但有卡點警告；迴圈走完（含是否被解決、是否符合需求）警告消失", async () => {
   const s = on("w3s");
-  await s.send("", { settings: { enforceHoldPoint: true } }, 200, "PATCH");
-  let r = await s.send("/elements", { category: "SubsystemRequirement", name: "合成次系統需求甲" }, 400);
-  assert.match(r.error, /卡點/);
-  assert.match(r.error, /系統層級/);
-  assert.match(r.error, /火箭/);
+  let w = await s.probe("SubsystemRequirement", "合成試探甲");
+  assert.match(w ?? "", /卡點警告/);
+  assert.match(w ?? "", /系統層級/);
+  assert.match(w ?? "", /火箭/);
 
   // 設計提案：方案追溯到系統需求（variation 裡不能放 satisfy）
   await s.send("/elements", { category: "DesignAlternative", name: "合成構型方案" });
@@ -124,8 +132,8 @@ test("範本專案打開卡點：系統迴圈沒過，不能新增次系統需�
   const o = layer("system").objects[0];
   assert.equal(o.current, "resolved");
   assert.match(o.steps.find((x: any) => x.id === "resolved").issues[0].text, /S×O＝20/);
-  r = await s.send("/elements", { category: "SubsystemRequirement", name: "合成次系統需求甲" }, 400);
-  assert.match(r.error, /是否被解決|停在/);
+  w = await s.probe("SubsystemRequirement", "合成試探乙");
+  assert.match(w ?? "", /是否被解決|停在/);
   // 緩解後降到門檻以下 → 解決
   await s.send("/elements", { id: named("合成失效").id, attrs: { mitigation: "合成緩解", residualSeverity: "5", residualLikelihood: "1" } }, 200, "PATCH");
   await s.load();
@@ -152,16 +160,20 @@ test("範本專案打開卡點：系統迴圈沒過，不能新增次系統需�
   assert.equal(layer("system").objects[0].current, null, JSON.stringify(layer("system").objects[0].steps.filter((x: any) => x.state === "current")));
   assert.equal(layer("system").objects[0].passed, true);
   assert.equal(hold("SubsystemRequirement").open, true);
-  await s.send("/elements", { category: "SubsystemRequirement", name: "合成次系統需求甲" });
-  assert.ok(named("合成次系統需求甲"), "迴圈走完後放行");
+  // 範本只有一個系統，走完就全部走完 → 沒有警告
+  assert.equal(await s.probe("SubsystemRequirement", "合成試探丙"), undefined, "迴圈走完後沒有卡點警告");
   assert.ok(v.gates.find((g: any) => g.id === "mdr").framework.find((c: any) => /系統層級」設計迴圈走完/.test(c.label)).pass);
+  // 上一層多個對象：只要有一個沒走完就警告（加第二個系統，它的迴圈沒走）
+  await s.send("/elements", { category: "System", name: "合成第二系統" });
+  const w2 = await s.probe("SubsystemRequirement", "合成試探丁");
+  assert.match(w2 ?? "", /1／2 個走完/);
+  assert.match(w2 ?? "", /合成第二系統/);
 });
 
-test("流程範本：任務剖面迴圈沒過，不能寫系統需求（伺服器擋並說明原因）；走完後放行", async () => {
+test("流程範本：任務剖面迴圈沒過，系統需求照常建立但有卡點警告並說明原因；走完後警告消失；跳步不再擋", async () => {
   assert.equal((await call(`${I}/api/projects`, "POST", { id: "w3g", name: "WP3 流程", kind: "annual", template: "guided" })).status, 200);
   const g = on("w3g");
   await g.load();
-  assert.equal(v.framework.settings.enforceHoldPoint, true, "流程範本預設強制卡點");
   const add = async (body: any) => { await g.send("/elements", body); return named(body.name); };
   const link = (kind: string, a: any, b: any) => g.send("/relations", { kind, from: a.id, to: b.id });
   // 舊教學順序 1～9 步（相容）
@@ -181,9 +193,9 @@ test("流程範本：任務剖面迴圈沒過，不能寫系統需求（伺服�
   assert.equal(v.process.find((x: any) => x.id === "sysreqs").state, "current", "舊順序已到系統層需求");
 
   // 卡點：任務剖面迴圈沒過
-  let r = await g.send("/elements", { category: "SystemRequirement", name: "合成系統需求" }, 400);
-  assert.match(r.error, /卡點/);
-  assert.match(r.error, /任務剖面/);
+  const w = await g.probe("SystemRequirement", "合成試探");
+  assert.match(w ?? "", /卡點警告/);
+  assert.match(w ?? "", /任務剖面/);
   // 任務剖面迴圈：任務需求 → 方案（追溯到任務需求）→ 兩候選＋決策 → FMEA 無超門檻 → 產出
   const mr = await add({ category: "MissionRequirement", name: "合成任務需求" });
   const alt = await add({ category: "DesignAlternative", name: "合成剖面方案" });
@@ -195,14 +207,15 @@ test("流程範本：任務剖面迴圈沒過，不能寫系統需求（伺服�
   const risk = await add({ category: "Risk", name: "合成剖面風險", attrs: { failureMode: "合成", severity: "3", likelihood: "2" } });
   await link("trace", risk, named("合成剖面方案"));
   assert.equal(layer("missionProfile").objects[0].passed, true, JSON.stringify(layer("missionProfile").objects[0].steps.filter((x: any) => x.state === "current")));
-  const sr = await add({ category: "SystemRequirement", name: "合成系統需求" });
-  assert.ok(sr, "任務剖面迴圈走完後放行");
+  const made = await g.send("/elements", { category: "SystemRequirement", name: "合成系統需求" });
+  assert.equal(made.holdWarning, undefined, "任務剖面迴圈走完後沒有卡點警告");
+  const sr = named("合成系統需求");
   // FW-04：新的系統需求沒有 #basis → 標缺設計產出來源；補上後消失
   assert.ok(v.framework.twoSources.some((x: any) => x.id === sr.id && x.missing.includes("basis")));
   await link("basis", named("合成系統需求"), named("合成剖面決策"));
   await link("derive", named("合成系統需求"), named("合成任務需求"));
   assert.ok(!v.framework.twoSources.some((x: any) => x.name.includes("合成系統需求")));
-  // 次系統需求：系統迴圈沒過（還沒有設計方案）→ 擋（舊順序也擋，訊息至少要說明原因）
-  r = await g.send("/elements", { category: "SubsystemRequirement", name: "合成次系統需求" }, 400);
-  assert.ok(r.error.length > 0);
+  // 次系統需求：系統迴圈沒過（還沒有設計方案）→ 有警告
+  assert.match(await g.probe("SubsystemRequirement", "合成次系統試探") ?? "", /卡點警告.*系統層級/);
+
 });

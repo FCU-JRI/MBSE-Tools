@@ -1003,7 +1003,7 @@ test("來源文件只存連結；元素可標註出處並寫進模型", async ()
   assert.equal(r.data.analysis.elements.find((x: any) => x.name === "降落傘未展開").attrs.detection, "3");
 });
 
-test("三種建立方式：空白、範本、流程範本；流程範本不可跳步，照順序可以走完前幾步", async () => {
+test("三種建立方式：空白、範本、流程範本；流程範本跳步照常建立（卡點只警告），照順序可以走完前幾步", async () => {
   await call(`${I}/api/projects`, "POST", { id: "g-blank", name: "空白", kind: "annual", template: "blank" });
   let b = (await call(`${I}/api/projects/g-blank`)).data;
   assert.equal(b.analysis.ok, true);
@@ -1020,11 +1020,17 @@ test("三種建立方式：空白、範本、流程範本；流程範本不可�
   let v = (await call(base)).data;
   assert.equal(v.project.template, "guided");
   assert.deepEqual(v.process.slice(0, 3).map((s: any) => s.state), ["current", "locked", "locked"]);
-  let r = await call(`${base}/elements`, "POST", { category: "SystemRequirement", name: "跳步的需求" });
-  assert.equal(r.status, 400);
-  assert.match(r.data.error, /利害關係人/);
-  r = await call(`${base}/elements`, "POST", { category: "Expectation", name: "跳步的期望" });
-  assert.equal(r.status, 400);
+  // 舊順序鎖已拿掉（Mars 2026-11-24）：照常建立；系統需求有框架卡點警告（任務剖面迴圈沒走完）。建完刪掉，後面的斷言不受影響
+  const skip = async (body: any, warn: boolean) => {
+    const x = await call(`${base}/elements`, "POST", body);
+    assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 200));
+    if (warn) assert.match(x.data.holdWarning, /卡點警告.*任務剖面/);
+    else assert.equal(x.data.holdWarning, undefined);
+    const e = x.data.analysis.elements.find((q: any) => q.name === body.name);
+    assert.equal((await call(`${base}/elements/delete`, "POST", { id: e.id })).status, 200);
+  };
+  await skip({ category: "SystemRequirement", name: "跳步的需求" }, true);
+  await skip({ category: "Expectation", name: "跳步的期望" }, false);
 
   const add = async (body: any) => { const x = await call(`${base}/elements`, "POST", body); assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 200)); v = x.data; return v.analysis.elements.find((e: any) => e.name === body.name); };
   const link = async (kind: string, from: any, to: any) => { const x = await call(`${base}/relations`, "POST", { kind, from: from.id, to: to.id }); assert.equal(x.status, 200, JSON.stringify(x.data).slice(0, 200)); v = x.data; };
@@ -1043,7 +1049,7 @@ test("三種建立方式：空白、範本、流程範本；流程範本不可�
   assert.equal(state("moes"), "current");
   const moe = await add({ category: "MOE", name: "高度偏差" }); await link("refine", moe, obj);
   assert.deepEqual([state("moes"), state("context"), state("usecases")], ["done", "current", "locked"]);
-  assert.equal((await call(`${base}/elements`, "POST", { category: "UseCase", name: "跳步" })).status, 400);
+  await skip({ category: "UseCase", name: "跳步" }, false);
   // 功能分配的關係要能被辨識（第 12 步的完成條件）
   const s1 = (await call(`${I}/api/projects/t1`)).data;
   const fnHost = s1.analysis.elements.find((e: any) => e.name === "任務");
