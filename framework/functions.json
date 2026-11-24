@@ -1,0 +1,2232 @@
+{
+ "version": 1,
+ "name": "MBSE-Tools 功能清單",
+ "asOf": "main 8697672（2026-11-24）",
+ "statusZh": {
+  "ok": "正常",
+  "partial": "部分",
+  "wrong": "與框架衝突",
+  "missing": "缺",
+  "orphan": "無依據"
+ },
+ "stores": [
+  {
+   "id": "model",
+   "zh": "模型 .sysml"
+  },
+  {
+   "id": "library",
+   "zh": "共用元件庫"
+  },
+  {
+   "id": "framework",
+   "zh": "框架定義檔"
+  },
+  {
+   "id": "layout",
+   "zh": "layout.json 版面"
+  },
+  {
+   "id": "diagrams",
+   "zh": "diagrams.json 自訂圖與標註"
+  },
+  {
+   "id": "pm",
+   "zh": "pm.json 時程、成本、人員、文件、里程碑"
+  },
+  {
+   "id": "sim",
+   "zh": "sim.json 模擬輸入與結果"
+  },
+  {
+   "id": "board",
+   "zh": "board.json 白板"
+  },
+  {
+   "id": "project",
+   "zh": "project.json 專案設定與簽核"
+  },
+  {
+   "id": "git",
+   "zh": "git 提交、分支、基線"
+  },
+  {
+   "id": "members",
+   "zh": "成員與申請"
+  },
+  {
+   "id": "shares",
+   "zh": "唯讀連結"
+  },
+  {
+   "id": "config",
+   "zh": "登入與系統設定"
+  }
+ ],
+ "functions": [
+  {
+   "id": "AUTH-01",
+   "zh": "Google 登入",
+   "area": "進站",
+   "where": "登入畫面",
+   "api": "/auth/google",
+   "reads": [
+    "config",
+    "members"
+   ],
+   "writes": [
+    "members"
+   ],
+   "status": "ok",
+   "sources": "SPEC 存取；PR #28",
+   "framework": "",
+   "verify": "以 Google 帳號登入成功",
+   "note": ""
+  },
+  {
+   "id": "AUTH-02",
+   "zh": "GitHub 登入（第二選項）",
+   "area": "進站",
+   "where": "登入畫面",
+   "api": "/auth/github",
+   "reads": [
+    "config",
+    "members"
+   ],
+   "writes": [
+    "members"
+   ],
+   "status": "ok",
+   "sources": "PR #28",
+   "framework": "",
+   "verify": "以 GitHub 登入成功",
+   "note": ""
+  },
+  {
+   "id": "AUTH-03",
+   "zh": "加入申請，總工程師核准",
+   "area": "進站",
+   "where": "管理頁",
+   "api": "/api/admin/requests",
+   "reads": [
+    "members"
+   ],
+   "writes": [
+    "members"
+   ],
+   "status": "ok",
+   "sources": "PR #28",
+   "framework": "roles",
+   "verify": "申請出現在管理頁，核准後可登入",
+   "note": ""
+  },
+  {
+   "id": "AUTH-04",
+   "zh": "唯讀分享連結",
+   "area": "進站",
+   "where": "/s/:token",
+   "api": "/s/:token",
+   "reads": [
+    "shares"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "SPEC 存取",
+   "framework": "",
+   "verify": "連結可唯讀開啟；到期後無法延期",
+   "note": "不能延期，只能重建（S1 稽核）"
+  },
+  {
+   "id": "AUTH-05",
+   "zh": "本機身分自填名字",
+   "area": "進站",
+   "where": "上方列",
+   "api": "",
+   "reads": [],
+   "writes": [],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "本機可填名字",
+   "note": ""
+  },
+  {
+   "id": "AUTH-06",
+   "zh": "歡迎畫面",
+   "area": "進站",
+   "where": "進站",
+   "api": "",
+   "reads": [],
+   "writes": [],
+   "status": "orphan",
+   "sources": "既有",
+   "framework": "",
+   "verify": "—",
+   "note": "沒有框架或 SPEC 依據，留或刪由 Mars 決定"
+  },
+  {
+   "id": "ADM-01",
+   "zh": "成員增改刪（職級）",
+   "area": "管理",
+   "where": "管理頁",
+   "api": "/api/admin/members",
+   "reads": [
+    "members"
+   ],
+   "writes": [
+    "members"
+   ],
+   "status": "ok",
+   "sources": "PR #28；AEAS 職級",
+   "framework": "roles",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "ADM-02",
+   "zh": "批次加入成員",
+   "area": "管理",
+   "where": "管理頁",
+   "api": "/api/admin/members/batch",
+   "reads": [
+    "members"
+   ],
+   "writes": [
+    "members"
+   ],
+   "status": "ok",
+   "sources": "PR #29",
+   "framework": "",
+   "verify": "預覽後一次加入",
+   "note": ""
+  },
+  {
+   "id": "ADM-03",
+   "zh": "唯讀連結建立與撤銷",
+   "area": "管理",
+   "where": "管理頁",
+   "api": "/api/admin/shares",
+   "reads": [
+    "shares"
+   ],
+   "writes": [
+    "shares"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "建立、撤銷",
+   "note": ""
+  },
+  {
+   "id": "ADM-04",
+   "zh": "登入設定（OAuth 欄位）",
+   "area": "管理",
+   "where": "管理頁",
+   "api": "/api/admin/config",
+   "reads": [
+    "config"
+   ],
+   "writes": [
+    "config"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "憑證由 Mars 自己填",
+   "note": "工具不收憑證"
+  },
+  {
+   "id": "ADM-05",
+   "zh": "共用元件庫編輯",
+   "area": "管理",
+   "where": "管理頁",
+   "api": "/api/shared",
+   "reads": [
+    "library"
+   ],
+   "writes": [
+    "library"
+   ],
+   "status": "ok",
+   "sources": "既有；D：新元素放共用庫由總工程師維護",
+   "framework": "elementTypes",
+   "verify": "存檔前檢查語法",
+   "note": "框架需要的新元素要加在這裡"
+  },
+  {
+   "id": "ADM-06",
+   "zh": "自動建 GitHub 儲存庫設定",
+   "area": "管理",
+   "where": "管理頁",
+   "api": "/api/admin/config",
+   "reads": [
+    "config"
+   ],
+   "writes": [
+    "config"
+   ],
+   "status": "ok",
+   "sources": "PR #1",
+   "framework": "",
+   "verify": "建專案時自動建 repo",
+   "note": ""
+  },
+  {
+   "id": "PRJ-01",
+   "zh": "專案列表",
+   "area": "專案",
+   "where": "專案列表",
+   "api": "/api/projects",
+   "reads": [
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 專案列表",
+   "framework": "",
+   "verify": "列出可開的專案",
+   "note": ""
+  },
+  {
+   "id": "PRJ-02",
+   "zh": "建立專案（流程範本／範本／空白）",
+   "area": "專案",
+   "where": "專案列表",
+   "api": "POST /api/projects",
+   "reads": [
+    "library"
+   ],
+   "writes": [
+    "project",
+    "model",
+    "git"
+   ],
+   "status": "partial",
+   "sources": "既有",
+   "framework": "layers",
+   "verify": "三種範本可建",
+   "note": "流程範本的順序鎖依舊 17 步，不是框架（見 PROC-06）"
+  },
+  {
+   "id": "PRJ-03",
+   "zh": "刪除專案（封存）",
+   "area": "專案",
+   "where": "專案列表",
+   "api": "/api/projects/:id/archive",
+   "reads": [
+    "project"
+   ],
+   "writes": [
+    "project"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "封存後列表不見",
+   "note": ""
+  },
+  {
+   "id": "PRJ-04",
+   "zh": "專案設定：名稱、類型、節點",
+   "area": "專案",
+   "where": "專案管理頁",
+   "api": "PATCH /api/projects/:id",
+   "reads": [
+    "project"
+   ],
+   "writes": [
+    "project",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S1 閉環；PR #34",
+   "framework": "",
+   "verify": "可改；代號不可改",
+   "note": ""
+  },
+  {
+   "id": "PRJ-05",
+   "zh": "專案設定：FMEA 門檻、預算餘裕、最少候選數、各步負責人",
+   "area": "專案",
+   "where": "專案管理頁",
+   "api": "",
+   "reads": [
+    "project",
+    "framework"
+   ],
+   "writes": [
+    "project"
+   ],
+   "status": "missing",
+   "sources": "D：預算餘裕不釘死、負責人每專案可改",
+   "framework": "settings",
+   "verify": "每項可設、預設值來自框架檔",
+   "note": ""
+  },
+  {
+   "id": "PRJ-06",
+   "zh": "每個次系統的模型放自己的檔案",
+   "area": "專案",
+   "where": "全站",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model"
+   ],
+   "status": "missing",
+   "sources": "D：每個次系統一個檔案",
+   "framework": "principles.filePerSubsystem",
+   "verify": "新增次系統時自動建檔，元素寫進對應檔案",
+   "note": ""
+  },
+  {
+   "id": "FW-01",
+   "zh": "讀框架定義檔並檢查一致",
+   "area": "框架",
+   "where": "伺服器",
+   "api": "server/framework.ts",
+   "reads": [
+    "framework"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "D：框架寫成資料",
+   "framework": "全部",
+   "verify": "npm test 檢查通過",
+   "note": "PR #39，尚未接上任何畫面"
+  },
+  {
+   "id": "FW-02",
+   "zh": "卡點判定：本層迴圈未通過，不能建下一層需求",
+   "area": "框架",
+   "where": "伺服器＋模型頁＋流程頁",
+   "api": "",
+   "reads": [
+    "model",
+    "framework",
+    "git"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：遇到設計就喊卡",
+   "framework": "designLoop.outputs",
+   "verify": "系統迴圈未過時，新增次系統需求被擋並說明原因",
+   "note": ""
+  },
+  {
+   "id": "FW-03",
+   "zh": "迴圈進度：每層每個對象走到第幾步",
+   "area": "框架",
+   "where": "伺服器",
+   "api": "",
+   "reads": [
+    "model",
+    "framework",
+    "git"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "框架 F1",
+   "framework": "designLoop",
+   "verify": "每個系統、次系統、元件顯示目前步驟",
+   "note": "由證據算出，不存"
+  },
+  {
+   "id": "FW-04",
+   "zh": "下一層需求兩個來源檢查（#derivation＋#basis）",
+   "area": "框架",
+   "where": "伺服器＋右欄",
+   "api": "",
+   "reads": [
+    "model",
+    "framework"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：下一層需求有兩個來源",
+   "framework": "principles.twoSources",
+   "verify": "缺 #basis 的需求標「缺設計產出來源」",
+   "note": ""
+  },
+  {
+   "id": "FW-05",
+   "zh": "衝突偵測：介面兩端不合、預算加總超過",
+   "area": "框架",
+   "where": "伺服器",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：互卡往上交",
+   "framework": "crossCutting.conflicts",
+   "verify": "故意改錯一端數字，出現一筆衝突",
+   "note": "依賴計算器 ANA-09"
+  },
+  {
+   "id": "FW-06",
+   "zh": "衝突裁決：總工程師裁決並留決策紀錄",
+   "area": "框架",
+   "where": "專案管理頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "D：裁決者＝總工程師",
+   "framework": "crossCutting.conflicts",
+   "verify": "裁決後衝突消失、留 DesignDecision",
+   "note": ""
+  },
+  {
+   "id": "FW-07",
+   "zh": "是否被解決判定（S×O 門檻）",
+   "area": "框架",
+   "where": "伺服器",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：6 個預設",
+   "framework": "designLoop.resolved",
+   "verify": "本層有超門檻未緩解風險時判否",
+   "note": ""
+  },
+  {
+   "id": "FW-08",
+   "zh": "是否符合需求判定（constraint＋模擬＋PR 核准）",
+   "area": "框架",
+   "where": "伺服器",
+   "api": "",
+   "reads": [
+    "model",
+    "sim",
+    "git"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "既有判定＋D",
+   "framework": "designLoop.meets",
+   "verify": "全 PASS 且 PR 核准才判是",
+   "note": "constraint 判定已有；尚未綁 PR 核准與層"
+  },
+  {
+   "id": "FW-09",
+   "zh": "變更控制：節點核可後改需求或介面要審查",
+   "area": "框架",
+   "where": "版本",
+   "api": "",
+   "reads": [
+    "git",
+    "project"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "白板 貫穿全程",
+   "framework": "crossCutting.changeControl",
+   "verify": "核可後改需求，送審時標出",
+   "note": "目前所有修改一樣走分支，沒有特別標出"
+  },
+  {
+   "id": "FW-10",
+   "zh": "TPM 每節點更新與趨勢",
+   "area": "框架",
+   "where": "首頁＋表格",
+   "api": "",
+   "reads": [
+    "model",
+    "git"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "白板 貫穿全程；METHOD",
+   "framework": "crossCutting.tpm",
+   "verify": "每個節點記一次估計值並畫趨勢",
+   "note": "#tpm 標記已有；歷次值沒有記錄"
+  },
+  {
+   "id": "HOME-01",
+   "zh": "總覽 5 指標",
+   "area": "首頁",
+   "where": "首頁",
+   "api": "/api/projects/:id",
+   "reads": [
+    "model",
+    "pm",
+    "sim"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 首頁",
+   "framework": "",
+   "verify": "5 指標數字與計算一致",
+   "note": ""
+  },
+  {
+   "id": "HOME-02",
+   "zh": "性能對門檻",
+   "area": "首頁",
+   "where": "首頁",
+   "api": "/api/projects/:id/sim",
+   "reads": [
+    "sim",
+    "model"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "SPEC 首頁",
+   "framework": "",
+   "verify": "顯示算出值、門檻、餘裕",
+   "note": "沒有門檻值，只顯示 PASS/FAIL 件數（#32）"
+  },
+  {
+   "id": "HOME-03",
+   "zh": "風險熱圖、需求覆蓋、接下來的任務、最近的變更、各次系統狀態",
+   "area": "首頁",
+   "where": "首頁",
+   "api": "/api/projects/:id/pm、/history",
+   "reads": [
+    "model",
+    "pm",
+    "git"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 首頁",
+   "framework": "",
+   "verify": "各格點擊導向正確",
+   "note": ""
+  },
+  {
+   "id": "HOME-04",
+   "zh": "設計迴圈進度總覽",
+   "area": "首頁",
+   "where": "首頁",
+   "api": "",
+   "reads": [
+    "model",
+    "framework"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "框架",
+   "framework": "designLoop",
+   "verify": "每層每個對象在第幾步一眼看出",
+   "note": "依賴 FW-03"
+  },
+  {
+   "id": "PROC-01",
+   "zh": "流程指南（17 步）",
+   "area": "流程",
+   "where": "流程頁",
+   "api": "/api/projects/:id",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "wrong",
+   "sources": "SPEC 流程；PR #36",
+   "framework": "layers",
+   "verify": "—",
+   "note": "步驟是「系統需求 → 結構分解 → 功能分配 → 次系統需求」，中間沒有設計迴圈，違反框架；要改成照框架檔的 7 層"
+  },
+  {
+   "id": "PROC-02",
+   "zh": "每步「要做什麼／怎麼做／還缺」",
+   "area": "流程",
+   "where": "流程頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "PR #36",
+   "framework": "layers",
+   "verify": "—",
+   "note": "形式可用，內容要依框架改寫"
+  },
+  {
+   "id": "PROC-03",
+   "zh": "到模型頁做這一步",
+   "area": "流程",
+   "where": "流程頁",
+   "api": "",
+   "reads": [],
+   "writes": [],
+   "status": "ok",
+   "sources": "PR #36",
+   "framework": "",
+   "verify": "按了打開該類別新增表單",
+   "note": ""
+  },
+  {
+   "id": "PROC-04",
+   "zh": "複製給 AI 的提示",
+   "area": "流程",
+   "where": "流程頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "TR-09",
+   "framework": "",
+   "verify": "複製出提示",
+   "note": ""
+  },
+  {
+   "id": "PROC-05",
+   "zh": "批次匯入項目",
+   "area": "流程",
+   "where": "流程頁",
+   "api": "/api/projects/:id/elements",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "orphan",
+   "sources": "既有",
+   "framework": "",
+   "verify": "—",
+   "note": "沒有框架或 SPEC 依據，留或刪由 Mars 決定"
+  },
+  {
+   "id": "PROC-06",
+   "zh": "流程範本專案的順序鎖",
+   "area": "流程",
+   "where": "伺服器",
+   "api": "/api/projects/:id/elements",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "wrong",
+   "sources": "既有",
+   "framework": "designLoop.outputs",
+   "verify": "—",
+   "note": "鎖的是 17 步順序，不是框架卡點；要由 FW-02 取代"
+  },
+  {
+   "id": "PROC-07",
+   "zh": "討論白板（便利貼、框、連線、連到元素）",
+   "area": "流程",
+   "where": "流程頁",
+   "api": "/api/projects/:id/board",
+   "reads": [
+    "board",
+    "model"
+   ],
+   "writes": [
+    "board",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "SPEC 流程；PR #37",
+   "framework": "",
+   "verify": "增改刪都可、兩人同時編輯不互蓋",
+   "note": ""
+  },
+  {
+   "id": "PROC-08",
+   "zh": "白板即時游標、在線人數",
+   "area": "流程",
+   "where": "流程頁",
+   "api": "",
+   "reads": [
+    "board"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "R2 示意",
+   "framework": "",
+   "verify": "—",
+   "note": "待決：需長連線，另案"
+  },
+  {
+   "id": "MOD-01",
+   "zh": "左欄：搜尋",
+   "area": "模型",
+   "where": "模型頁左欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 模型",
+   "framework": "",
+   "verify": "名稱或編號篩選",
+   "note": ""
+  },
+  {
+   "id": "MOD-02",
+   "zh": "左欄：依框架層級排列（取代「圖依種類」）",
+   "area": "模型",
+   "where": "模型頁左欄",
+   "api": "",
+   "reads": [
+    "model",
+    "framework"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：照流程生框架、畫面從框架長出",
+   "framework": "layers",
+   "verify": "左欄層級與框架檔一致",
+   "note": "PR #38 照錯的理解做，先不合併；框架定案後重做"
+  },
+  {
+   "id": "MOD-03",
+   "zh": "左欄：模型元素樹",
+   "area": "模型",
+   "where": "模型頁左欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 模型",
+   "framework": "",
+   "verify": "點元素開右欄",
+   "note": ""
+  },
+  {
+   "id": "MOD-04",
+   "zh": "原始碼抽屜：編輯、即時檢查、寫入",
+   "area": "模型",
+   "where": "模型頁下方",
+   "api": "/api/projects/:id/files、/validate",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "SPEC 模型",
+   "framework": "",
+   "verify": "有錯不存",
+   "note": ""
+  },
+  {
+   "id": "MOD-05",
+   "zh": "自動產生的圖（結構分解、需求追溯、使用案例、IBD、活動、狀態機）",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "model",
+    "layout"
+   ],
+   "writes": [
+    "layout"
+   ],
+   "status": "ok",
+   "sources": "TR-02",
+   "framework": "",
+   "verify": "從模型產生",
+   "note": ""
+  },
+  {
+   "id": "MOD-06",
+   "zh": "自訂圖：建、改名、刪、加入、移出；建好跳出選項目",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "/api/projects/:id/diagrams",
+   "reads": [
+    "diagrams",
+    "model"
+   ],
+   "writes": [
+    "diagrams"
+   ],
+   "status": "ok",
+   "sources": "S1 閉環；PR #35",
+   "framework": "",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "MOD-07",
+   "zh": "圖上新增元素與連線",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "/elements、/relations",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "TR-02",
+   "framework": "",
+   "verify": "在圖上建立並寫進模型",
+   "note": ""
+  },
+  {
+   "id": "MOD-08",
+   "zh": "套件：建、搬入搬出、轉成套件、刪",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "/packages、/elements/move",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "MOD-09",
+   "zh": "註解（SysML comment）",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "/comments",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "MOD-10",
+   "zh": "便箋與外框標註（不進模型）",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "/api/projects/:id/diagrams",
+   "reads": [
+    "diagrams"
+   ],
+   "writes": [
+    "diagrams"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "MOD-11",
+   "zh": "版面拖拉、自動排列",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "/api/projects/:id/layout",
+   "reads": [
+    "layout"
+   ],
+   "writes": [
+    "layout"
+   ],
+   "status": "ok",
+   "sources": "TR-02",
+   "framework": "",
+   "verify": "位置保存",
+   "note": ""
+  },
+  {
+   "id": "MOD-12",
+   "zh": "匯出圖 SVG／PNG",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "layout",
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "TR-06",
+   "framework": "",
+   "verify": "下載檔案",
+   "note": ""
+  },
+  {
+   "id": "MOD-13",
+   "zh": "復原、重做",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "/undo、/redo",
+   "reads": [
+    "git"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "一步步回復",
+   "note": ""
+  },
+  {
+   "id": "MOD-14",
+   "zh": "工具箱精簡（常用 7 顆＋更多）、新增按鈕在右欄最下方、名稱列「匯出 ▾」",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [],
+   "writes": [],
+   "status": "missing",
+   "sources": "R3",
+   "framework": "",
+   "verify": "—",
+   "note": "做在 PR #38，未合併"
+  },
+  {
+   "id": "MOD-15",
+   "zh": "右欄：屬性編輯（名稱、編號、說明、欄位、出處）",
+   "area": "模型",
+   "where": "右欄",
+   "api": "PATCH /elements",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S1 閉環",
+   "framework": "",
+   "verify": "改後重新解析",
+   "note": ""
+  },
+  {
+   "id": "MOD-16",
+   "zh": "右欄：改類別（同 SysML 關鍵字才可）",
+   "area": "模型",
+   "where": "右欄",
+   "api": "/elements/category",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S1；PR #35",
+   "framework": "",
+   "verify": "跨關鍵字不開放並說明",
+   "note": ""
+  },
+  {
+   "id": "MOD-17",
+   "zh": "右欄：改上層",
+   "area": "模型",
+   "where": "右欄",
+   "api": "/elements/reparent",
+   "reads": [
+    "model",
+    "layout"
+   ],
+   "writes": [
+    "model",
+    "layout",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S1；PR #35",
+   "framework": "",
+   "verify": "搬移後關係保留",
+   "note": ""
+  },
+  {
+   "id": "MOD-18",
+   "zh": "右欄：自訂屬性（名稱、值、單位）",
+   "area": "模型",
+   "where": "右欄",
+   "api": "/elements/attribute",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S1；PR #35",
+   "framework": "",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "MOD-19",
+   "zh": "右欄：驗證事件方法與要驗證的需求",
+   "area": "模型",
+   "where": "右欄",
+   "api": "/verification",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S1；PR #35",
+   "framework": "",
+   "verify": "可改可增減",
+   "note": ""
+  },
+  {
+   "id": "MOD-20",
+   "zh": "右欄：關係改對象、改類型",
+   "area": "模型",
+   "where": "右欄",
+   "api": "/relations/change",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "partial",
+   "sources": "S1；PR #35",
+   "framework": "",
+   "verify": "全部關係種類都能改",
+   "note": "分配、連接、狀態轉換只靠共用邏輯，沒在畫面逐一實測"
+  },
+  {
+   "id": "MOD-21",
+   "zh": "刪除元素（連帶關係）",
+   "area": "模型",
+   "where": "右欄、圖上",
+   "api": "/elements/delete",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "刪除後關係一併清掉",
+   "note": ""
+  },
+  {
+   "id": "MOD-22",
+   "zh": "任務需求類別",
+   "area": "模型",
+   "where": "右欄、左欄",
+   "api": "",
+   "reads": [
+    "library",
+    "model"
+   ],
+   "writes": [
+    "model"
+   ],
+   "status": "missing",
+   "sources": "框架 elementTypes",
+   "framework": "layers.missionDefinition",
+   "verify": "可建、可改、可刪",
+   "note": "共用庫要先定義"
+  },
+  {
+   "id": "MOD-23",
+   "zh": "設計方案（variation／variant）建立與選定",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "D：方案比較用標準寫法",
+   "framework": "designLoop.proposal",
+   "verify": "每層至少能建 2 個候選並標選定",
+   "note": "解析器支援未實測"
+  },
+  {
+   "id": "MOD-24",
+   "zh": "介面：port def＋interface def 建立、兩端數字、狀態",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "框架 elementTypes；METHOD 第 4 節",
+   "framework": "designLoop.outputs",
+   "verify": "建介面、兩端數字、存在／暫定／凍結",
+   "note": ""
+  },
+  {
+   "id": "MOD-25",
+   "zh": "預算配額與邊界：對下一層的 require constraint",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "框架 F1 第 8 步",
+   "framework": "designLoop.outputs",
+   "verify": "系統對次系統下配額，加總檢查",
+   "note": ""
+  },
+  {
+   "id": "MOD-26",
+   "zh": "#basis：下一層需求連到設計產出",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "D：下一層需求有兩個來源",
+   "framework": "principles.twoSources",
+   "verify": "右欄可選設計產出、可改可刪",
+   "note": ""
+  },
+  {
+   "id": "MOD-27",
+   "zh": "#cad：CAD 連結與版本",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "D：CAD 只放連結",
+   "framework": "designLoop.cad",
+   "verify": "可填、可改、可刪",
+   "note": ""
+  },
+  {
+   "id": "MOD-28",
+   "zh": "#layer：手填層級",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "D：FMEA、方案比較分層",
+   "framework": "metadata.layer",
+   "verify": "推不出層級時可手填",
+   "note": ""
+  },
+  {
+   "id": "MOD-29",
+   "zh": "決策紀錄（DesignDecision）",
+   "area": "模型",
+   "where": "右欄、專案管理",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "TR-08",
+   "framework": "designLoop.tradeStudy",
+   "verify": "每次選定方案與裁決都有理由、裁決者、日期",
+   "note": ""
+  },
+  {
+   "id": "TAB-01",
+   "zh": "需求矩陣＋推導鏈",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 表格",
+   "framework": "",
+   "verify": "列出來源、滿足者、驗證",
+   "note": "推導鏈只看需求之間，看不到設計產出來源（FW-04）"
+  },
+  {
+   "id": "TAB-02",
+   "zh": "驗證矩陣",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "TR-06；PR #33",
+   "framework": "crossCutting.verificationWithReq",
+   "verify": "需求 × 驗證事件",
+   "note": ""
+  },
+  {
+   "id": "TAB-03",
+   "zh": "FMEA 表（熱圖、緩解前後）",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 表格",
+   "framework": "designLoop.fmea",
+   "verify": "熱圖與切換正常",
+   "note": ""
+  },
+  {
+   "id": "TAB-04",
+   "zh": "FMEA 分層（全專案一張，可依層篩選）",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：全專案一張但要分層",
+   "framework": "designLoop.fmea",
+   "verify": "依層篩選",
+   "note": ""
+  },
+  {
+   "id": "TAB-05",
+   "zh": "設計參數表",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "PR #33",
+   "framework": "",
+   "verify": "列出屬性與單位",
+   "note": ""
+  },
+  {
+   "id": "TAB-06",
+   "zh": "公式清單（唯讀）",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "/api/projects/:id/formulas",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "PR #33",
+   "framework": "",
+   "verify": "列出 constraint 與 calc",
+   "note": ""
+  },
+  {
+   "id": "TAB-07",
+   "zh": "作業與風險類清單（SOP、QC、名冊、安全係數、異常）",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "PR #33",
+   "framework": "",
+   "verify": "列表正確",
+   "note": "與「模型元素清單」重複列出（#33 待決）"
+  },
+  {
+   "id": "TAB-08",
+   "zh": "模型元素清單（各類別）",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 表格",
+   "framework": "",
+   "verify": "每類一張表",
+   "note": ""
+  },
+  {
+   "id": "TAB-09",
+   "zh": "來源文件增改刪",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "/api/projects/:id/pm/docs",
+   "reads": [
+    "pm"
+   ],
+   "writes": [
+    "pm",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "TR-05",
+   "framework": "layers.missionDefinition.sources",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "TAB-10",
+   "zh": "統一工具列：搜尋、篩選、欄位、CSV、列印",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 表格",
+   "framework": "",
+   "verify": "每張表都有",
+   "note": ""
+  },
+  {
+   "id": "TAB-11",
+   "zh": "匯出 Excel",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "/api/projects/:id/export.xlsx",
+   "reads": [
+    "model",
+    "pm"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "TR-06",
+   "framework": "",
+   "verify": "整本下載",
+   "note": "不含公式清單與驗證矩陣工作表（#33 待決）"
+  },
+  {
+   "id": "TAB-12",
+   "zh": "方案比較表",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "框架 F1 第 2 步；METHOD 圖 9",
+   "framework": "designLoop.tradeStudy",
+   "verify": "準則、權重、分數、選定與否決",
+   "note": "依賴 MOD-23"
+  },
+  {
+   "id": "TAB-13",
+   "zh": "風險登錄（非技術風險）",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "missing",
+   "sources": "白板 貫穿全程",
+   "framework": "crossCutting.riskRegister",
+   "verify": "時程、預算、場地、人員風險可登錄",
+   "note": "Risk 加 kind 欄位"
+  },
+  {
+   "id": "TAB-14",
+   "zh": "衝突清單",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：互卡往上交",
+   "framework": "crossCutting.conflicts",
+   "verify": "列出未裁決的衝突",
+   "note": "依賴 FW-05"
+  },
+  {
+   "id": "TAB-15",
+   "zh": "N² 矩陣",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "METHOD 第 4 節；TR-06 介面圖",
+   "framework": "designLoop.outputs",
+   "verify": "對角線次系統、格子是介面",
+   "note": "依賴 MOD-24"
+  },
+  {
+   "id": "ANA-01",
+   "zh": "模擬輸入（外形、引擎、發射條件）",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "/api/projects/:id/sim/inputs",
+   "reads": [
+    "sim"
+   ],
+   "writes": [
+    "sim",
+    "git"
+   ],
+   "status": "partial",
+   "sources": "既有",
+   "framework": "designLoop.calc",
+   "verify": "可改可存",
+   "note": "輸入存在 sim.json，和模型是兩份，違反 TR-01「模型為唯一來源」（見 ANA-10）"
+  },
+  {
+   "id": "ANA-02",
+   "zh": "推力曲線（貼 .eng）",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "/sim/thrust",
+   "reads": [
+    "sim"
+   ],
+   "writes": [
+    "sim"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "讀入曲線",
+   "note": ""
+  },
+  {
+   "id": "ANA-03",
+   "zh": "飛行模擬（RocketPy）",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "/sim/run",
+   "reads": [
+    "sim"
+   ],
+   "writes": [
+    "sim",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "TR-04",
+   "framework": "designLoop.calc",
+   "verify": "跑出遠地點等結果",
+   "note": "本機未設 JRI_PYTHON，測試略過"
+  },
+  {
+   "id": "ANA-04",
+   "zh": "寫回模型",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "/sim/apply",
+   "reads": [
+    "sim",
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "partial",
+   "sources": "TR-04",
+   "framework": "designLoop.calc",
+   "verify": "對應可設、可取消",
+   "note": "最後一個對應無法取消（#35）"
+  },
+  {
+   "id": "ANA-05",
+   "zh": ".ork 匯入匯出",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "/sim/import-ork、/sim/export.ork",
+   "reads": [
+    "sim"
+   ],
+   "writes": [
+    "sim"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "匯入匯出成功",
+   "note": ""
+  },
+  {
+   "id": "ANA-06",
+   "zh": "判定總覽（需求、算出值、門檻、餘裕、來源）",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "",
+   "reads": [
+    "model",
+    "sim"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "SPEC 分析 R5",
+   "framework": "designLoop.meets",
+   "verify": "每條有判定的需求一列",
+   "note": ""
+  },
+  {
+   "id": "ANA-07",
+   "zh": "OpenRocket 式版面／OpenRocket 線上版",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "",
+   "reads": [
+    "sim"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "SPEC 分析",
+   "framework": "",
+   "verify": "—",
+   "note": "OpenRocket 線上版工作階段待命"
+  },
+  {
+   "id": "ANA-08",
+   "zh": "約束圖（連動需求與公式）",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "",
+   "reads": [
+    "model",
+    "sim"
+   ],
+   "writes": [
+    "model"
+   ],
+   "status": "missing",
+   "sources": "SPEC 分析；約束圖連動討論",
+   "framework": "designLoop.calc",
+   "verify": "軸與約束線從模型推出；選點可寫回",
+   "note": "依賴 ANA-09"
+  },
+  {
+   "id": "ANA-09",
+   "zh": "計算器（calc／constraint 求值，含單位）",
+   "area": "分析",
+   "where": "伺服器",
+   "api": "",
+   "reads": [
+    "model",
+    "library"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "框架 elementTypes.Calculation",
+   "framework": "designLoop.calc",
+   "verify": "每條公式有合成數值驗算測試",
+   "note": "解析器不會算值，要自己寫"
+  },
+  {
+   "id": "ANA-10",
+   "zh": "模擬輸入改從模型讀（模型為唯一來源）",
+   "area": "分析",
+   "where": "伺服器",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "sim"
+   ],
+   "status": "missing",
+   "sources": "TR-01",
+   "framework": "designLoop.calc",
+   "verify": "改模型屬性後模擬輸入跟著變",
+   "note": ""
+  },
+  {
+   "id": "ANA-11",
+   "zh": "質量預算自動計算",
+   "area": "分析",
+   "where": "伺服器",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "TR-04",
+   "framework": "designLoop.calc",
+   "verify": "子項質量加總、超過上限判 FAIL",
+   "note": "可用 MOD-25 的配額＋ANA-09"
+  },
+  {
+   "id": "ANA-12",
+   "zh": "送審前自動預跑（PR 上附結果）",
+   "area": "分析",
+   "where": "GitHub",
+   "api": "",
+   "reads": [
+    "model",
+    "sim",
+    "git"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "TR-04；RFP F3",
+   "framework": "designLoop.meets",
+   "verify": "開 PR 時自動跑並把結果貼在 PR",
+   "note": "repo 沒有 .github 工作流程"
+  },
+  {
+   "id": "ANA-13",
+   "zh": "行為模擬（狀態機可執行）",
+   "area": "分析",
+   "where": "分析頁",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [],
+   "status": "missing",
+   "sources": "D：要做",
+   "framework": "",
+   "verify": "—",
+   "note": "另案規劃"
+  },
+  {
+   "id": "MGT-01",
+   "zh": "4 指標",
+   "area": "專案管理",
+   "where": "專案管理頁",
+   "api": "",
+   "reads": [
+    "model",
+    "pm"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 專案管理",
+   "framework": "",
+   "verify": "數字正確",
+   "note": ""
+  },
+  {
+   "id": "MGT-02",
+   "zh": "審查節點卡＋自動檢查清單",
+   "area": "專案管理",
+   "where": "專案管理頁",
+   "api": "/api/projects/:id",
+   "reads": [
+    "model",
+    "pm",
+    "project"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "SPEC 專案管理；server/gates.ts",
+   "framework": "layers.gate",
+   "verify": "節點檢查來自框架",
+   "note": "檢查項寫死在 gates.ts，不是從框架檔來；也沒有檢查各層迴圈是否走完"
+  },
+  {
+   "id": "MGT-03",
+   "zh": "人工確認勾選",
+   "area": "專案管理",
+   "where": "節點卡",
+   "api": "/manual",
+   "reads": [
+    "project"
+   ],
+   "writes": [
+    "project",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "可勾可取消",
+   "note": ""
+  },
+  {
+   "id": "MGT-04",
+   "zh": "審查報告（網頁／Word）",
+   "area": "專案管理",
+   "where": "節點卡",
+   "api": "/report",
+   "reads": [
+    "model",
+    "pm",
+    "sim"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "TR-06",
+   "framework": "",
+   "verify": "開啟、下載",
+   "note": "EDMS 格式是否完整未核對"
+  },
+  {
+   "id": "MGT-05",
+   "zh": "簽核核可／退回",
+   "area": "專案管理",
+   "where": "節點卡",
+   "api": "/signoffs",
+   "reads": [
+    "project"
+   ],
+   "writes": [
+    "project",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "AEAS Table 3",
+   "framework": "layers.gate",
+   "verify": "依職級可簽",
+   "note": ""
+  },
+  {
+   "id": "MGT-06",
+   "zh": "簽核撤回留紀錄",
+   "area": "專案管理",
+   "where": "節點卡",
+   "api": "/signoffs/revoke",
+   "reads": [
+    "project"
+   ],
+   "writes": [
+    "project",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S1；PR #35",
+   "framework": "",
+   "verify": "撤回不刪原紀錄",
+   "note": "撤回後節點狀態的算法待決"
+  },
+  {
+   "id": "MGT-07",
+   "zh": "里程碑預定日期",
+   "area": "專案管理",
+   "where": "節點卡",
+   "api": "/milestones",
+   "reads": [
+    "pm"
+   ],
+   "writes": [
+    "pm",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "SPEC 專案管理",
+   "framework": "",
+   "verify": "可改",
+   "note": "Deliverables.tsx 的 Milestones 已沒有畫面使用，是殘留程式"
+  },
+  {
+   "id": "MGT-08",
+   "zh": "甘特圖與任務",
+   "area": "專案管理",
+   "where": "專案管理頁",
+   "api": "/pm/tasks",
+   "reads": [
+    "pm"
+   ],
+   "writes": [
+    "pm",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "AEAS",
+   "framework": "",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "MGT-09",
+   "zh": "人員",
+   "area": "專案管理",
+   "where": "專案管理頁",
+   "api": "/pm/people",
+   "reads": [
+    "pm"
+   ],
+   "writes": [
+    "pm",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "SPEC 專案管理",
+   "framework": "",
+   "verify": "增改刪都可",
+   "note": ""
+  },
+  {
+   "id": "MGT-10",
+   "zh": "成本與成本圓環",
+   "area": "專案管理",
+   "where": "專案管理頁",
+   "api": "/pm/costs",
+   "reads": [
+    "pm"
+   ],
+   "writes": [
+    "pm",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "S3",
+   "framework": "",
+   "verify": "圓環與表一致，超支標紅",
+   "note": ""
+  },
+  {
+   "id": "VER-01",
+   "zh": "右上版本按鈕（分支、未送審數）",
+   "area": "版本",
+   "where": "上方列",
+   "api": "/branches",
+   "reads": [
+    "git"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 版本",
+   "framework": "",
+   "verify": "數字正確",
+   "note": "「送審」定義待決"
+  },
+  {
+   "id": "VER-02",
+   "zh": "修改 → 送審 → 核准三步驟",
+   "area": "版本",
+   "where": "版本畫面",
+   "api": "/branches/diff",
+   "reads": [
+    "git"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "SPEC 版本；PR #31",
+   "framework": "",
+   "verify": "三格顯示所在步驟",
+   "note": ""
+  },
+  {
+   "id": "VER-03",
+   "zh": "開新分支",
+   "area": "版本",
+   "where": "版本畫面",
+   "api": "",
+   "reads": [
+    "git"
+   ],
+   "writes": [
+    "git"
+   ],
+   "status": "ok",
+   "sources": "PR #31",
+   "framework": "",
+   "verify": "開啟 代號@分支 即建立",
+   "note": ""
+  },
+  {
+   "id": "VER-04",
+   "zh": "分支差異、合併",
+   "area": "版本",
+   "where": "版本畫面",
+   "api": "/branches/diff、/merge",
+   "reads": [
+    "git"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "TR-03",
+   "framework": "",
+   "verify": "責任工程師以上可合併",
+   "note": "TR-03 寫「次系統負責人核准」；目前是職級門檻，沒有綁到次系統"
+  },
+  {
+   "id": "VER-05",
+   "zh": "把 main 的更新合併進分支",
+   "area": "版本",
+   "where": "版本畫面",
+   "api": "/branches/update",
+   "reads": [
+    "git"
+   ],
+   "writes": [
+    "git"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "合併成功",
+   "note": ""
+  },
+  {
+   "id": "VER-06",
+   "zh": "基線比較、修改紀錄",
+   "area": "版本",
+   "where": "版本畫面",
+   "api": "/baselines、/compare、/history",
+   "reads": [
+    "git"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "選兩版比較差異",
+   "note": ""
+  },
+  {
+   "id": "VER-07",
+   "zh": "GitHub 同步與 remote 設定",
+   "area": "版本",
+   "where": "版本畫面",
+   "api": "/sync、/remote",
+   "reads": [
+    "git",
+    "config"
+   ],
+   "writes": [
+    "git"
+   ],
+   "status": "ok",
+   "sources": "既有",
+   "framework": "",
+   "verify": "推送狀態正確",
+   "note": ""
+  },
+  {
+   "id": "VER-08",
+   "zh": "送審＝真的開 GitHub PR",
+   "area": "版本",
+   "where": "版本畫面",
+   "api": "",
+   "reads": [
+    "git"
+   ],
+   "writes": [
+    "git"
+   ],
+   "status": "missing",
+   "sources": "CLAUDE.md：所有模型變更以 PR 提出",
+   "framework": "designLoop.meets",
+   "verify": "送審時在 GitHub 開 PR",
+   "note": "待決：要不要改成真的開 PR"
+  },
+  {
+   "id": "AI-01",
+   "zh": "專案儲存庫內的 AI skill（.claude/skills/jri-mbse）",
+   "area": "AI",
+   "where": "專案儲存庫",
+   "api": "",
+   "reads": [
+    "library"
+   ],
+   "writes": [
+    "git"
+   ],
+   "status": "partial",
+   "sources": "TR-09",
+   "framework": "",
+   "verify": "Claude 能依 skill 操作",
+   "note": "內容要依框架更新"
+  },
+  {
+   "id": "AI-02",
+   "zh": "Claude 可讀完整專案（模型、分析、變更、討論）",
+   "area": "AI",
+   "where": "GitHub",
+   "api": "",
+   "reads": [
+    "git"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "TR-10",
+   "framework": "",
+   "verify": "Claude 讀得到模型、模擬結果、白板",
+   "note": "PR 討論與審查留言還沒整理成 Claude 讀得到的位置"
+  }
+ ],
+ "flows": [
+  {
+   "id": "FLOW-1",
+   "zh": "需求 → 驗證 → TRR",
+   "steps": [
+    "MOD-07",
+    "MOD-19",
+    "TAB-02",
+    "MGT-02",
+    "MGT-05"
+   ],
+   "gaps": []
+  },
+  {
+   "id": "FLOW-2",
+   "zh": "系統設計迴圈 → 設計限制 → 次系統需求（喊卡）",
+   "steps": [
+    "MOD-23",
+    "TAB-12",
+    "TAB-04",
+    "FW-07",
+    "MOD-27",
+    "ANA-09",
+    "FW-08",
+    "MOD-24",
+    "MOD-25",
+    "FW-02",
+    "MOD-26",
+    "FW-04"
+   ],
+   "gaps": [
+    "MOD-23",
+    "TAB-12",
+    "TAB-04",
+    "FW-07",
+    "MOD-27",
+    "ANA-09",
+    "MOD-24",
+    "MOD-25",
+    "FW-02",
+    "MOD-26",
+    "FW-04"
+   ]
+  },
+  {
+   "id": "FLOW-3",
+   "zh": "修改 → 預跑 → 送審 → 核准 → 基線",
+   "steps": [
+    "VER-03",
+    "MOD-15",
+    "ANA-12",
+    "VER-08",
+    "VER-04",
+    "MGT-05"
+   ],
+   "gaps": [
+    "ANA-12",
+    "VER-08"
+   ]
+  },
+  {
+   "id": "FLOW-4",
+   "zh": "介面互卡 → 總工程師裁決 → 決策紀錄 → 兩邊需求更新",
+   "steps": [
+    "MOD-24",
+    "ANA-09",
+    "FW-05",
+    "TAB-14",
+    "FW-06",
+    "MOD-29",
+    "FW-09"
+   ],
+   "gaps": [
+    "MOD-24",
+    "ANA-09",
+    "FW-05",
+    "TAB-14",
+    "FW-06",
+    "MOD-29"
+   ]
+  },
+  {
+   "id": "FLOW-5",
+   "zh": "模型參數 → 模擬 → 寫回 → 需求判定 → 首頁與節點",
+   "steps": [
+    "ANA-10",
+    "ANA-01",
+    "ANA-03",
+    "ANA-04",
+    "FW-08",
+    "HOME-02",
+    "MGT-02"
+   ],
+   "gaps": [
+    "ANA-10"
+   ]
+  }
+ ]
+}
