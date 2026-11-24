@@ -3,7 +3,8 @@ import type { Element } from "../extract.ts";
 import { ROOT_PACKAGE } from "../engine.ts";
 import { CATEGORIES, CATEGORY, RELATION_LABELS } from "../metamodel.ts";
 import * as store from "../projects.ts";
-import { evaluateProcess, stepOfCategory } from "../process.ts";
+import { evaluateProcess, holdPoint, stepOfCategory } from "../process.ts";
+import * as pm from "../pm.ts";
 import { paramLines, paramWord } from "../modernize.ts";
 import { readCondition, setConditionText, attrForm, moveBlockText, setCategoryText, setCustomAttrText, setMethodText, setUsageTypeText, setVerifiesText, nextShortName } from "../edits.ts";
 import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, setCadText, setLayerText, snippetFor } from "../edits.ts";
@@ -129,6 +130,9 @@ export function mount(app: Express): void {
         throw new store.UserError(`還不能新增${cat.zh}。請先完成「${cur?.zh ?? "前面的步驟"}」：${cur?.issues[0]?.text ?? ""}`);
       }
     }
+    // 框架卡點（FW-02）：上一層設計迴圈沒走完，不能新增下一層需求（專案設定 enforceHoldPoint）
+    const hold = await holdPoint(id, await store.readProject(id), before, (await pm.readPm(id)).docs.length, cat.id);
+    if (hold) throw new store.UserError(hold);
     const parent0 = req.body.parentId ? before.elements.find((e) => e.id === req.body.parentId) : undefined;
     const file = parent0 ? editable(parent0).file : rootFile(before);
     const content = await store.readFile(id, file);

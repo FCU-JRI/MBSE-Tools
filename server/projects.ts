@@ -8,6 +8,8 @@ import { analyze } from "./engine.ts";
 import type { Analysis, Source } from "./engine.ts";
 import { GATES } from "./gates.ts";
 import { upgradeText } from "./upgrade.ts";
+import { defaultSettings, loadFramework, normalizeSettings } from "./framework.ts";
+import type { FwSettings } from "./framework.ts";
 
 const run = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,6 +42,8 @@ export interface Project {
   highPower?: boolean; // 高功率（H 級以上）：TRR／FRR 只有指導老師能核可
   manual: Record<string, boolean>;
   signoffs: Signoff[];
+  /** 框架參數（PRJ-05）：只存改過的值，其餘用 framework/jri.json 的預設 */
+  settings?: Partial<FwSettings>;
 }
 
 export class UserError extends Error {}
@@ -267,8 +271,21 @@ export async function createProject(input: { id: string; name: string; kind: "an
 }
 
 /** 改專案名稱、類型、節點。代號是儲存庫名稱，不能改。已有簽核紀錄的節點不能移除（紀錄不刪）。 */
-export async function updateProject(ref: string, input: { name?: unknown; kind?: unknown; gates?: unknown; author: string }): Promise<Project> {
-  const p = await readProject(ref);
+export async function updateProject(ref: string, input: { name?: unknown; kind?: unknown; gates?: unknown; settings?: unknown; author: string }): Promise<Project> {
+  const p0 = await readProject(ref);
+  // 框架參數（PRJ-05）：檢查後只存跟預設不同的值
+  let p = p0, settingsNote = "";
+  if (input.settings !== undefined) {
+    const f = loadFramework();
+    const def = defaultSettings(f, p0.template);
+    let next: FwSettings;
+    try { next = normalizeSettings(f, { ...def, ...p0.settings, owners: { ...(p0.settings?.owners ?? {}) } } as FwSettings, input.settings); }
+    catch (e) { throw new UserError((e as Error).message); }
+    const diff: Partial<FwSettings> = {};
+    for (const k of Object.keys(next) as (keyof FwSettings)[]) if (k !== "owners" && next[k] !== def[k]) (diff as Record<string, unknown>)[k] = next[k];
+    if (Object.keys(next.owners).length) diff.owners = next.owners;
+    if (JSON.stringify(diff) !== JSON.stringify(p0.settings ?? {})) { p = { ...p0, settings: diff }; settingsNote = "框架參數"; }
+  }
   const name = input.name === undefined ? p.name : String(input.name).trim().slice(0, 80);
   if (!name) throw new UserError("請填專案名稱。");
   const kind = input.kind === undefined ? p.kind : input.kind;
@@ -287,10 +304,10 @@ export async function updateProject(ref: string, input: { name?: unknown; kind?:
   const dropped = p.gates.filter((g) => !gates.includes(g));
   const locked = dropped.filter((g) => p.signoffs.some((s) => s.gate === g));
   if (locked.length > 0) throw new UserError(`節點 ${locked.map((g) => g.toUpperCase()).join("、")} 已有簽核紀錄，不能移除。`);
-  if (name === p.name && kind === p.kind && gates.join() === p.gates.join()) return p;
+  if (name === p.name && kind === p.kind && gates.join() === p.gates.join() && !settingsNote) return p;
   const next: Project = { ...p, name, kind, gates };
   await writeProject(ref, next);
-  const parts = [name !== p.name && `名稱 → ${name}`, kind !== p.kind && `類型 → ${kind === "annual" ? "年度專案" : "小型專案"}`, gates.join() !== p.gates.join() && `節點 → ${gates.join("、")}`].filter(Boolean);
+  const parts = [name !== p.name && `名稱 → ${name}`, kind !== p.kind && `類型 → ${kind === "annual" ? "年度專案" : "小型專案"}`, gates.join() !== p.gates.join() && `節點 → ${gates.join("、")}`, settingsNote].filter(Boolean);
   await commit(dirOf(ref), input.author, `更新專案設定：${parts.join("；")}`);
   return next;
 }
