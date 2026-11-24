@@ -30,6 +30,100 @@ function Changes({ list, post }: { list: Change[]; post?: Set<string> }) {
   );
 }
 
+interface PreRun {
+  at: string; commit: string;
+  verdicts: { ok: boolean; total: number; holds: number; fails: number; undecided: number; failing: { requirement: string; name: string; note: string }[]; error?: string };
+  conflicts: { ok: boolean; total: number; open: number; items: { name: string; condition: string; decided: boolean }[]; note?: string };
+  framework: { ok: boolean; passed: number; total: number; failing: string[]; warnings: string[] };
+  budget: { ok: boolean; rows: number; fails: { name: string; limitKg: number; sumKg: number }[]; error?: string };
+  sim: { ran: boolean; engine?: string; at?: string; outputs?: { zh: string; value: number; unit: string }[]; note: string };
+  changes: { added: number; changed: number; removed: number };
+}
+interface Comment { id: string; kind: "approve" | "return" | "comment"; by: string; rank: string; at: string; text: string }
+interface Review {
+  branch: string; status: "submitted" | "withdrawn" | "returned" | "merged";
+  submitted: { by: string; rank: string; at: string; note: string } | null; prerun: PreRun | null; comments: Comment[];
+  history: { action: string; by: string; at: string; note: string }[]; merged: { by: string; rank: string; at: string; commit: string; basis: string } | null;
+}
+interface ReviewOne { review: Review; canApprove: boolean; approveNote: string; subsystems: string[] }
+const STATUS_ZH = { submitted: "送審中", withdrawn: "未送審", returned: "已退回", merged: "已合併" } as const;
+const KIND_ZH = { approve: "核准", return: "退回", comment: "意見" } as const;
+
+/** 送審時自動預跑的結果（ANA-12）：constraint 判定、衝突、框架檢查、質量預算、模擬。 */
+function PreRunView({ p }: { p: PreRun }) {
+  const row = (label: string, ok: boolean | null, body: React.ReactNode, warn = false) => (
+    <tr><td>{label}</td><td>{ok === null ? <span className="tag">未跑</span> : ok ? <span className="tag done">PASS</span> : <span className="tag danger">{warn ? "警告" : "FAIL"}</span>}</td><td>{body}</td></tr>
+  );
+  const v = p.verdicts, c = p.conflicts, f = p.framework, b = p.budget;
+  return (
+    <>
+      <p className="caption">預跑於 {when(p.at)}（提交 {p.commit}）；新增 {p.changes.added}、修改 {p.changes.changed}、移除 {p.changes.removed}。結果只供審查參考。</p>
+      <table>
+        <thead><tr><th>項目</th><th>結果</th><th>說明</th></tr></thead>
+        <tbody>
+          {row("constraint 判定", v.error ? null : v.fails === 0, v.error ?? <>成立 {v.holds}／{v.total}，不成立 {v.fails}，未定 {v.undecided}{v.failing.map((x) => <div key={x.requirement} className="caption">{x.name}　{x.note}</div>)}</>)}
+          {row("衝突", c.ok ? c.open === 0 : null, c.ok ? <>共 {c.total} 件，未裁決 {c.open}{c.items.filter((x) => !x.decided).map((x, i) => <div key={i} className="caption">{x.name}：{x.condition}</div>)}</> : c.note ?? "未跑")}
+          {row("框架檢查", f.ok ? f.passed === f.total : null, f.ok ? <>通過 {f.passed}／{f.total}{f.failing.map((x) => <div key={x} className="caption">未通過：{x}</div>)}{f.warnings.map((x, i) => <div key={i} className="caption">警告：{x}</div>)}</> : f.warnings.join("；") || "未跑", true)}
+          {row("質量預算", b.error ? null : b.fails.length === 0, b.error ?? (b.rows === 0 ? "沒有設定質量上限的零件" : <>{b.rows} 項{b.fails.map((x) => <div key={x.name} className="caption">{x.name}：{x.sumKg} kg 超過上限 {x.limitKg} kg</div>)}</>))}
+          {row("RocketPy 模擬", p.sim.ran ? true : null, p.sim.ran ? <>{p.sim.engine}　{(p.sim.outputs ?? []).map((o) => `${o.zh} ${o.value} ${o.unit}`).join("、")}</> : p.sim.note)}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+/** 送審說明、預跑結果與審查留言（核准、退回、意見）。 */
+function ReviewPanel({ id, branch, user, mainView, onChanged }: { id: string; branch: string; user: Me; mainView: boolean; onChanged: () => void }) {
+  const [one, setOne] = useState<ReviewOne | null>(null);
+  const [note, setNote] = useState("");
+  const [text, setText] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const q = `/projects/${baseOf(id)}/reviews`;
+  const load = useCallback(() => api<ReviewOne>(`${q}/one?branch=${encodeURIComponent(branch)}`).then(setOne).catch((e) => setErr((e as Error).message)), [id, branch]);
+  useEffect(() => { load(); }, [load]);
+  const act = async (path: string, body: object) => {
+    setErr(""); setBusy(true);
+    try { await api(`${q}/${path}`, "POST", { branch, ...body }); setNote(""); setText(""); await load(); onChanged(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  if (!one) return <p className="label">{err || "讀取中"}</p>;
+  const r = one.review;
+  const active = r.status === "submitted" || r.status === "returned";
+  return (
+    <div style={{ marginTop: 8 }}>
+      {err && <p className="msg" role="alert"><span className="tag danger">ERR</span>{err}</p>}
+      <p className="body">送審狀態：<span className={`tag ${r.status === "submitted" ? "warn" : r.status === "merged" ? "done" : r.status === "returned" ? "danger" : ""}`}>{STATUS_ZH[r.status]}</span>
+        {r.submitted && active && <span className="caption">　{r.submitted.by}（{r.submitted.rank}）於 {when(r.submitted.at)} 送審{r.submitted.note ? `：${r.submitted.note}` : ""}</span>}</p>
+      {r.merged && <p className="caption">核准合併：{r.merged.by}（{r.merged.rank}）於 {when(r.merged.at)}；依據：{r.merged.basis}</p>}
+      {!mainView && !active && user.caps.edit && (
+        <div className="row">
+          <label className="field"><span className="label">送審說明</span><textarea className="input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="這次改了什麼、為什麼" /></label>
+          <div className="tbtn-row" style={{ marginBottom: 12 }}><button className="tbtn primary" disabled={busy} onClick={() => act("submit", { note })}>{busy ? "預跑中…" : "送審（自動預跑）"}</button></div>
+        </div>
+      )}
+      {active && <div className="tbtn-row"><button className="tbtn" disabled={busy} onClick={() => act("withdraw", {})}>撤回送審</button></div>}
+      {r.prerun && <PreRunView p={r.prerun} />}
+      {r.comments.length > 0 && (
+        <table style={{ marginTop: 8 }}>
+          <thead><tr><th>類型</th><th>留言者</th><th>時間</th><th>內容</th></tr></thead>
+          <tbody>{r.comments.map((c) => <tr key={c.id}><td><span className={`tag ${c.kind === "approve" ? "done" : c.kind === "return" ? "danger" : ""}`}>{KIND_ZH[c.kind]}</span></td><td>{c.by}（{c.rank}）</td><td className="id">{when(c.at)}</td><td>{c.text}</td></tr>)}</tbody>
+        </table>
+      )}
+      {active && mainView && user.caps.edit && (
+        <div className="row" style={{ marginTop: 8 }}>
+          <label className="field"><span className="label">審查留言</span><textarea className="input" rows={2} value={text} onChange={(e) => setText(e.target.value)} /></label>
+          <div className="tbtn-row" style={{ marginBottom: 12 }}>
+            <button className="tbtn" disabled={busy || !text.trim()} onClick={() => act("comment", { kind: "comment", text })}>意見</button>
+            <button className="tbtn" disabled={busy || !one.canApprove || !text.trim()} onClick={() => act("comment", { kind: "return", text })}>退回</button>
+            <button className="tbtn primary" disabled={busy || !one.canApprove} onClick={() => act("comment", { kind: "approve", text })}>核准</button>
+          </div>
+          <p className="caption">{one.canApprove ? `你可以核准：${one.approveNote}` : `你不能核准：${one.approveNote}`}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const BRANCH_OK = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,120}$/;
 const tally = (l: Change[]) => `新增 ${l.filter((c) => c.type === "added").length}、修改 ${l.filter((c) => c.type === "changed").length}、移除 ${l.filter((c) => c.type === "removed").length}`;
 
@@ -58,6 +152,9 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
   const [newName, setNewName] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [tick, setTick] = useState(0);
+  const [reviews, setReviews] = useState<Record<string, Review>>({});
+  const [reviewOpen, setReviewOpen] = useState<string | null>(null);
+  const [myReview, setMyReview] = useState<Review | null>(null);
   const onBranch = !!branch;
 
   const run = async (fn: () => Promise<void>, done?: string) => {
@@ -70,15 +167,22 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
     setBranches(await api<Branch[]>(`/projects/${id}/branches`));
     const cc = await api<{ approved: { gate: string; keys: string[] } | null }>(`/projects/${id}/change-control`).catch(() => ({ approved: null }));
     setPost(cc.approved ? { keys: new Set(cc.approved.keys), gate: cc.approved.gate } : null);
+    const rs = await api<Review[]>(`/projects/${baseOf(id)}/reviews`).catch(() => [] as Review[]);
+    setReviews(Object.fromEntries(rs.map((x) => [x.branch, x])));
+    setMyReview(branch ? rs.find((x) => x.branch === branch.name) ?? null : null);
     if (branch) setMine((await api<{ changes: Change[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(branch.name)}`)).changes);
   }), [id, branch?.name]);
   useEffect(() => { load(); }, [load]);
 
+  // 送審狀態變了：重讀這個畫面，也更新右上版本按鈕（它看的是 view.branch.ahead）
+  const refresh = () => { load(); setTick((t) => t + 1); api<View>(`/projects/${id}`).then(onChanged).catch(() => undefined); };
   const update = () => run(async () => { onChanged(await api<View>(`/projects/${id}/branches/update`, "POST", {})); await load(); setTick((t) => t + 1); }, "已合併 main 的更新。");
   const merge = (name: string) => run(async () => { onChanged(await api<View>(`/projects/${id}/branches/merge`, "POST", { name })); setOpen(null); await load(); setTick((t) => t + 1); }, `已合併 ${name}。`);
   const me = branch && branches?.find((b) => b.name === branch.name);
   const changed = mine?.length ?? 0;
-  const pending = (branches ?? []).filter((b) => b.ahead > 0);
+  const pending = (branches ?? []).filter((b) => b.ahead > 0 && reviews[b.name]?.status === "submitted");
+  const rstat = myReview?.status ?? "withdrawn";
+  const inReview = rstat === "submitted" || rstat === "returned";
   const nameOk = BRANCH_OK.test(newName);
 
   return (
@@ -94,13 +198,14 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
               {changed > 0 && <div className="tbtn-row"><button className="tbtn" aria-expanded={showMine} onClick={() => setShowMine(!showMine)}>{showMine ? "收起差異" : "看改了什麼"}</button></div>}
               {user.caps.edit && branch.behind > 0 && <p className="caption">main 有 {branch.behind} 筆更新還沒進來，可到下方「進階」合併。</p>}
             </Step>
-            <Step n="②" title="送審" state={changed === 0 ? "wait" : "now"}>
-              <p className="body">{branch.ahead} 筆提交存在這個分支（有設定 GitHub 時會自動推送）；責任工程師會在 main 的「送審中」清單看到它。</p>
+            <Step n="②" title="送審" state={changed === 0 ? "wait" : inReview ? "done" : "now"}>
+              <p className="body">{inReview ? "已送審，送審時自動預跑的結果在下方；要補充請撤回後重新送審。" : "送審時伺服器會自動預跑 constraint 判定、衝突、框架檢查、質量預算與模擬，結果附在送審紀錄上。"}（{branch.ahead} 筆提交存在這個分支，有設定 GitHub 時會自動推送。）</p>
               <p className="body">檢查：{!me ? "讀取中" : me.ok ? <span className="tag done">PASS</span> : <><span className="tag danger">ERR</span> {me.firstError}</>}</p>
-              <div className="tbtn-row"><button className="tbtn primary" onClick={() => onOpen(baseOf(id))}>回到 main 看送審清單</button></div>
+              {changed > 0 && <ReviewPanel key={`${branch.name}-${branch.ahead}`} id={id} branch={branch.name} user={user} mainView={false} onChanged={refresh} />}
             </Step>
-            <Step n="③" title="核准合併" state="wait">
-              <p className="body">責任工程師以上在 main 審查並合併，之後才成為大家看到的版本。{user.caps.merge ? "你有合併權限，請回到 main 操作。" : "你沒有合併權限，等責任工程師處理。"}</p>
+            <Step n="③" title="核准合併" state={inReview ? "now" : "wait"}>
+              <p className="body">{rstat === "returned" ? "審查者退回了，請依留言修改後重新送審。" : "核准者在 main 審查並合併，之後才成為大家看到的版本。"}{user.caps.merge ? "你有合併權限，請回到 main 操作。" : "你沒有合併權限，等核准者處理。"}</p>
+              <div className="tbtn-row"><button className="tbtn" onClick={() => onOpen(baseOf(id))}>回到 main 看送審清單</button></div>
             </Step>
           </div>
           {showMine && mine && <Changes list={mine} post={post?.keys} />}
@@ -110,19 +215,21 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
           <div className="section-head"><h1 className="section-title">版本</h1><span className="label">main</span></div>
           <div className="vsteps">
             <Step n="①" title="修改" state="wait"><p className="body">在自己的分支上修改，不影響 main。下方可以開一個新分支。</p></Step>
-            <Step n="②" title="送審" state={pending.length > 0 ? "done" : "wait"}><p className="body">推送後出現在下方「送審中」，工具先檢查模型能不能解析。</p></Step>
+            <Step n="②" title="送審" state={pending.length > 0 ? "done" : "wait"}><p className="body">在分支的版本畫面按「送審」，狀態顯示在下方清單，並附上自動預跑的結果。</p></Step>
             <Step n="③" title="核准合併" state={pending.length > 0 ? "now" : "wait"}><p className="body">{pending.length > 0 ? `有 ${pending.length} 個分支等待審查。` : "目前沒有等待審查的分支。"}{user.caps.merge ? "按「合併」即可。" : "合併需要責任工程師以上的權限。"}</p></Step>
           </div>
 
-          <div className="section-head" style={{ marginTop: 16 }}><h2 className="section-title">送審中</h2><span className="label">{branches?.length ?? "…"}</span></div>
+          <div className="section-head" style={{ marginTop: 16 }}><h2 className="section-title">分支與送審狀態</h2><span className="label">{branches?.length ?? "…"}</span></div>
           {branches === null ? <p className="label">讀取中</p> : branches.length === 0 ? <p className="caption">目前沒有送審中的分支。</p> : (
             <table>
-              <thead><tr><th>分支</th><th>作者</th><th>最後修改</th><th>提交</th><th>預跑／檢查</th><th></th></tr></thead>
+              <thead><tr><th>分支</th><th>作者</th><th>最後修改</th><th>提交</th><th>送審</th><th>預跑／檢查</th><th></th></tr></thead>
               <tbody>{branches.map((b) => (
                 <tr key={b.name}>
                   <td className="id">{b.name}</td><td>{b.author}</td><td className="id">{when(b.date)}</td><td>{b.ahead} 筆<div className="caption">{b.subject}</div></td>
+                  <td><span className={`tag ${reviews[b.name]?.status === "submitted" ? "warn" : reviews[b.name]?.status === "returned" ? "danger" : ""}`}>{STATUS_ZH[reviews[b.name]?.status ?? "withdrawn"]}</span></td>
                   <td>{b.ok ? <span className="tag done">PASS</span> : <><span className="tag danger">ERR</span><div className="caption">{b.firstError}</div></>}</td>
                   <td><div className="tbtn-row">
+                    <button className="tbtn" onClick={() => setReviewOpen(reviewOpen === b.name ? null : b.name)}>送審紀錄</button>
                     <button className="tbtn" onClick={() => onOpen(refOf(id, b.name))}>開啟</button>
                     <button className="tbtn" onClick={() => run(async () => setOpen({ name: b.name, ...(await api<{ diff: string; changes: Change[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(b.name)}`)) }))}>看差異</button>
                     {user.caps.merge && b.ok && <button className="tbtn primary" onClick={() => merge(b.name)}>合併</button>}
@@ -130,6 +237,12 @@ export function VersionsView({ id, user, branch, onOpen, onChanged }: { id: stri
                 </tr>
               ))}</tbody>
             </table>
+          )}
+          {reviewOpen && (
+            <div style={{ marginTop: 16 }}>
+              <div className="section-head"><h3 className="section-title">{reviewOpen} 的送審紀錄</h3><button className="tbtn" onClick={() => setReviewOpen(null)}>關閉</button></div>
+              <ReviewPanel key={reviewOpen} id={id} branch={reviewOpen} user={user} mainView onChanged={refresh} />
+            </div>
           )}
           {open && (
             <div style={{ marginTop: 16 }}>
