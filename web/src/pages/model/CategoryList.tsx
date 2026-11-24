@@ -1,21 +1,28 @@
-// 模型頁中間（MOD-02）：左欄點了某層的類別，在這裡列出該類別的全部元素；點元素在右欄打開。
+// 模型頁中間（MOD-02）：左欄點了某層的類別，在這裡列出屬於該層的元素（可切換看全專案）；點元素在右欄打開。
+import { useState } from "react";
 import type { Meta, View } from "../../api.ts";
 import { listOf } from "../../model.ts";
+import type { ListSpec } from "./LayerTree.tsx";
 
 interface Props {
-  view: View; meta: Meta; category: string; selectedId: string | null; readOnly?: boolean;
+  view: View; meta: Meta; spec: ListSpec; selectedId: string | null; readOnly?: boolean;
   onElement: (id: string) => void; onNew: (category: string) => void; onClose: () => void;
 }
 
-export function CategoryList({ view, meta, category, selectedId, readOnly, onElement, onNew, onClose }: Props) {
+export function CategoryList({ view, meta, spec, selectedId, readOnly, onElement, onNew, onClose }: Props) {
+  const category = spec.category;
   const cat = meta.categories.find((c) => c.id === category);
-  const items = listOf(view.analysis.elements, category);
+  const [whole, setWhole] = useState(false);
+  const all = listOf(view.analysis.elements, category);
+  const mine = spec.ids ? new Set(spec.ids) : null;
+  const items = mine && !whole ? all.filter((e) => mine.has(e.id)) : all;
   const parentName = (id: string | null) => (id ? view.analysis.elements.find((e) => e.id === id)?.name ?? "" : "");
   return (
-    <section className="cat-list" aria-label={`${cat?.zh ?? category}列表`} data-list={category}>
+    <section className="cat-list" aria-label={`${cat?.zh ?? category}列表`} data-list={category} data-layer={spec.layer} data-scope={mine && !whole ? "layer" : "all"}>
       <div className="section-head">
-        <h2 className="section-title">{cat?.zh ?? category}</h2><span className="label">{items.length}</span>
+        <h2 className="section-title">{cat?.zh ?? category}</h2><span className="label">{mine && !whole ? spec.layerZh : "全專案"} · {items.length}</span>
         <span className="grow" />
+        {mine && <button className="tbtn" aria-pressed={whole} onClick={() => setWhole(!whole)} title="本層＝有 @LayerTag 標記或連到本層對象、需求、設計方案的元素（和本層 FMEA 同一套規則）">{whole ? `只看${spec.layerZh}` : `看全專案（${all.length}）`}</button>}
         <button className="tbtn" onClick={onClose}>回到圖</button>
       </div>
       {cat?.help && <p className="caption">{cat.help}</p>}

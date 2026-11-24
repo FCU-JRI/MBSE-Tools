@@ -207,6 +207,8 @@ export interface LayerResult {
   steps: StepResult[]; before: StepResult[]; objects: ObjectLoop[]; after: StepResult[];
   /** 迴圈層：至少一個對象、且每個對象的迴圈都走到「產出設計限制」；鏈狀層：每一步都完成 */
   passed: boolean;
+  /** 本層產生的各類別、屬於本層的元素 id（MOD-02 左欄用，見 layerMembers）；來源文件不是模型元素，只給數量 */
+  members?: Record<string, string[]>;
 }
 export interface TwoSourcesIssue { id: string; name: string; category: string; missing: ("derivation" | "basis")[]; text: string }
 export interface HoldPoint { category: string; zh: string; fromLayer: string; fromLayerZh: string; open: boolean; reason: string }
@@ -560,6 +562,49 @@ export function gateChecks(ev: FrameworkEval, gate: string, nameOf: (id: string)
         missing: l.objects.filter((o) => !o.passed && o.id).map((o) => ({ id: o.id as string, name: o.name })) });
       for (const r of l.after) add(l, r);
     }
+  }
+  return out;
+}
+
+/** 一層會產生的類別（框架檔順序、不重複）：鏈狀步驟／迴圈前步驟 → 迴圈產出 → 迴圈各步 → 迴圈後步驟。 */
+export function layerProduces(f: Framework, l: Layer): string[] {
+  const loop = l.kind === "loop" ? f.designLoop.steps.filter((s) => (l.loopSteps ?? []).includes(s.id)) : [];
+  const list = [...(l.steps ?? []), ...(l.before ?? [])].flatMap((s) => s.produces ?? [])
+    .concat(l.loopProduces ?? [], loop.flatMap((s) => s.produces ?? []), (l.after ?? []).flatMap((s) => s.produces ?? []));
+  return [...new Set(list)];
+}
+
+/**
+ * 分層歸屬（MOD-02）：每層產生的類別裡，哪些元素屬於這一層。規則和本層 FMEA（objectRisks）同一套：
+ * 只有一層產生的類別全部算該層；好幾層都產生的類別（風險、設計方案、性能量度…），有 @LayerTag 就照標記，
+ * 沒有就看是否連到本層的對象（或它的零件）、本層需求、本層設計方案與候選、分配給本層對象的功能。
+ */
+export function layerMembers(f: Framework, ctx: FwContext): Record<string, Record<string, string[]>> {
+  const h = helpers(ctx);
+  const made = new Map(f.layers.map((l) => [l.id, layerProduces(f, l)]));
+  const owners = new Map<string, number>();
+  for (const cats of made.values()) for (const c of cats) owners.set(c, (owners.get(c) ?? 0) + 1);
+  const out: Record<string, Record<string, string[]>> = {};
+  for (const l of f.layers) {
+    const tag = LAYER_TAG[l.subject];
+    const objs = l.kind === "loop" ? objectsOf(h, l) : [];
+    const ids = new Set<string>();
+    for (const o of objs) {
+      const reqs = reqsOf(h, l, o, objs);
+      const s: Scope = { layer: l, step: f.designLoop.steps[0], object: o, reqs };
+      if (o) for (const x of objectIds(h, o)) ids.add(x);
+      for (const r of reqs) ids.add(r.id);
+      for (const alt of objectAlternatives(h, s)) { ids.add(alt.id); for (const v of variantsOf(h, alt)) ids.add(v.id); }
+    }
+    for (const fn of h.of("Function")) if (h.out(fn, ["allocate"]).some((t) => ids.has(t.id))) ids.add(fn.id);
+    const members: Record<string, string[]> = {};
+    for (const c of made.get(l.id) ?? []) {
+      if (c === "Doc") continue;
+      const els = h.of(c);
+      members[c] = ((owners.get(c) ?? 0) <= 1 ? els
+        : els.filter((e) => ((e.attrs.layer ?? "").trim() ? e.attrs.layer === tag : ids.has(e.id) || h.linked(e, ids)))).map((e) => e.id);
+    }
+    out[l.id] = members;
   }
   return out;
 }

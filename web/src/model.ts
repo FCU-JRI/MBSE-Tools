@@ -133,7 +133,8 @@ export function diagramsOf(a: Analysis, extra?: Diagrams): DiagramDef[] {
   const byKind = (id: string | null) => a.elements.find((e) => e.id === id)?.kind;
   const kids = (id: string, kind: string) => a.elements.some((e) => e.owner === id && e.kind === kind);
   for (const e of a.elements) {
-    if (e.kind === "PartDefinition" && kids(e.id, "PartUsage")) out.push(def(`ibd:${e.qualifiedName}`, "ibd", e.name, e.id));
+    // 設計方案（variation def，底下是 variant 候選零件）不是內部結構，不產生內部連接圖（Mars 決定）
+    if (e.kind === "PartDefinition" && e.category !== "DesignAlternative" && kids(e.id, "PartUsage")) out.push(def(`ibd:${e.qualifiedName}`, "ibd", e.name, e.id));
     if (e.kind === "StateUsage" && (kids(e.id, "StateUsage") || e.category === "Mode") && byKind(e.owner) !== "StateUsage") out.push(def(`stm:${e.qualifiedName}`, "stm", e.name, e.id));
     if (e.kind === "ActionUsage" && kids(e.id, "ActionUsage")) out.push(def(`act:${e.qualifiedName}`, "act", e.name, e.id));
   }

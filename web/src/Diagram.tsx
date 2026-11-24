@@ -167,6 +167,8 @@ export interface DiagramProps {
   onPicked?: () => void;
   /** 給上層名稱列的「匯出 ▾」用（MOD-14） */
   handle?: React.RefObject<DiagramHandle | null>;
+  /** 工具箱依框架（MOD-14）：這張圖所在的層、該層框架自動化需要的元素與關係；其餘放「更多」 */
+  framework?: { layerZh: string; cats: string[]; links: string[] };
 }
 /** 上層可以呼叫的功能：匯出這張圖；notes＝草稿標註數（有才顯示「含草稿標註」） */
 export interface DiagramHandle { exportAs: (kind: "svg" | "png", withDraft: boolean) => void; notes: number }
@@ -193,10 +195,12 @@ const store = (key: string, v: unknown) => { try { localStorage.setItem(key, JSO
 /** 觸控裝置：單指拖曳維持移動畫面，不做框選 */
 const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 const newId = (prefix: string) => `${prefix}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+/** 設計依據（#basis）：下一層需求指向上一層的設計產出（框架「兩個來源」）。只在自訂圖能拉，兩端都要在圖上。 */
+const BASIS_LINK: LinkTool = { kind: "basis", zh: "設計依據", en: "#basis", hint: "從下一層需求拉到它依據的上一層設計產出（介面、設計決策、選定方案）" };
 const linkIconOf = (k: string): IconName => (k === "compose" ? "diamond" : ["refine", "trace", "basis"].includes(k) ? "dashed" : "line"); // 衍生是連結，畫實線
 type Moved = View & { moved: Record<string, string>; packageId: string | null; layout: Layout; diagrams: Diagrams };
 
-function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError, pickOnOpen, onPicked, handle }: DiagramProps) {
+function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError, pickOnOpen, onPicked, handle, framework }: DiagramProps) {
   const pid = view.project.id;
   const flow = useReactFlow();
   const rf = useStoreApi();
@@ -234,7 +238,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     return () => el.removeEventListener("wheel", onWheel, { capture: true });
   }, [flow]);
   const [confirm, setConfirm] = useState<null | "selection" | "diagram">(null);
-  const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg" | "els" | "links" | "more">(null);
+  const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg" | "more">(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(() => load("jri.toolbox", { collapsed: false }).collapsed);
@@ -252,9 +256,15 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   const drag = useRef<{ starts: Map<string, { x: number; y: number }>; pkgs: Map<string, { x: number; y: number }>; members: Map<string, { pkg: string; x: number; y: number }> } | null>(null);
 
   // 第一層工具：一般的圖用該圖固定的項目，自訂圖用釘選的項目
-  const elTools = custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c)) : PALETTE[def.kind];
-  const allowedLinks = LINK_TOOLS[def.kind];
-  const linkTools: LinkTool[] = custom ? ALL_LINKS.filter((t) => pins.links.includes(t.kind)) : allowedLinks;
+  // 有框架時：本層需要的元素全部列（這張圖不顯示的也能建，建好在右欄與左欄列表）；關係只列這張圖拉得出來的
+  const allowedLinks = custom ? [...ALL_LINKS, BASIS_LINK] : LINK_TOOLS[def.kind];
+  // 自訂圖另外加上自己釘選的
+  const pinned = custom ? pins : { els: [] as string[], links: [] as string[] };
+  const elTools = framework ? [...new Set([...framework.cats, ...pinned.els])].filter((c) => meta.categories.some((x) => x.id === c))
+    : custom ? pins.els.filter((c) => meta.categories.some((x) => x.id === c)) : PALETTE[def.kind];
+  const linkTools: LinkTool[] = framework ? allowedLinks.filter((t) => framework.links.includes(t.kind) || pinned.links.includes(t.kind))
+    : custom ? ALL_LINKS.filter((t) => pins.links.includes(t.kind)) : allowedLinks;
+  const shows = (c: string) => custom || PALETTE[def.kind].includes(c);
 
   useEffect(() => { api<Layout>(`/projects/${pid}/layout`).then((l) => { layoutRef.current = l; setLayout(l); }).catch(() => setLayout({})); }, [pid]);
   useEffect(() => { setTool("select"); setSelEdge(null); setSelNote(null); setConfirm(null); setPanel(null); setMenu(null); multiRef.current = []; setMulti([]); pending.current = null; }, [def.id]);
@@ -434,10 +444,10 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
 
   const onConnect = useCallback((c: Connection) => {
     if (readOnly || !c.source || !c.target || c.source === c.target) return;
-    const kind = tool !== "select" ? tool : linkTools[0]?.kind;
+    const kind = tool !== "select" ? tool : (linkTools[0] ?? allowedLinks[0])?.kind;
     if (!kind) return;
     act(() => api<View>(`/projects/${pid}/relations`, "POST", { kind, from: c.source, to: c.target }));
-  }, [readOnly, tool, linkTools, pid, act]);
+  }, [readOnly, tool, linkTools, allowedLinks, pid, act]);
 
   const clearSel = () => { setSelEdge(null); setSelNote(null); setConfirm(null); onSelectEdge(null); };
   /** 結束多選，只留下指定的節點（或都不選） */
@@ -464,6 +474,12 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
   };
   const newElement = (c: string) => {
     setTool("select"); setPanel(null); setSelNote(null);
+    // 介面不是用新增表單建：在系統（或次系統）的右欄「介面」加
+    if (meta.categories.find((x) => x.id === c)?.special) {
+      const ctx = view.analysis.elements.find((e) => e.id === def.context && e.kind === "PartDefinition");
+      if (ctx) onSelectElement(ctx.id); else onError(`${meta.categories.find((x) => x.id === c)?.zh ?? c}要在系統或次系統的右欄新增：先點選那個系統。`);
+      return;
+    }
     if (custom) pending.current = new Set(modelItems(view.analysis.elements).map((e) => e.id));
     onNew(c, def.kind === "act" || def.kind === "stm" ? def.context : null);
   };
@@ -685,12 +701,21 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           <Tool onClick={toggleCollapsed} glyph={collapsed ? "»" : "«"} text={collapsed ? "展開工具列" : "收合工具列"} />
           <Tool on={tool === "select"} onClick={() => setTool("select")} icon="select" text="選取" sub="Shift＋捲動平移" title="點選、拖曳移動。在空白處拖曳可以框選多個一起移動；按住 Ctrl 或 Shift 點選可以加選；Ctrl+A 全選。按右鍵有快速功能。要移動畫面：按住 Shift 捲動（滾輪或觸控板兩指滑動）；也可以按住滑鼠右鍵或中鍵拖曳，或按住空白鍵拖曳。" />
         </div>
-        {/* 常用 7 顆（選取、元素、連線、套件、註解、復原、全覽）；其餘收進「更多」。匯出在圖上方名稱列。 */}
-        <div className="tool-group" data-tools="common">
-          {!readOnly && <Tool on={panel === "els"} onClick={() => { setPanel(panel === "els" ? null : "els"); }} icon="usage" text="元素" title="建立新的模型元素" />}
-          {!readOnly && <Tool on={panel === "links" || !!activeLink} onClick={() => setPanel(panel === "links" ? null : "links")} icon="line" text={activeLink ? `連線：${activeLink.zh}` : "連線"} title="選一種連線，再從起點拉到終點" />}
-          {!readOnly && <Tool on={panel === "pkg"} onClick={() => setPanel(panel === "pkg" ? null : "pkg")} icon="package" text="套件" sub="package" title="把屬於同一群的項目放在一起。把項目拖進框裡就歸屬這個套件，拖出來就移出。會寫進模型。" />}
-          {!readOnly && <Tool disabled={busy} onClick={() => addComment("註解", undefined, onThisDiagram && selectedEl?.kind !== "Comment" && selectedEl?.kind !== "Package" ? selectedEl?.id : undefined)} icon="comment" text="註解" sub="comment" title="先選一個項目再按，註解就會連到它；沒有選取就是整個模型的註解。會寫進模型。" />}
+        {/* 依框架（MOD-14）：這張圖所在層的框架自動化需要的元素與關係；套件、註解、重做、放大縮小等放「更多」。匯出在圖上方名稱列。 */}
+        {!readOnly && elTools.length > 0 && (
+          <div className="tool-group" data-tools="elements">
+            <span className="label" title={framework ? `第「${framework.layerZh}」層的框架步驟會用到的元素` : undefined}>{framework ? `${framework.layerZh}・元素` : "元素"}</span>
+            {elTools.map((c) => <Tool key={c} onClick={() => newElement(c)} icon={CATEGORY_SHAPE[c] ?? "usage"} text={catOf(c)?.zh ?? c} sub={shows(c) ? undefined : "不在這張圖"}
+              title={`${catOf(c)?.help ?? ""}${shows(c) ? "" : "（這張圖不顯示這類項目：建好後在右欄編輯，左欄該層的類別列表找得到）"}`} />)}
+          </div>
+        )}
+        {!readOnly && linkTools.length > 0 && (
+          <div className="tool-group" data-tools="links">
+            <span className="label">{framework ? `${framework.layerZh}・關係` : "連線"}</span>
+            {linkTools.map((t) => <Tool key={t.kind} on={tool === t.kind} onClick={() => setTool(tool === t.kind ? "select" : t.kind)} icon={linkIconOf(t.kind)} text={t.zh} sub={t.en} title={t.hint} />)}
+          </div>
+        )}
+        <div className="tool-group" data-tools="basic">
           {!readOnly && <Tool disabled={busy || !view.history?.undo} onClick={() => stepHistory("undo")} glyph="↶" text="復原" sub="Ctrl+Z" title="回到上一步（對模型的修改）。可以連續按，一步一步往回。" />}
           <Tool onClick={() => flow.fitView({ padding: 0.15, maxZoom: 1 })} glyph="⤢" text="全覽" />
         </div>
@@ -705,7 +730,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           </div>
         )}
         <div className="tool-group">
-          <Tool on={panel === "more"} onClick={() => setPanel(panel === "more" ? null : "more")} glyph="⋯" text="更多" title="重做、刪除、放大縮小、自動排列、加入既有項目、全部工具、重新命名、刪除這張圖" />
+          <Tool on={panel === "more"} onClick={() => setPanel(panel === "more" ? null : "more")} glyph="⋯" text="更多" title="套件、註解、重做、刪除、放大縮小、自動排列、加入既有項目、全部工具、重新命名、刪除這張圖" />
         </div>
       </div>
       <div ref={canvasRef} className={`canvas ${activeLink ? "linking" : ""}`} tabIndex={0} onKeyDown={onKey}>
@@ -745,27 +770,14 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} onBlur={(e) => rename(e.target.value)} />
           </div>
         )}
-        {panel === "els" && (
-          <div className="canvas-panel" role="dialog" aria-label="元素">
-            <div className="section-head"><h2 className="section-title">元素</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
-            {elTools.length === 0 && <p className="caption muted">{custom ? "還沒有釘選常用元素，到「全部工具」釘選。" : "這張圖沒有可新增的元素。"}</p>}
-            <div className="tool-group">{elTools.map((c) => <Tool key={c} onClick={() => { setPanel(null); newElement(c); }} icon={CATEGORY_SHAPE[c] ?? "usage"} text={catOf(c)?.zh ?? c} title={catOf(c)?.help} />)}</div>
-            <div className="tool-group"><Tool onClick={() => { setQuery(""); setPanel("all"); }} glyph="⋯" text="全部工具" title="所有元素、連線與標註" /></div>
-          </div>
-        )}
-        {panel === "links" && (
-          <div className="canvas-panel" role="dialog" aria-label="連線">
-            <div className="section-head"><h2 className="section-title">連線</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
-            {linkTools.length === 0 && <p className="caption muted">這張圖不使用連線。</p>}
-            <div className="tool-group">
-              <Tool on={tool === "select"} onClick={() => { setTool("select"); setPanel(null); }} icon="select" text="不連線（選取）" />
-              {linkTools.map((t) => <Tool key={t.kind} on={tool === t.kind} onClick={() => { setTool(t.kind); setPanel(null); }} icon={linkIconOf(t.kind)} text={t.zh} sub={t.en} title={t.hint} />)}
-            </div>
-          </div>
-        )}
         {panel === "more" && (
           <div className="canvas-panel" role="dialog" aria-label="更多">
             <div className="section-head"><h2 className="section-title">更多</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
+            {!readOnly && <div className="tool-group">
+              <span className="label">組織（寫進模型）</span>
+              <Tool onClick={() => setPanel("pkg")} icon="package" text="套件" sub="package" title="把屬於同一群的項目放在一起。把項目拖進框裡就歸屬這個套件，拖出來就移出。會寫進模型。" />
+              <Tool disabled={busy} onClick={() => { setPanel(null); addComment("註解", undefined, onThisDiagram && selectedEl?.kind !== "Comment" && selectedEl?.kind !== "Package" ? selectedEl?.id : undefined); }} icon="comment" text="註解" sub="comment" title="先選一個項目再按，註解就會連到它；沒有選取就是整個模型的註解。會寫進模型。" />
+            </div>}
             {!readOnly && <div className="tool-group">
               <span className="label">編輯</span>
               <Tool disabled={busy || !view.history?.redo} onClick={() => stepHistory("redo")} glyph="↷" text="重做" sub="Ctrl+Y" title="把剛才復原的那一步做回來。復原之後若做了新的修改，就不能再重做。" />
@@ -814,7 +826,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
               })}
               <div className="tool-group">
                 <span className="label">連線</span>
-                {ALL_LINKS.filter((t) => match(t.zh, t.en)).map((t) => {
+                {[...ALL_LINKS, BASIS_LINK].filter((t) => match(t.zh, t.en)).map((t) => {
                   const ok = allowedLinks.some((x) => x.kind === t.kind);
                   return (
                     <div className="tool-row" key={t.kind}>

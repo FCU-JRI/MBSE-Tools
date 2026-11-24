@@ -273,7 +273,12 @@ const catZh = (id: string) => CATS.find((c) => c.id === id)?.zh ?? id;
 /** 畫面資料用：框架執行結果。模型有錯時回傳 null。 */
 export async function frameworkView(ref: string, project: Project, a: Analysis, docs: number): Promise<fw.FrameworkEval | null> {
   if (!a.ok) return null;
-  return fw.evaluateFramework(framework(), { a, settings: settingsOf(project), docs, approval: await approvalState(ref), catZh });
+  const ctx = { a, settings: settingsOf(project), docs, approval: await approvalState(ref), catZh };
+  const ev = fw.evaluateFramework(framework(), ctx);
+  // 模型頁左欄（MOD-02）：每層各類別屬於本層的元素
+  const members = fw.layerMembers(framework(), ctx);
+  for (const l of ev.layers) l.members = members[l.id] ?? {};
+  return ev;
 }
 
 /** 新增元素前的卡點（FW-02）：只警告不擋（Mars 決定）。回傳要顯示的警告，null＝沒有卡點。 */
