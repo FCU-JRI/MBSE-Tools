@@ -619,11 +619,11 @@
     "framework"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "框架",
    "framework": "designLoop",
    "verify": "每層每個對象在第幾步一眼看出",
-   "note": "依賴 FW-03"
+   "note": "WP5b-2 #47：首頁設計迴圈進度，點對象到模型頁"
   },
   {
    "id": "PROC-01",
@@ -785,11 +785,11 @@
     "framework"
    ],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "D：照流程生框架、畫面從框架長出",
    "framework": "layers",
    "verify": "左欄層級與框架檔一致",
-   "note": "PR #38 照錯的理解做，先不合併；框架定案後重做"
+   "note": "WP5b-1 #48：左欄由框架檔 7 層長出，層標題帶節點進度與現在、類別與迴圈對象進度"
   },
   {
    "id": "MOD-03",
@@ -1001,11 +1001,11 @@
    "api": "",
    "reads": [],
    "writes": [],
-   "status": "missing",
+   "status": "ok",
    "sources": "R3",
    "framework": "",
    "verify": "—",
-   "note": "做在 PR #38，未合併"
+   "note": "WP5b-1 #48：工具箱 7 顆＋更多、右欄最下方新增按鈕、名稱列匯出 ▾"
   },
   {
    "id": "MOD-15",
@@ -1117,11 +1117,11 @@
     "model",
     "git"
    ],
-   "status": "partial",
+   "status": "ok",
    "sources": "S1；PR #35",
    "framework": "",
    "verify": "全部關係種類都能改",
-   "note": "WP5a #45：實測後回報 Inspector 關係列標籤與連接在圖上選線改的問題，屬共用檔，未修"
+   "note": "WP5b-1 #48：關係改對象／類型逐一實測並修補"
   },
   {
    "id": "MOD-21",
@@ -1679,11 +1679,11 @@
    "writes": [
     "model"
    ],
-   "status": "missing",
+   "status": "ok",
    "sources": "SPEC 分析；約束圖連動討論",
    "framework": "designLoop.calc",
    "verify": "軸與約束線從模型推出；選點可寫回",
-   "note": "可用解析器 runSweep 掃描（參數寫法要再查）"
+   "note": "WP5b-2 #47：約束圖連動模型與需求，可校正、可寫回設計點；標明參考"
   },
   {
    "id": "ANA-09",
