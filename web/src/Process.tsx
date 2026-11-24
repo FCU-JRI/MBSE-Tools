@@ -2,6 +2,7 @@
 // 每一步固定「要做什麼／怎麼做／還缺」；進度、卡點、兩個來源都由伺服器從模型證據算出（view.framework），網頁不另外判斷。
 import { useEffect, useState } from "react";
 import type { Me, Meta, View } from "./api.ts";
+import { label, listOf } from "./model.ts";
 import type { Page } from "./workspace.ts";
 
 /** 伺服器 server/framework.ts 的 FrameworkEval（只列網頁用到的欄位） */
@@ -129,7 +130,7 @@ function ObjectLoop(p: Props & { obj: FwObject }) {
   );
 }
 
-function StepList(p: Props & { steps: FwStep[] }) {
+function StepList(p: Props & { steps: FwStep[]; layer?: FwLayer; obj?: FwObject }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(p.steps.filter((s) => s.state === "current").map((s) => s.id)));
   const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   return (
@@ -153,8 +154,41 @@ function StepList(p: Props & { steps: FwStep[] }) {
   );
 }
 
-function StepBody(p: Props & { step: FwStep; steps: FwStep[] }) {
+/**
+ * 給 AI 的提示（PROC-04，TR-09）：依框架步驟產生。使用者貼給自己的 AI（工具不代收任何人的 AI 憑證），
+ * AI 照框架原則一次問一題，最後輸出可以照著新增的清單；工具不自動匯入。
+ */
+export function aiPrompt(view: View, meta: Meta, step: FwStep, layer: FwLayer | undefined, obj: FwObject | undefined): string {
+  const zh = (id: string) => meta.categories.find((c) => c.id === id)?.zh ?? id;
+  const els = view.analysis.elements;
+  const have = step.produces.length ? listOf(els, ...step.produces).filter((e) => !e.shared).map((e) => `- ${label(e)}${e.doc ? `：${e.doc}` : ""}`).join("\n") : "";
+  const reqs = !layer ? [] : listOf(els, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement").filter((e) => !e.shared);
+  const fw = fwOf(view);
+  return [
+    `你正在協助 JRI（學生火箭團隊）依「${fw?.name ?? "JRI 系統工程框架"}」（framework/jri.json）建立 SysML v2 模型。專案：${view.project.name}。`,
+    `框架原則：需求與設計交替；每一層的設計迴圈沒走到「是否符合需求＝是」，不能推導下一層需求；下一層需求要同時衍生自上一層需求並以 #basis 連到上一層的設計產出；pass／fail 只由 constraint 與模擬決定，你的判斷只當參考。不要編造數值、規範或設計參數，不確定就先問我。`,
+    ``,
+    `現在是第 ${layer?.order ?? "?"} 層「${layer?.zh ?? ""}」${obj && obj.id ? `、對象「${obj.name}」` : ""}的「${step.zh}」${step.decision ? "（判斷步驟）" : ""}${step.holdPoint ? "（卡點）" : ""}。`,
+    step.checkZh ? `完成條件：${step.checkZh}` : "",
+    step.produces.length ? `這一步要產出：${step.produces.map(zh).join("、")}` : "",
+    step.ownerZh ? `負責：${step.ownerZh}` : "",
+    step.issues.length ? `工具目前判定還缺：\n${step.issues.map((i) => `- ${i.text}`).join("\n")}` : "",
+    have ? `這一步已經有的項目：\n${have}` : step.produces.length ? "這一步已經有的項目：（還沒有）" : "",
+    reqs.length ? `本專案目前的需求（可供連結）：\n${reqs.slice(0, 40).map((e) => `- ${label(e)}`).join("\n")}` : "",
+    layer?.outputsZh ? `本層設計迴圈的產出：${layer.outputsZh}` : "",
+    ``,
+    `請先針對上面還缺的部分向我提問，一次一題。等我回答完，把結果整理成清單：每項寫類別、名稱、內容（繁體中文${step.produces.some((c) => /Requirement/.test(c)) ? "，需求用「應」字且一條一件事" : ""}），以及要連到哪個既有項目、用什麼關係（衍生自、追溯到、#basis、滿足）。我會自己到模型頁新增。`,
+  ].filter((l) => l !== "").join("\n");
+}
+
+function StepBody(p: Props & { step: FwStep; steps: FwStep[]; layer?: FwLayer; obj?: FwObject }) {
   const s = p.step;
+  const [aiMsg, setAiMsg] = useState("");
+  const prompt = () => aiPrompt(p.view, p.meta, s, p.layer, p.obj);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(prompt()); setAiMsg("已複製。貼到你自己的 AI，回答它的提問；它整理好的清單請自己檢查後到模型頁新增。"); }
+    catch { setAiMsg("無法自動複製，請展開「看提示內容」手動選取。"); }
+  };
   const where = s.where ? WHERE[s.where] : null;
   const cat = (id: string) => p.meta.categories.find((c) => c.id === id);
   const creatable = s.produces.filter((c) => cat(c) && !cat(c)?.special);
@@ -177,7 +211,10 @@ function StepBody(p: Props & { step: FwStep; steps: FwStep[] }) {
           {creatable.slice(0, 3).map((c) => <button key={c} className="btn" disabled={!p.user.caps.edit} onClick={() => p.onNew(c)}>到模型頁新增{cat(c)?.zh} →</button>)}
           {where?.page && where.page !== "model" && <button className="tbtn" onClick={() => p.go(where.page as Page)}>到{where.zh} →</button>}
           {s.gate && <button className="tbtn" onClick={() => p.go("manage")}>到專案管理頁 →</button>}
+          {!s.gate && s.where !== "auto" && <button type="button" className="tbtn primary" data-ai-prompt={s.id} onClick={copy}>複製給 AI 的提示</button>}
         </div>
+        {aiMsg && <p className="msg" role="status">{aiMsg}</p>}
+        {!s.gate && s.where !== "auto" && <details><summary className="tbtn">看提示內容</summary><pre className="code" style={{ maxHeight: 220, whiteSpace: "pre-wrap" }}>{prompt()}</pre></details>}
       </div>
       <div className="guide-part">
         <h2 className="label">還缺</h2>
