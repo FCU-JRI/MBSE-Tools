@@ -165,7 +165,11 @@ export interface DiagramProps {
   /** 剛建好的自訂圖：一打開就跳出「加入既有項目」 */
   pickOnOpen?: boolean;
   onPicked?: () => void;
+  /** 給上層名稱列的「匯出 ▾」用（MOD-14） */
+  handle?: React.RefObject<DiagramHandle | null>;
 }
+/** 上層可以呼叫的功能：匯出這張圖；notes＝草稿標註數（有才顯示「含草稿標註」） */
+export interface DiagramHandle { exportAs: (kind: "svg" | "png", withDraft: boolean) => void; notes: number }
 
 export function Diagram(props: DiagramProps) {
   return <ReactFlowProvider><Canvas {...props} /></ReactFlowProvider>;
@@ -192,7 +196,7 @@ const newId = (prefix: string) => `${prefix}:${Date.now().toString(36)}${Math.ra
 const linkIconOf = (k: string): IconName => (k === "compose" ? "diamond" : ["refine", "trace", "basis"].includes(k) ? "dashed" : "line"); // 衍生是連結，畫實線
 type Moved = View & { moved: Record<string, string>; packageId: string | null; layout: Layout; diagrams: Diagrams };
 
-function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError, pickOnOpen, onPicked }: DiagramProps) {
+function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelectElement, onSelectEdge, onNew, onChanged, onError, pickOnOpen, onPicked, handle }: DiagramProps) {
   const pid = view.project.id;
   const flow = useReactFlow();
   const rf = useStoreApi();
@@ -230,8 +234,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     return () => el.removeEventListener("wheel", onWheel, { capture: true });
   }, [flow]);
   const [confirm, setConfirm] = useState<null | "selection" | "diagram">(null);
-  const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg">(null);
-  const [withDraft, setWithDraft] = useState(() => load("jri.export", { draft: false }).draft);
+  const [panel, setPanel] = useState<null | "all" | "add" | "rename" | "pkg" | "els" | "links" | "more">(null);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(() => load("jri.toolbox", { collapsed: false }).collapsed);
@@ -648,7 +651,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     return { x, y, w, h, svg: frameSvg(frameLabel(def), 0, 0, w, h, SCREEN) };
   }, [nodes, def]);
 
-  const exportAs = (kind: "svg" | "png") => {
+  const exportAs = (kind: "svg" | "png", withDraft: boolean) => {
     const placed = (flow.getNodes() as FlowNode[]).filter((n) => n.data.g).map((n) => ({ g: n.data.g!, x: n.position.x, y: n.position.y }));
     const drafts = withDraft ? notes : []; // 草稿標註不是模型的一部分，預設不輸出
     if (placed.length + drafts.length === 0) return;
@@ -657,6 +660,7 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
     if (kind === "svg") downloadSvg(svg, name); else downloadPng(svg, name).catch((e) => onError((e as Error).message));
   };
 
+  if (handle) (handle as React.MutableRefObject<DiagramHandle | null>).current = { exportAs, notes: notes.length };
   const activeLink = allowedLinks.find((t) => t.kind === tool);
   const onKey = (e: React.KeyboardEvent) => {
     if ((e.target as HTMLElement).closest("input,textarea,select")) return;
@@ -681,66 +685,28 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
           <Tool onClick={toggleCollapsed} glyph={collapsed ? "»" : "«"} text={collapsed ? "展開工具列" : "收合工具列"} />
           <Tool on={tool === "select"} onClick={() => setTool("select")} icon="select" text="選取" sub="Shift＋捲動平移" title="點選、拖曳移動。在空白處拖曳可以框選多個一起移動；按住 Ctrl 或 Shift 點選可以加選；Ctrl+A 全選。按右鍵有快速功能。要移動畫面：按住 Shift 捲動（滾輪或觸控板兩指滑動）；也可以按住滑鼠右鍵或中鍵拖曳，或按住空白鍵拖曳。" />
         </div>
-        {!readOnly && elTools.length > 0 && (
-          <div className="tool-group">
-            <span className="label">元素</span>
-            {elTools.map((c) => <Tool key={c} onClick={() => newElement(c)} icon={CATEGORY_SHAPE[c] ?? "usage"} text={catOf(c)?.zh ?? c} title={catOf(c)?.help} />)}
-          </div>
-        )}
-        {!readOnly && linkTools.length > 0 && (
-          <div className="tool-group">
-            <span className="label">連線</span>
-            {linkTools.map((t) => <Tool key={t.kind} on={tool === t.kind} onClick={() => setTool(tool === t.kind ? "select" : t.kind)} icon={linkIconOf(t.kind)} text={t.zh} sub={t.en} title={t.hint} />)}
-          </div>
-        )}
-        {!readOnly && (
-          <div className="tool-group">
-            <span className="label">組織</span>
-            <Tool on={panel === "pkg"} onClick={() => setPanel(panel === "pkg" ? null : "pkg")} icon="package" text="套件" sub="package" title="把屬於同一群的項目放在一起。把項目拖進框裡就歸屬這個套件，拖出來就移出。會寫進模型。" />
-            <Tool disabled={busy} onClick={() => addComment("註解", undefined, onThisDiagram && selectedEl?.kind !== "Comment" && selectedEl?.kind !== "Package" ? selectedEl?.id : undefined)} icon="comment" text="註解" sub="comment" title="先選一個項目再按，註解就會連到它；沒有選取就是整個模型的註解。會寫進模型。" />
-          </div>
-        )}
-        {!readOnly && (
-          <div className="tool-group">
-            <span className="label">更多</span>
-            <Tool on={panel === "all"} onClick={() => { setQuery(""); setPanel(panel === "all" ? null : "all"); }} glyph="⋯" text="全部工具" title="所有元素、連線與標註" />
-            {custom && <Tool on={panel === "add"} onClick={() => { setQuery(""); setPanel(panel === "add" ? null : "add"); }} glyph="＋" text="加入既有項目" title="把模型裡已有的項目放進這張圖" />}
-          </div>
-        )}
-        {!readOnly && (
-          <div className="tool-group">
-            <span className="label">編輯</span>
-            {confirm === "selection"
-              ? <><Tool danger onClick={doDelete} disabled={busy} glyph="✓" text="確定刪除" /><Tool onClick={() => setConfirm(null)} glyph="×" text="取消" /></>
-              : <Tool disabled={!canDelete || busy} onClick={() => setConfirm("selection")} glyph="✕" text={multi.length ? `刪除選取（${delCount}）` : "刪除選取"} title={note ? "刪除選取的標註（Delete 鍵）" : "從模型刪除選取的元素或連線（Delete 鍵）"} />}
-            {outIds.length > 0 && <Tool disabled={busy} onClick={moveOut} glyph="⇱" text="移出套件" title="把選取的項目移回上一層套件（也可以直接把它拖出框外）" />}
-            {custom && <Tool disabled={!onThisDiagram} onClick={() => { setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); }} glyph="−" text="移出此圖" title="只從這張圖拿掉，模型裡仍然保留" />}
-            <Tool disabled={busy || !view.history?.undo} onClick={() => stepHistory("undo")} glyph="↶" text="復原" sub="Ctrl+Z" title="回到上一步（對模型的修改）。可以連續按，一步一步往回。" />
-            <Tool disabled={busy || !view.history?.redo} onClick={() => stepHistory("redo")} glyph="↷" text="重做" sub="Ctrl+Y" title="把剛才復原的那一步做回來。復原之後若做了新的修改，就不能再重做。" />
-          </div>
-        )}
-        <div className="tool-group">
-          <span className="label">檢視</span>
-          <Tool onClick={() => flow.zoomIn()} glyph="＋" text="放大" />
-          <Tool onClick={() => flow.zoomOut()} glyph="－" text="縮小" />
+        {/* 常用 7 顆（選取、元素、連線、套件、註解、復原、全覽）；其餘收進「更多」。匯出在圖上方名稱列。 */}
+        <div className="tool-group" data-tools="common">
+          {!readOnly && <Tool on={panel === "els"} onClick={() => { setPanel(panel === "els" ? null : "els"); }} icon="usage" text="元素" title="建立新的模型元素" />}
+          {!readOnly && <Tool on={panel === "links" || !!activeLink} onClick={() => setPanel(panel === "links" ? null : "links")} icon="line" text={activeLink ? `連線：${activeLink.zh}` : "連線"} title="選一種連線，再從起點拉到終點" />}
+          {!readOnly && <Tool on={panel === "pkg"} onClick={() => setPanel(panel === "pkg" ? null : "pkg")} icon="package" text="套件" sub="package" title="把屬於同一群的項目放在一起。把項目拖進框裡就歸屬這個套件，拖出來就移出。會寫進模型。" />}
+          {!readOnly && <Tool disabled={busy} onClick={() => addComment("註解", undefined, onThisDiagram && selectedEl?.kind !== "Comment" && selectedEl?.kind !== "Package" ? selectedEl?.id : undefined)} icon="comment" text="註解" sub="comment" title="先選一個項目再按，註解就會連到它；沒有選取就是整個模型的註解。會寫進模型。" />}
+          {!readOnly && <Tool disabled={busy || !view.history?.undo} onClick={() => stepHistory("undo")} glyph="↶" text="復原" sub="Ctrl+Z" title="回到上一步（對模型的修改）。可以連續按，一步一步往回。" />}
           <Tool onClick={() => flow.fitView({ padding: 0.15, maxZoom: 1 })} glyph="⤢" text="全覽" />
-          <Tool onClick={resetLayout} glyph="▦" text="自動排列" title="重新排列這張圖的所有節點（標註不動）" />
         </div>
-        <div className="tool-group">
-          <span className="label">匯出</span>
-          <Tool onClick={() => exportAs("png")} glyph="P" text="PNG" />
-          <Tool onClick={() => exportAs("svg")} glyph="S" text="SVG" />
-          {notes.length > 0 && <Tool on={withDraft} onClick={() => setWithDraft((v: boolean) => { store("jri.export", { draft: !v }); return !v; })} glyph="✎" text="含草稿標註" title="草稿便箋、外框與文字不是模型的一部分，預設不會出現在匯出的圖上。" />}
-        </div>
-        {custom && !readOnly && (
+        {!readOnly && confirm === "selection" && (
           <div className="tool-group">
-            <span className="label">這張圖</span>
-            <Tool on={panel === "rename"} onClick={() => setPanel(panel === "rename" ? null : "rename")} glyph="✎" text="重新命名" />
-            {confirm === "diagram"
-              ? <><Tool danger onClick={deleteDiagram} glyph="✓" text="確定刪除" /><Tool onClick={() => setConfirm(null)} glyph="×" text="取消" /></>
-              : <Tool onClick={() => setConfirm("diagram")} glyph="✕" text="刪除這張圖" title="只刪除這張圖，裡面的模型項目仍然保留" />}
+            <Tool danger onClick={doDelete} disabled={busy} glyph="✓" text="確定刪除" /><Tool onClick={() => setConfirm(null)} glyph="×" text="取消" />
           </div>
         )}
+        {custom && !readOnly && confirm === "diagram" && (
+          <div className="tool-group">
+            <Tool danger onClick={deleteDiagram} glyph="✓" text="確定刪除這張圖" /><Tool onClick={() => setConfirm(null)} glyph="×" text="取消" />
+          </div>
+        )}
+        <div className="tool-group">
+          <Tool on={panel === "more"} onClick={() => setPanel(panel === "more" ? null : "more")} glyph="⋯" text="更多" title="重做、刪除、放大縮小、自動排列、加入既有項目、全部工具、重新命名、刪除這張圖" />
+        </div>
       </div>
       <div ref={canvasRef} className={`canvas ${activeLink ? "linking" : ""}`} tabIndex={0} onKeyDown={onKey}>
         {activeLink && <div className="canvas-hint"><span className="tag done">{activeLink.zh}</span><span className="caption">{activeLink.hint}。按 Esc 結束。</span></div>}
@@ -777,6 +743,49 @@ function Canvas({ readOnly, view, meta, def, extra, onExtra, selectedId, onSelec
             <span className="tag">名稱</span>
             <input className="input" style={{ width: 240 }} defaultValue={def.title} maxLength={60} aria-label="圖的名稱" autoFocus
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} onBlur={(e) => rename(e.target.value)} />
+          </div>
+        )}
+        {panel === "els" && (
+          <div className="canvas-panel" role="dialog" aria-label="元素">
+            <div className="section-head"><h2 className="section-title">元素</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
+            {elTools.length === 0 && <p className="caption muted">{custom ? "還沒有釘選常用元素，到「全部工具」釘選。" : "這張圖沒有可新增的元素。"}</p>}
+            <div className="tool-group">{elTools.map((c) => <Tool key={c} onClick={() => { setPanel(null); newElement(c); }} icon={CATEGORY_SHAPE[c] ?? "usage"} text={catOf(c)?.zh ?? c} title={catOf(c)?.help} />)}</div>
+            <div className="tool-group"><Tool onClick={() => { setQuery(""); setPanel("all"); }} glyph="⋯" text="全部工具" title="所有元素、連線與標註" /></div>
+          </div>
+        )}
+        {panel === "links" && (
+          <div className="canvas-panel" role="dialog" aria-label="連線">
+            <div className="section-head"><h2 className="section-title">連線</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
+            {linkTools.length === 0 && <p className="caption muted">這張圖不使用連線。</p>}
+            <div className="tool-group">
+              <Tool on={tool === "select"} onClick={() => { setTool("select"); setPanel(null); }} icon="select" text="不連線（選取）" />
+              {linkTools.map((t) => <Tool key={t.kind} on={tool === t.kind} onClick={() => { setTool(t.kind); setPanel(null); }} icon={linkIconOf(t.kind)} text={t.zh} sub={t.en} title={t.hint} />)}
+            </div>
+          </div>
+        )}
+        {panel === "more" && (
+          <div className="canvas-panel" role="dialog" aria-label="更多">
+            <div className="section-head"><h2 className="section-title">更多</h2><button className="tbtn" onClick={() => setPanel(null)}>關閉</button></div>
+            {!readOnly && <div className="tool-group">
+              <span className="label">編輯</span>
+              <Tool disabled={busy || !view.history?.redo} onClick={() => stepHistory("redo")} glyph="↷" text="重做" sub="Ctrl+Y" title="把剛才復原的那一步做回來。復原之後若做了新的修改，就不能再重做。" />
+              <Tool disabled={!canDelete || busy} onClick={() => { setPanel(null); setConfirm("selection"); }} glyph="✕" text={multi.length ? `刪除選取（${delCount}）` : "刪除選取"} title={note ? "刪除選取的標註（Delete 鍵）" : "從模型刪除選取的元素或連線（Delete 鍵）"} />
+              {outIds.length > 0 && <Tool disabled={busy} onClick={() => { setPanel(null); moveOut(); }} glyph="⇱" text="移出套件" title="把選取的項目移回上一層套件（也可以直接把它拖出框外）" />}
+              {custom && <Tool disabled={!onThisDiagram} onClick={() => { setPanel(null); setMembers((ids) => ids.filter((x) => x !== selectedId)); onSelectElement(null); }} glyph="−" text="移出此圖" title="只從這張圖拿掉，模型裡仍然保留" />}
+              {custom && <Tool onClick={() => { setQuery(""); setPanel("add"); }} glyph="＋" text="加入既有項目" title="把模型裡已有的項目放進這張圖" />}
+              <Tool onClick={() => { setQuery(""); setPanel("all"); }} glyph="⋯" text="全部工具" title="所有元素、連線與標註" />
+            </div>}
+            <div className="tool-group">
+              <span className="label">檢視</span>
+              <Tool onClick={() => flow.zoomIn()} glyph="＋" text="放大" />
+              <Tool onClick={() => flow.zoomOut()} glyph="－" text="縮小" />
+              <Tool onClick={() => { setPanel(null); resetLayout(); }} glyph="▦" text="自動排列" title="重新排列這張圖的所有節點（標註不動）" />
+            </div>
+            {custom && !readOnly && <div className="tool-group">
+              <span className="label">這張圖</span>
+              <Tool onClick={() => setPanel("rename")} glyph="✎" text="重新命名" />
+              <Tool onClick={() => { setPanel(null); setConfirm("diagram"); }} glyph="✕" text="刪除這張圖" title="只刪除這張圖，裡面的模型項目仍然保留" />
+            </div>}
           </div>
         )}
         {(panel === "all" || panel === "add") && (
