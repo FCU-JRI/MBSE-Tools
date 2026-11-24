@@ -4,6 +4,14 @@
  */
 package JRI {
     private import ScalarValues::*;
+    private import MeasurementReferences::*;
+    private import ISQ::*;
+    private import SI::*;
+
+    // ───────── 單位（SI 標準庫沒有帶的常用前綴單位） ─────────
+    // 需求門檻可寫 3 [km]、300 [kPa]。用標準的 ConversionByPrefix 定義，換算由解析器做。
+    attribute <km> kilometre : LengthUnit { :>> unitConversion : ConversionByPrefix { :>> prefix = kilo; :>> referenceUnit = m; } }
+    attribute <kPa> kilopascal : PressureUnit { :>> unitConversion : ConversionByPrefix { :>> prefix = kilo; :>> referenceUnit = Pa; } }
 
     // ───────── 需求支柱 Requirements ─────────
 
