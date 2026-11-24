@@ -100,6 +100,14 @@ package JRI {
        variation part def <'ALT-001'> '回收方案' :> DesignAlternative { variant part <'ALT-001-1'> '單段傘'; } */
     part def DesignAlternative;
 
+    /* 方案評分：準則就是連到方案的需求。權重寫在需求上：@TradeWeight { weight = 3.0; }（沒寫當 1）。
+       候選對準則的分數寫在候選上，一個準則一個值，名稱是 score_ 加需求編號（- 換成 _）：
+       variant part <'ALT-001-1'> '單段傘' { attribute score_REQ_SYS_001 : TradeScore = 4.0; } */
+    metadata def TradeWeight {
+        attribute weight : Real;
+    }
+    attribute def TradeScore :> Real;
+
     // ───────── 行為支柱 Behavior ─────────
 
     /* 任務階段 Mission Phase */

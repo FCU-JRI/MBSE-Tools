@@ -19,6 +19,7 @@ import { mount as sim } from "./routes/sim.ts";
 import { mount as versionRoutes } from "./routes/versions.ts";
 import { mount as xlsx } from "./routes/export.ts";
 import { mount as tables } from "./routes/tables.ts";
+import { mount as trade } from "./routes/trade.ts";
 import { mount as board } from "./routes/board.ts";
 import { mount as design } from "./routes/design.ts";
 
@@ -84,7 +85,7 @@ app.get("/api/me", wrap(async (req, res) => {
 }));
 
 // 各功能的路由，依原本的順序掛上
-for (const m of [admin, projects, elements, diagrams, gates, pm, sim, versionRoutes, xlsx, tables, board, design]) m(app);
+for (const m of [admin, projects, elements, diagrams, gates, pm, sim, versionRoutes, xlsx, tables, trade, board, design]) m(app);
 
 const dist = path.join(ROOT, "dist");
 if (fs.existsSync(dist)) {
