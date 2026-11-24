@@ -7,6 +7,8 @@ import { Columns, SelectionPane } from "../layout.tsx";
 import { Formulas } from "./tables/Formulas.tsx";
 import { Params, VerifyMatrix } from "./tables/Derived.tsx";
 import { Conflicts } from "./tables/Conflicts.tsx";
+import { Trade } from "./tables/Trade.tsx";
+import { N2 } from "./tables/N2.tsx";
 import type { PageProps, TableGroup } from "../workspace.ts";
 import "./tables.css";
 
@@ -15,7 +17,7 @@ import "./tables.css";
 const GROUPS: { zh: string; items: [TableGroup, string][] }[] = [
   { zh: "需求與驗證", items: [["req", "需求矩陣"], ["verify", "驗證矩陣"]] },
   { zh: "風險", items: [["fmea", "FMEA 表"], ["cat:SafetyFactor", "安全係數"], ["cat:Anomaly", "異常報告"]] },
-  { zh: "設計", items: [["params", "設計參數表"]] },
+  { zh: "設計", items: [["params", "設計參數表"], ["trade", "方案比較"], ["n2", "N² 矩陣"]] },
   { zh: "作業", items: [["cat:SOP", "標準作業程序"], ["cat:QCRecord", "加工 QC 紀錄"], ["cat:RosterEntry", "名冊"]] },
   { zh: "衝突與決策", items: [["conflicts", "衝突"]] },
   { zh: "公式", items: [["formula", "constraint 與 calc"]] },
@@ -72,6 +74,8 @@ export function TablesPage(p: PageProps) {
         {table === "verify" && <VerifyMatrix {...tp} />}
         {table === "fmea" && <Fmea {...tp} />}
         {table === "params" && <Params {...tp} />}
+        {table === "trade" && <Trade {...tp} />}
+        {table === "n2" && <N2 {...tp} />}
         {table === "formula" && <Formulas view={view} selectedId={selectedId} onSelect={onSelect} />}
         {table === "conflicts" && <Conflicts {...tp} />}
         {table === "docs" && <Docs {...tp} />}

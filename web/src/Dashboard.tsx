@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./pages/tables/wp5a.css";
 import { api } from "./api.ts";
 import type { Element, View } from "./api.ts";
 import type { Page } from "./workspace.ts";
@@ -7,6 +8,7 @@ import { listOf } from "./model.ts";
 interface Task { id: string; title: string; start: string; end: string; done: boolean; re: string }
 interface Pm { tasks: Task[]; costs: { planned: number; actual: number }[] }
 interface Sim { result: { at?: string; outputs: { key: string; zh: string; value: number; unit: string }[] } | null }
+interface Margin { requirement: string; shortName: string; name: string; attribute: string; subject: string; value: number | null; unit: string; lo: number | null; hi: number | null; margin: number | null; marginPct: number | null; status: string; note: string }
 interface Hist { commit: string; date: string; message: string }
 interface Br { name: string; ahead: number }
 
@@ -68,12 +70,14 @@ const ago = (iso: string) => {
 export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) {
   const [pm, setPm] = useState<Pm | null>(null);
   const [sim, setSim] = useState<Sim | null>(null);
+  const [margins, setMargins] = useState<Margin[] | null>(null);
   const [hist, setHist] = useState<Hist[] | null>(null);
   const [branches, setBranches] = useState<Br[] | null>(null);
   const onBranch = !!view.branch;
   useEffect(() => {
     api<Pm>(`/projects/${id}/pm`).then(setPm).catch(() => setPm({ tasks: [], costs: [] }));
     api<Sim>(`/projects/${id}/sim`).then(setSim).catch(() => setSim({ result: null }));
+    api<{ margins: Margin[] }>(`/projects/${id}/margins`).then((r) => setMargins(r.margins)).catch(() => setMargins([]));
     api<Hist[]>(`/projects/${id}/history`).then(setHist).catch(() => setHist(null));
     if (!onBranch) api<Br[]>(`/projects/${id}/branches`).then(setBranches).catch(() => setBranches(null));
   }, [id, onBranch]);
@@ -158,13 +162,33 @@ export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) 
       </div>
 
       <div className="dash-grid">
-        {outputs.length > 0 && (
+        {(outputs.length > 0 || (margins?.length ?? 0) > 0) && (
           <section className="section" data-cell="perf">
             <div className="section-head"><h2 className="section-title">性能對門檻</h2><button className="tbtn" data-go="analysis" onClick={() => go("analysis")}>分析</button></div>
-            <div className="dash-stats">
+            {(margins?.length ?? 0) > 0 && (
+              <table className="dash-margins" aria-label="性能對門檻">
+                <thead><tr><th>需求</th><th>算出值</th><th>門檻</th><th>餘裕</th></tr></thead>
+                <tbody>
+                  {margins!.slice(0, 8).map((m) => {
+                    const bad = m.margin !== null ? m.margin < 0 : m.status === "fails";
+                    const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString("zh-TW") : String(+n.toFixed(3)));
+                    const u = m.unit ? ` ${m.unit}` : "";
+                    return (
+                      <tr key={`${m.requirement}.${m.attribute}`} data-margin={m.margin === null ? "na" : bad ? "fail" : "ok"}>
+                        <td><span className="id">{m.shortName}</span> {m.name}<div className="caption">{m.subject ? `${m.subject}.` : ""}{m.attribute}</div></td>
+                        <td className="data">{m.value === null ? <span className="faint" title={m.note}>—</span> : `${fmt(m.value)}${u}`}</td>
+                        <td className="data">{[m.lo !== null ? `≥ ${fmt(m.lo)}` : "", m.hi !== null ? `≤ ${fmt(m.hi)}` : ""].filter(Boolean).join("　")}{u}</td>
+                        <td className="data">{m.margin === null ? <span className="caption">{m.note || "—"}</span> : <span style={bad ? { color: "var(--danger)", fontWeight: 700 } : undefined}>{m.margin >= 0 ? "+" : "−"}{fmt(Math.abs(m.margin))}{u}{m.marginPct !== null && ` (${m.margin >= 0 ? "+" : "−"}${Math.abs(m.marginPct).toFixed(1)}%)`}</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {outputs.length > 0 && <div className="dash-stats">
               {outputs.slice(0, 6).map((o) => <div key={o.key}><span className="label">{o.zh}</span><span className="data">{Number.isInteger(o.value) ? o.value.toLocaleString("zh-TW") : o.value.toFixed(2)} {o.unit}</span></div>)}
-            </div>
-            <p className="caption" style={{ marginTop: 8 }}>門檻判定：{pass} PASS{fails > 0 ? <> · <span className="tag danger">{fails} FAIL</span></> : " · 0 FAIL"}</p>
+            </div>}
+            <p className="caption" style={{ marginTop: 8 }}>門檻判定：{pass} PASS{fails > 0 ? <> · <span className="tag danger">{fails} FAIL</span></> : " · 0 FAIL"}　餘裕＝離最近一個門檻的距離，負值表示已超出；單位不同或值不是單純數字的需求只列判定。</p>
           </section>
         )}
 
