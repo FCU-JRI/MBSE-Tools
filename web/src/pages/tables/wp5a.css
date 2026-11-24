@@ -1,0 +1,13 @@
+.dash-margins { width: 100%; margin-top: var(--space-3); }
+.dash-margins th { text-align: left; font-weight: 500; color: var(--muted, inherit); padding: 2px 8px 2px 0; }
+.dash-margins td { padding: 4px 8px 4px 0; vertical-align: top; }
+.n2 { border-collapse: collapse; width: auto; }
+.n2 th, .n2 td { border: var(--stroke-hair, 1px) solid var(--line-strong, #bbb); padding: 6px 8px; vertical-align: top; min-width: 110px; }
+.n2 th { text-align: left; font-weight: 500; }
+.n2 td.diag { font-weight: 700; background: var(--panel, rgba(128,128,128,.12)); }
+.n2 td.mirror { opacity: .55; }
+.n2 button.cell { display: block; text-align: left; margin-bottom: 4px; width: 100%; }
+.trade h3 { margin: var(--space-4, 16px) 0 var(--space-2, 8px); }
+.trade td.sel { font-weight: 700; }
+.trade td.rej { text-decoration: line-through; opacity: .7; }
+.howto { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; padding: 8px; border: 1px solid var(--line-strong, #bbb); overflow-x: auto; }

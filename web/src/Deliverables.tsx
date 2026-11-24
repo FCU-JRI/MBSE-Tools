@@ -7,6 +7,7 @@ import { methodZh } from "./Inspector.tsx";
 import { RiskGrid } from "./Dashboard.tsx";
 import { DataTable } from "./pages/tables/DataTable.tsx";
 import type { Col } from "./pages/tables/DataTable.tsx";
+import { LAYERS, layerOf } from "./pages/tables/layers.ts";
 
 const bookOf = (v: View) => ({ id: v.project.id, ok: v.analysis.ok });
 
@@ -69,12 +70,15 @@ export function Fmea({ view, selectedId, onSelect }: Props) {
   const n = (e: Element, k: string) => Number(e.attrs[k]) || 0;
   const score = (e: Element) => n(e, "severity") * n(e, "likelihood");
   const after = (e: Element) => n(e, "residualSeverity") * n(e, "residualLikelihood");
+  const layerById = new Map(risks.map((e) => [e.id, layerOf(e, view.analysis)]));
+  const layerZh = (e: Element) => LAYERS.find(([id]) => id === layerById.get(e.id)?.layer)?.[1] ?? "未分層";
   const sorted = [...risks].sort((x, y) => score(y) - score(x));
   const pre = useCallback((e: Element) => !pick || pick.includes(e.id), [pick]);
   const tag = (v: number) => (v >= 15 ? <span className="tag danger">{v}</span> : v >= 8 ? <span className="tag warn">{v}</span> : v > 0 ? <span className="tag">{v}</span> : <span className="faint">—</span>);
   const dash = (v: number) => (v ? String(v) : "");
   const cols: Col<Element>[] = [
     { key: "id", title: "編號", text: (e) => e.shortName ?? "", cls: "id" },
+    { key: "layer", title: "層級", text: layerZh, render: (e) => <span title={layerById.get(e.id)?.how ? `由${layerById.get(e.id)?.how}推出` : "沒有標記也沒連到元素"}>{layerZh(e)}</span> },
     { key: "mode", title: "失效模式", text: (e) => e.attrs.failureMode || e.name },
     { key: "effect", title: "影響", text: (e) => e.attrs.effect ?? "" },
     { key: "cause", title: "原因", text: (e) => e.attrs.cause ?? "" },
@@ -107,6 +111,8 @@ export function Fmea({ view, selectedId, onSelect }: Props) {
   );
   return (
     <DataTable name="FMEA" title="FMEA 風險矩陣" book={bookOf(view)} rows={sorted} cols={cols} rowId={(e) => e.id} selectedId={selectedId} onSelect={(e) => onSelect(e.id)} above={grid} preFilter={pre}
+      hint="全專案一張，用「篩選」的層級看任務、系統、次系統、元件各自的風險。層級優先取風險上的 @LayerTag；沒有就由風險連到的元素推出（連到多個時取最低層），都沒有歸「未分層」。"
+      filters={[{ id: "layer", label: "層級", options: [...LAYERS.map(([id, zh]): [string, string] => [id, `${zh}（${risks.filter((e) => layerById.get(e.id)?.layer === id).length}）`]), ["none", `未分層（${risks.filter((e) => !layerById.get(e.id)?.layer).length}）`]], test: (e, v) => (layerById.get(e.id)?.layer || "none") === v }]}
       chips={[
         { id: "high", label: "高（15 以上）", test: (e) => score(e) >= 15 }, { id: "mid", label: "中（8–14）", test: (e) => score(e) >= 8 && score(e) < 15 },
         { id: "noMit", label: "缺緩解", test: (e) => !e.attrs.mitigation }, { id: "open", label: "未結", test: (e) => (e.attrs.status || "開啟") !== "已結" },

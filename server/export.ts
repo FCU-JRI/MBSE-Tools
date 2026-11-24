@@ -7,6 +7,7 @@ import type { GateStatus } from "./gates.ts";
 import type { Project } from "./projects.ts";
 import type { Pm } from "./pm.ts";
 import { PRIORITY_ZH } from "./pm.ts";
+import { formulasOf } from "./routes/tables.ts";
 
 const METHOD: Record<string, string> = {
   "VerificationMethodKind::test": "測試 Test",
@@ -68,6 +69,15 @@ const src = (e: Element) => { const d = plan.docs.find((x) => x.id === e.attrs.s
     for (const v of events) rvm.push([r.shortName ?? "", r.name, r.doc, v.shortName ?? "", v.name, METHOD[v.attrs.kind ?? ""] ?? "", v.doc]);
   }
   sheet("需求驗證矩陣", [["需求編號", 14], ["需求名稱", 22], ["需求內容", 44], ["驗證編號", 12], ["驗證事件", 26], ["方法", 16], ["驗證說明", 40]], rvm);
+
+  // 驗證矩陣：需求 × 驗證／確認事件，● 表示該事件驗證該需求；與網頁表格頁的「驗證矩陣」相同
+  const verifies = (ev: Element, r: Element) => a.relations.some((x) => x.kind === "verify" && ((x.from === ev.id && x.to === r.id) || (x.from === r.id && x.to === ev.id)));
+  sheet("驗證矩陣", [["需求", 36], ...vers.map((v): [string, number] => [v.shortName ?? v.name, 12]), ["判定", 10], ["缺口", 10]],
+    reqs.map((r) => [`${r.shortName ?? ""} ${r.name}`.trim(), ...vers.map((v) => (verifies(v, r) ? "●" : "")), { holds: "PASS", fails: "FAIL" }[sat.get(r.qualifiedName) ?? ""] ?? "", vers.some((v) => verifies(v, r)) ? "" : "缺驗證"]));
+
+  const formulas = await formulasOf(project.id).catch(() => []);
+  sheet("公式清單", [["種類", 16], ["名稱", 24], ["所屬", 34], ["算式", 60], ["輸入", 28], ["結果／判定", 12]],
+    formulas.map((f) => [`${f.kind}${f.def ? " def" : ""}`, f.name || byId.get(f.selectId ?? "")?.name || "", f.owner.replace(/^Project::/, ""), f.expr, f.inputs.join("\n"), f.status === "holds" ? "PASS" : f.status === "fails" ? "FAIL" : f.status === "definition" ? "定義" : "未判定"]));
 
   sheet("驗證與確認事件", [["編號", 12], ["類別", 12], ["名稱", 26], ["方法", 16], ["說明", 44], ["驗證的需求", 32]],
     vers.map((e) => [e.shortName ?? "", catZh(e), e.name, METHOD[e.attrs.kind ?? ""] ?? "", e.doc, outs(e, "verify")]));

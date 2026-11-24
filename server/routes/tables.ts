@@ -97,6 +97,76 @@ export async function formulasOf(id: string): Promise<Formula[]> {
   return out;
 }
 
+/** 首頁「性能對門檻」：需求裡 require constraint 的數值門檻，對上滿足者實例的屬性值，算出餘裕。 */
+export interface Margin {
+  /** 需求的元素 id、編號、名稱 */
+  requirement: string; shortName: string; name: string;
+  /** 被檢查的屬性（subject 參數後面那一段） */
+  attribute: string;
+  /** 滿足者實例的名稱；沒有實例時為空 */
+  subject: string;
+  value: number | null; unit: string;
+  /** 下限、上限（沒有就是 null） */
+  lo: number | null; hi: number | null;
+  /** 離最近一個門檻的距離（單位同 value）；負值＝已超出。算不出來為 null */
+  margin: number | null;
+  /** 餘裕占門檻絕對值的比例（%） */
+  marginPct: number | null;
+  /** holds | fails | undecided，沿用模擬引擎的判定；算不出餘裕時照引擎 */
+  status: string;
+  /** 算不出時的原因 */
+  note: string;
+}
+
+const NUM = "-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?";
+const CLAUSE = new RegExp(`^\\(?\\s*([\\w'.]+)\\s*(>=|<=|>|<)\\s*(${NUM})\\s*(?:\\[([^\\]]+)\\])?\\s*\\)?$`);
+const VALUE = new RegExp(`^\\s*(${NUM})\\s*(?:\\[([^\\]]+)\\])?\\s*$`);
+
+export async function marginsOf(id: string): Promise<Margin[]> {
+  const analysis = await store.analyzeProject(id);
+  if (!analysis.ok) return [];
+  const out: Margin[] = [];
+  for (const f of await formulasOf(id)) {
+    if (f.kind !== "constraint" || f.def || !f.owner) continue;
+    const req = analysis.elements.find((e) => e.qualifiedName === f.owner && e.kind === "RequirementUsage");
+    if (!req) continue;
+    const body = /\{([\s\S]*)\}\s*$/.exec(f.expr)?.[1] ?? f.expr;
+    const clauses = body.split(/\s+and\s+|&&/).map((c) => CLAUSE.exec(c.trim()));
+    if (clauses.some((c) => !c)) continue; // 不是單純的「屬性 比較 數字」就不判餘裕（例如 or、算式）
+    const groups = new Map<string, { lo: number | null; hi: number | null; unit: string }>();
+    for (const c of clauses as RegExpExecArray[]) {
+      const g = groups.get(c[1]) ?? { lo: null, hi: null, unit: "" };
+      const n = Number(c[3]);
+      if (c[2].startsWith(">")) g.lo = n; else g.hi = n;
+      g.unit = (c[4] ?? "").trim();
+      groups.set(c[1], g);
+    }
+    const verdict = analysis.satisfaction.find((s) => s.requirement === req.qualifiedName);
+    const inst = verdict ? analysis.elements.find((e) => e.qualifiedName === verdict.subject) : undefined;
+    for (const [chain, g] of groups) {
+      const parts = chain.split(".");
+      const row: Margin = { requirement: req.id, shortName: req.shortName ?? "", name: req.name, attribute: parts.slice(1).join("."), subject: inst?.name ?? "", value: null, unit: g.unit, lo: g.lo, hi: g.hi, margin: null, marginPct: null, status: verdict?.status ?? "undecided", note: "" };
+      const raw = parts.length === 2 ? inst?.attrs[parts[1]] : undefined;
+      const m = raw === undefined ? null : VALUE.exec(raw);
+      if (!inst) row.note = "沒有滿足者實例";
+      else if (parts.length !== 2) row.note = "屬性路徑太深";
+      else if (!m) row.note = raw === undefined ? `實例上沒有 ${parts[1]} 的值` : "值不是單純數字";
+      else if ((m[2] ?? "").trim() !== g.unit) row.note = `單位不同（${m[2] ?? "無"} ↔ ${g.unit || "無"}）`;
+      else {
+        const v = Number(m[1]);
+        row.value = v;
+        const cand = [g.lo === null ? null : { m: v - g.lo, t: g.lo }, g.hi === null ? null : { m: g.hi - v, t: g.hi }].filter((x): x is { m: number; t: number } => x !== null);
+        const near = cand.reduce((x, y) => (y.m < x.m ? y : x));
+        row.margin = near.m;
+        row.marginPct = near.t ? (near.m / Math.abs(near.t)) * 100 : null;
+      }
+      out.push(row);
+    }
+  }
+  return out;
+}
+
 export function mount(app: Express): void {
   app.get("/api/projects/:id/formulas", wrap(async (req, res) => res.json({ formulas: await formulasOf(pid(req)) })));
+  app.get("/api/projects/:id/margins", wrap(async (req, res) => res.json({ margins: await marginsOf(pid(req)) })));
 }
