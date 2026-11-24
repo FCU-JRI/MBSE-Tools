@@ -89,6 +89,9 @@ const isAncestor = (dir: string, a: string, b: string) => git(dir, "merge-base",
 // 工具自己維護的資料檔是 JSON。兩邊都改過（例如各自拖過圖）時 git 會當成文字衝突，這裡改成逐欄位合併。
 const DATA_FILES = new Map([["layout.json", 1], ["diagrams.json", 1], ["pm.json", 1], ["sim.json", 1], ["board.json", 1], ["project.json", 2]]);
 // 工具放進儲存庫的副本（元模型庫、分析方法），每次讀專案都會更新成工具內的版本，衝突時留哪一邊都一樣
+// 送審紀錄（reviews/<分支>.json）：同一分支重複送審、合併時兩邊都改過，逐欄位合併（留言有 id，逐項比）
+const REVIEW_FILE = /^reviews\/(?!approvers\.json$)[^/]+\.json$/;
+const isData = (f: string) => DATA_FILES.has(f) || REVIEW_FILE.test(f);
 const TOOL_COPY = /^(lib|\.claude)\//;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -292,12 +295,12 @@ async function mergeInto(ref: string, sha: string, author: string, message: stri
         if (!r) { await stop(f); continue; }
         await fs.writeFile(path.join(dir, f), r.text, "utf8");
         if (r.resolved) auto.push(`${path.posix.basename(f)} ${r.resolved} 段`);
-      } else if (!DATA_FILES.has(f) && !TOOL_COPY.test(f)) await stop(f);
-      else if (DATA_FILES.has(f)) {
+      } else if (!isData(f) && !TOOL_COPY.test(f)) await stop(f);
+      else if (isData(f)) {
         const stage = async (n: number): Promise<unknown> => { try { return JSON.parse(await git(dir, "show", `:${n}:${f}`)); } catch { return undefined; } };
         const merged = merge3(await stage(1), await stage(2), await stage(3), prefer);
         if (merged === undefined) { await git(dir, "rm", "-q", "-f", "--", f); continue; }
-        await fs.writeFile(path.join(dir, f), JSON.stringify(merged, null, DATA_FILES.get(f)) + "\n", "utf8");
+        await fs.writeFile(path.join(dir, f), JSON.stringify(merged, null, DATA_FILES.get(f) ?? 2) + "\n", "utf8");
       } else await git(dir, "checkout", "--ours", "--", f);
       await git(dir, "add", "--", f);
     }

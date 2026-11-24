@@ -2,7 +2,8 @@ import type { Express } from "express";
 import * as store from "../projects.ts";
 import * as auth from "../auth.ts";
 import * as versions from "../versions.ts";
-import { wrap, author, pid, view, admin } from "./common.ts";
+import * as reviews from "../reviews.ts";
+import { wrap, author, pid, view, admin, me } from "./common.ts";
 
 /** 版本：GitHub 同步、分支審查、基線比較 */
 export function mount(app: Express): void {
@@ -17,8 +18,13 @@ export function mount(app: Express): void {
   }));
   app.get("/api/projects/:id/branches", wrap(async (req, res) => res.json(await versions.listBranches(pid(req)))));
   app.get("/api/projects/:id/branches/diff", wrap(async (req, res) => res.json(await versions.branchDiff(pid(req), String(req.query.name ?? "")))));
-  app.post("/api/projects/:id/branches/merge", auth.need(auth.can.merge, "合併分支需要責任工程師以上的權限。"), wrap(async (req, res) => {
-    const r = await versions.mergeBranch(pid(req), String(req.body?.name ?? ""), author(req));
+  // 合併：核准者照專案設定的負責人（沒設定時沿用職級門檻）；合併紀錄寫入核准者（VER-04）
+  app.post("/api/projects/:id/branches/merge", wrap(async (req, res) => {
+    const name = String(req.body?.name ?? "");
+    const check = await reviews.approverCheck(pid(req), name, me(req), author(req));
+    if (!check.ok) return res.status(403).json({ error: check.reason });
+    const r = await versions.mergeBranch(pid(req), name, author(req));
+    await reviews.recordMerge(pid(req), name, me(req), author(req), check, r.commit);
     res.json({ ...r, ...(await view(pid(req))) });
   }));
   // 把 main 的更新合併進目前開啟的分支

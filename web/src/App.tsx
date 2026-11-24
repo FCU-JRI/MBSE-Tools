@@ -126,21 +126,24 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
 }
 
 /**
- * 右上的版本按鈕。「未送審」的定義：
- *  - 在分支上：這個分支相對 main 的變更項數（新增＋修改＋移除的模型元素），0 顯示「沒有改動」。
- *  - 在 main 上：送審中的分支數（有領先 main 提交的分支）。
+ * 右上的版本按鈕。「未送審」「送審中」取自送審紀錄（reviews/<分支>.json，VER-08）：
+ *  - 在分支上：已送審顯示「送審中」（退回顯示「已退回」）；否則顯示變更項數＋「未送審」，0 顯示「沒有改動」。
+ *  - 在 main 上：送審中的分支數。
  * 點開是版本畫面（修改 → 送審 → 核准）。
  */
 function VersionButton({ id, view, active, onClick }: { id: string; view: View; active: boolean; onClick: () => void }) {
-  const [count, setCount] = useState<number | null>(null);
+  const [note, setNote] = useState("");
   const bname = view.branch?.name, bahead = view.branch?.ahead;
   useEffect(() => {
-    setCount(null);
+    setNote("");
+    const base = id.split("@")[0];
     const q = bname
-      ? api<{ changes: unknown[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(bname)}`).then((d) => d.changes.length)
-      : api<{ ahead: number }[]>(`/projects/${id}/branches`).then((b) => b.filter((x) => x.ahead > 0).length);
-    q.then(setCount).catch(() => setCount(null));
-  }, [id, bname, bahead]);
-  const note = count === null ? "" : bname ? (count === 0 ? " · 沒有改動" : ` · ${count} 項未送審`) : ` · ${count} 個送審中`;
+      ? Promise.all([
+        api<{ changes: unknown[] }>(`/projects/${id}/branches/diff?name=${encodeURIComponent(bname)}`),
+        api<{ review: { status: string } }>(`/projects/${base}/reviews/one?branch=${encodeURIComponent(bname)}`),
+      ]).then(([d, r]) => r.review.status === "submitted" ? " · 送審中" : r.review.status === "returned" ? " · 已退回" : d.changes.length === 0 ? " · 沒有改動" : ` · ${d.changes.length} 項未送審`)
+      : api<{ status: string }[]>(`/projects/${base}/reviews`).then((r) => ` · ${r.filter((x) => x.status === "submitted").length} 個送審中`);
+    q.then(setNote).catch(() => setNote(""));
+  }, [id, bname, bahead, bname ? null : view]); // main 的送審數：合併、核准後 view 會更新，跟著重讀
   return <button className="tbtn version-btn" aria-pressed={active} onClick={onClick} title="版本：修改 → 送審 → 核准合併">{bname ?? "main"}{note} ▾</button>;
 }
