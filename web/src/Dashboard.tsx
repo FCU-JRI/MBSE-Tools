@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
+import "./pages/tables/wp5a.css";
 import { api } from "./api.ts";
 import type { Element, View } from "./api.ts";
 import type { Page } from "./workspace.ts";
 import { listOf } from "./model.ts";
+import { fwOf } from "./Process.tsx";
+import type { FwEval, FwLayer, FwObject } from "./Process.tsx";
 
 interface Task { id: string; title: string; start: string; end: string; done: boolean; re: string }
 interface Pm { tasks: Task[]; costs: { planned: number; actual: number }[] }
 interface Sim { result: { at?: string; outputs: { key: string; zh: string; value: number; unit: string }[] } | null }
+interface Margin { requirement: string; shortName: string; name: string; attribute: string; subject: string; value: number | null; unit: string; lo: number | null; hi: number | null; margin: number | null; marginPct: number | null; status: string; note: string }
 interface Hist { commit: string; date: string; message: string }
 interface Br { name: string; ahead: number }
 
@@ -56,6 +60,50 @@ function Bar({ label, done, total, onClick }: { label: string; done: number; tot
   );
 }
 
+/** 設計迴圈進度（HOME-04）：每層每個對象走到第幾步，卡點警告標在該層。資料全來自 view.framework（伺服器由模型證據算出）。 */
+export function LoopProgress({ fw, go, open }: { fw: FwEval; go: Go; open?: (elementId: string) => void }) {
+  const holds = (l: FwLayer) => fw.holdPoints.filter((h) => h.open && h.fromLayer === l.id);
+  const rowOf = (o: FwObject) => {
+    const total = o.steps.length, done = o.steps.filter((x) => x.state === "done").length;
+    const cur = o.steps.find((x) => x.id === o.current) ?? o.steps.find((x) => x.state !== "done");
+    return { total, done, cur };
+  };
+  const visit = (o: FwObject) => { if (o.id && open) open(o.id); go("model"); };
+  return (
+    <section className="section dash-loop" data-cell="loop" aria-label="設計迴圈進度">
+      <div className="section-head"><h2 className="section-title">設計迴圈進度</h2><button className="tbtn" data-go="process" onClick={() => go("process")}>流程頁</button></div>
+      <div className="dash-loop-layers">
+        {fw.layers.map((l) => {
+          const hs = holds(l);
+          return (
+            <div key={l.id} className={`dash-loop-layer ${l.passed ? "ok" : ""}`} data-layer={l.id}>
+              <div className="dash-loop-head">
+                <span className="label">第 {l.order} 層</span>
+                <span className="body">{l.zh}</span>
+                {l.passed && <span className="tag done">通過</span>}
+                {hs.map((h) => <button key={h.category} className="tag warn dash-loop-warn" data-hold={h.category} title={h.reason} onClick={() => go("process")}>卡點：{h.zh}</button>)}
+              </div>
+              {l.objects.length === 0
+                ? <p className="caption">{l.kind === "chain" ? `${l.steps.filter((x) => x.state === "done").length} / ${l.steps.length} 步` : "還沒有對象"}</p>
+                : l.objects.map((o) => {
+                  const r = rowOf(o);
+                  return (
+                    <button key={o.id ?? o.name} className="dash-loop-obj" data-object={o.name} onClick={() => visit(o)} aria-label={`${l.zh}／${o.name}：${r.done} / ${r.total} 步${r.cur ? `，目前「${r.cur.zh}」` : ""}`}>
+                      <span className="body">{o.name}</span>
+                      <span className="dash-steps" aria-hidden="true">{o.steps.map((x) => <i key={x.id} className={x.state} title={x.zh} />)}</span>
+                      <span className="data">{o.passed ? "已通過" : `${r.done} / ${r.total} · ${r.cur?.zh ?? ""}`}</span>
+                      {!o.passed && r.cur && r.cur.issues.length > 0 && <span className="tag warn" title={r.cur.issues[0].text}>缺 {r.cur.issues.length}</span>}
+                    </button>
+                  );
+                })}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 const ago = (iso: string) => {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
   return m < 60 ? `${m} 分鐘前` : m < 1440 ? `${Math.round(m / 60)} 小時前` : `${Math.round(m / 1440)} 天前`;
@@ -65,23 +113,26 @@ const ago = (iso: string) => {
  * 專案首頁：由上到下是現在的節點、5 個指標、性能與風險與需求覆蓋、任務與最近變更、各次系統。
  * 每一格點了前往能處理它的頁。顏色只依計算結果；沒有資料的格子顯示空狀態，不畫沒有資料的圖。
  */
-export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) {
+export function Dashboard({ view, go, id, open }: { view: View; go: Go; id: string; open?: (elementId: string) => void }) {
   const [pm, setPm] = useState<Pm | null>(null);
   const [sim, setSim] = useState<Sim | null>(null);
+  const [margins, setMargins] = useState<Margin[] | null>(null);
   const [hist, setHist] = useState<Hist[] | null>(null);
   const [branches, setBranches] = useState<Br[] | null>(null);
   const onBranch = !!view.branch;
   useEffect(() => {
     api<Pm>(`/projects/${id}/pm`).then(setPm).catch(() => setPm({ tasks: [], costs: [] }));
     api<Sim>(`/projects/${id}/sim`).then(setSim).catch(() => setSim({ result: null }));
+    api<{ margins: Margin[] }>(`/projects/${id}/margins`).then((r) => setMargins(r.margins)).catch(() => setMargins([]));
     api<Hist[]>(`/projects/${id}/history`).then(setHist).catch(() => setHist(null));
     if (!onBranch) api<Br[]>(`/projects/${id}/branches`).then(setBranches).catch(() => setBranches(null));
   }, [id, onBranch]);
 
   const a = view.analysis;
+  const fw = fwOf(view);
   const approved = (g: string) => [...view.project.signoffs].reverse().find((s) => s.gate === g && !s.subsystem)?.decision === "APPROVE";
   const current = view.gates.find((g) => !approved(g.id)) ?? view.gates[view.gates.length - 1];
-  const reqs = listOf(a.elements, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
+  const reqs = listOf(a.elements, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
   const has = (e: Element, dir: "in" | "out", ...k: string[]) => a.relations.some((r) => (dir === "in" ? r.to : r.from) === e.id && k.includes(r.kind));
   const verified = reqs.filter((e) => has(e, "in", "verify")).length;
   const sourced = reqs.filter((e) => has(e, "out", "derive", "refine", "trace") || !!e.attrs.sourceDoc).length;
@@ -127,6 +178,8 @@ export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) 
 
       {errors > 0 && <button className="msg dash-alert" data-go="model" onClick={() => go("model", "source")}><span className="tag danger">ERR</span>模型有 {errors} 個錯誤，圖表暫停更新。點此修正。</button>}
 
+      {fw && <LoopProgress fw={fw} go={go} open={open} />}
+
       <div className="dash-kpis" aria-label="關鍵指標">
         <button className="kpi" data-go="tables:req" onClick={() => go("tables", "req")}>
           <span className="label">需求有驗證</span>
@@ -158,13 +211,33 @@ export function Dashboard({ view, go, id }: { view: View; go: Go; id: string }) 
       </div>
 
       <div className="dash-grid">
-        {outputs.length > 0 && (
+        {(outputs.length > 0 || (margins?.length ?? 0) > 0) && (
           <section className="section" data-cell="perf">
             <div className="section-head"><h2 className="section-title">性能對門檻</h2><button className="tbtn" data-go="analysis" onClick={() => go("analysis")}>分析</button></div>
-            <div className="dash-stats">
+            {(margins?.length ?? 0) > 0 && (
+              <table className="dash-margins" aria-label="性能對門檻">
+                <thead><tr><th>需求</th><th>算出值</th><th>門檻</th><th>餘裕</th></tr></thead>
+                <tbody>
+                  {margins!.slice(0, 8).map((m) => {
+                    const bad = m.margin !== null ? m.margin < 0 : m.status === "fails";
+                    const fmt = (n: number) => (Number.isInteger(n) ? n.toLocaleString("zh-TW") : String(+n.toFixed(3)));
+                    const u = m.unit ? ` ${m.unit}` : "";
+                    return (
+                      <tr key={`${m.requirement}.${m.attribute}`} data-margin={m.margin === null ? "na" : bad ? "fail" : "ok"}>
+                        <td><span className="id">{m.shortName}</span> {m.name}<div className="caption">{m.subject ? `${m.subject}.` : ""}{m.attribute}</div></td>
+                        <td className="data">{m.value === null ? <span className="faint" title={m.note}>—</span> : `${fmt(m.value)}${u}`}</td>
+                        <td className="data">{[m.lo !== null ? `≥ ${fmt(m.lo)}` : "", m.hi !== null ? `≤ ${fmt(m.hi)}` : ""].filter(Boolean).join("　")}{u}</td>
+                        <td className="data">{m.margin === null ? <span className="caption">{m.note || "—"}</span> : <span style={bad ? { color: "var(--danger)", fontWeight: 700 } : undefined}>{m.margin >= 0 ? "+" : "−"}{fmt(Math.abs(m.margin))}{u}{m.marginPct !== null && ` (${m.margin >= 0 ? "+" : "−"}${Math.abs(m.marginPct).toFixed(1)}%)`}</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {outputs.length > 0 && <div className="dash-stats">
               {outputs.slice(0, 6).map((o) => <div key={o.key}><span className="label">{o.zh}</span><span className="data">{Number.isInteger(o.value) ? o.value.toLocaleString("zh-TW") : o.value.toFixed(2)} {o.unit}</span></div>)}
-            </div>
-            <p className="caption" style={{ marginTop: 8 }}>門檻判定：{pass} PASS{fails > 0 ? <> · <span className="tag danger">{fails} FAIL</span></> : " · 0 FAIL"}</p>
+            </div>}
+            <p className="caption" style={{ marginTop: 8 }}>門檻判定：{pass} PASS{fails > 0 ? <> · <span className="tag danger">{fails} FAIL</span></> : " · 0 FAIL"}　餘裕＝離最近一個門檻的距離，負值表示已超出；單位不同或值不是單純數字的需求只列判定。</p>
           </section>
         )}
 

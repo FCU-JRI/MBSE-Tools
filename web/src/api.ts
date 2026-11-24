@@ -27,7 +27,7 @@ export interface View { project: Project; analysis: Analysis; gates: Gate[]; doc
 export const baseOf = (ref: string) => ref.split("@")[0];
 export const refOf = (ref: string, branch: string) => `${baseOf(ref)}@${branch.replaceAll("/", "~")}`;
 export interface Field { name: string; zh: string; type: "text" | "int" | "real" }
-export interface Category { id: string; zh: string; en: string; pillar: string; prefix: string; pkg: string; keyword: string; help: string; example: string; fields?: Field[] }
+export interface Category { id: string; zh: string; en: string; pillar: string; prefix: string; pkg: string; keyword: string; help: string; example: string; fields?: Field[]; special?: boolean }
 export interface Meta {
   categories: Category[]; pillars: Record<string, string>; relations: Record<string, { zh: string; help: string }>;
   gates: { id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean }[];

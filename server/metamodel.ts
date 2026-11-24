@@ -12,6 +12,8 @@ export interface Category {
   help: string;
   example: string;
   fields?: { name: string; zh: string; type: "text" | "int" | "real" }[];
+  /** 不用一般的新增表單建立（例如介面要選兩端），由專門的入口建立 */
+  special?: boolean;
 }
 
 export const PILLARS: Record<Category["pillar"], string> = {
@@ -37,7 +39,10 @@ export const CATEGORIES: Category[] = [
   { id: "Objective", zh: "目的", en: "Objective", pillar: "requirements", prefix: "OBJ", pkg: "NGOs", keyword: "requirement",
     help: "把目標變成可以衡量的具體結果。", example: "火箭遠地點高度達到 3000 m。" },
   { id: "MOE", zh: "效能量度", en: "Measure of Effectiveness", pillar: "parametrics", prefix: "MOE", pkg: "NGOs", keyword: "requirement",
-    help: "從任務角度衡量「做得好不好」的指標，對應到某個目的。", example: "實際遠地點與目標高度的偏差百分比。" },
+    help: "從任務角度衡量「做得好不好」的指標，對應到某個目的。成功判準分三級：最低、完全、額外。", example: "實際遠地點與目標高度的偏差百分比。",
+    fields: [{ name: "successLevel", zh: "成功判準等級（最低／完全／額外）", type: "text" }] },
+  { id: "MissionRequirement", zh: "任務需求", en: "Mission Requirement", pillar: "requirements", prefix: "REQ-MSN", pkg: "Requirements", keyword: "requirement",
+    help: "整個任務「應」達成的事，來自成功判準或來源文件的硬條件。之後的任務剖面、系統需求都從這裡推導。", example: "任務應將酬載送達 3000 m 並完整回收。" },
   { id: "SystemRequirement", zh: "系統層需求", en: "System Requirement", pillar: "requirements", prefix: "REQ-SYS", pkg: "Requirements", keyword: "requirement",
     help: "整枚火箭「應」做到的事。一條只寫一件事，要能被驗證，用「應」字。", example: "火箭應到達 3000 m ± 150 m 的遠地點高度。" },
   { id: "SubsystemRequirement", zh: "次系統層需求", en: "Subsystem Requirement", pillar: "requirements", prefix: "REQ-SUB", pkg: "Requirements", keyword: "requirement",
@@ -54,6 +59,10 @@ export const CATEGORIES: Category[] = [
     help: "次系統底下可以單獨設計、製造或採購的東西。", example: "燃燒室、噴嘴、飛行電腦" },
   { id: "ExternalEntity", zh: "外部對象", en: "External Entity", pillar: "structure", prefix: "EXT", pkg: "Structure", keyword: "part def",
     help: "不屬於系統、但會與系統互動的東西，用來畫系統脈絡。", example: "發射架、地面站、大氣環境" },
+  { id: "DesignAlternative", zh: "設計方案", en: "Design Alternative", pillar: "structure", prefix: "ALT", pkg: "Design", keyword: "variation part def",
+    help: "設計迴圈的提案與方案分析：列出要比較的候選方案（variant）。選定哪一個寫成設計決策。", example: "回收方案：單段傘、雙段傘" },
+  { id: "Interface", zh: "介面", en: "Interface", pillar: "structure", prefix: "IF", pkg: "Structure", keyword: "interface", special: true,
+    help: "兩個次系統之間的連接，由系統的設計迴圈產出。在系統的右欄「介面」新增：選兩端、種類與關鍵數字。", example: "推進—結構 接頭" },
   { id: "MissionPhase", zh: "任務階段", en: "Mission Phase", pillar: "behavior", prefix: "PH", pkg: "Behavior", keyword: "action",
     help: "任務從開始到結束依序經過的階段。", example: "發射、動力飛行、滑行、回收" },
   { id: "Function", zh: "功能", en: "Function", pillar: "behavior", prefix: "FN", pkg: "Behavior", keyword: "action",
@@ -74,7 +83,10 @@ export const CATEGORIES: Category[] = [
       { name: "likelihood", zh: "可能性 1–5", type: "int" }, { name: "detection", zh: "偵測度 1–5（越難發現越高）", type: "int" },
       { name: "mitigation", zh: "緩解措施", type: "text" }, { name: "residualSeverity", zh: "緩解後嚴重度 1–5", type: "int" },
       { name: "residualLikelihood", zh: "緩解後可能性 1–5", type: "int" }, { name: "owner", zh: "負責人", type: "text" },
-      { name: "status", zh: "狀態（開啟／結案）", type: "text" } ] },
+      { name: "status", zh: "狀態（開啟／結案）", type: "text" }, { name: "riskKind", zh: "種類（技術／時程／預算／場地／人員）", type: "text" } ] },
+  { id: "DesignDecision", zh: "設計決策", en: "Design Decision", pillar: "parametrics", prefix: "DEC", pkg: "Decisions", keyword: "item",
+    help: "方案選定或衝突裁決的紀錄：選了什麼、為什麼、誰決定、何時。下一屆看得懂為什麼這樣設計。", example: "回收改用雙段開傘",
+    fields: [{ name: "rationale", zh: "理由", type: "text" }, { name: "decidedBy", zh: "裁決者", type: "text" }, { name: "decidedOn", zh: "日期", type: "text" }] },
   { id: "SafetyFactor", zh: "安全係數", en: "Factor of Safety", pillar: "risk", prefix: "FOS", pkg: "Safety", keyword: "item",
     help: "結構或壓力元件的實際安全係數與要求值。", example: "燃燒室爆破安全係數",
     fields: [
@@ -109,6 +121,7 @@ export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
   derive: { zh: "衍生自", help: "這條需求是從哪一條上層需求或目的推導出來的。" },
   refine: { zh: "細化", help: "這個量度或需求把哪一個上層項目說得更具體。" },
   trace: { zh: "追溯到", help: "一般性的關聯。連到利害關係人時，期望會寫成 stakeholder、使用案例會寫成 actor（SysML v2 內建的寫法）。" },
+  basis: { zh: "設計依據", help: "這條需求是根據上一層設計迴圈的哪個產出推出來的：介面、尺寸或質量邊界、預算配額、選定方案或設計決策。下一層需求要同時有「衍生自」與「設計依據」。" },
   satisfy: { zh: "滿足", help: "哪個系統或元件負責做到這條需求。" },
   verify: { zh: "驗證", help: "哪個驗證事件用來證明這條需求。" },
   allocate: { zh: "分配給", help: "這個功能由哪個次系統或元件執行。" },

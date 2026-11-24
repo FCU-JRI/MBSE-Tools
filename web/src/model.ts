@@ -8,7 +8,7 @@
 //   「零件由哪個定義所定義」為實線、定義端空心三角形加兩點；起始為實心圓、完成為牛眼。
 import type { Analysis, Diagrams, Element } from "./api.ts";
 
-const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
+const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
 
 export const label = (e: Element) => (e.shortName ? `${e.shortName} ${e.name}` : e.name);
 
@@ -68,7 +68,7 @@ export const stereotype = (e: Element) => {
   const k = KEYWORD[e.kind] ?? e.kind.replace(/(Usage|Definition)$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase() + (e.kind.endsWith("Definition") ? " def" : "");
   return `«${k}»`;
 };
-const EDGE_LABEL: Record<string, string> = { derive: "«#derivation»", refine: "«#refinement»", trace: "«#trace»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»", include: "«include»" };
+const EDGE_LABEL: Record<string, string> = { derive: "«#derivation»", refine: "«#refinement»", trace: "«#trace»", basis: "«#basis»", satisfy: "«satisfy»", verify: "«verify»", allocate: "«allocate»", include: "«include»" };
 
 /** 依寬度折行：中日韓字算 2、其餘算 1。 */
 export function wrap(text: string, units: number, maxLines: number): string[] {
@@ -115,7 +115,7 @@ const edge = (id: string, source: string, target: string, kind: string, text: st
   tail: kind === "compose" ? "diamond" : "none",
 });
 
-const REQ_CATS = ["Expectation", "Need", "Goal", "Objective", "MOE", "MOP", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
+const REQ_CATS = ["Expectation", "Need", "Goal", "Objective", "MOE", "MOP", "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
 
 /** 一般的節點：需求顯示 doc 隔間，定義顯示 attributes 隔間。 */
 function node(e: Element, a: Analysis): GNode {
@@ -133,7 +133,8 @@ export function diagramsOf(a: Analysis, extra?: Diagrams): DiagramDef[] {
   const byKind = (id: string | null) => a.elements.find((e) => e.id === id)?.kind;
   const kids = (id: string, kind: string) => a.elements.some((e) => e.owner === id && e.kind === kind);
   for (const e of a.elements) {
-    if (e.kind === "PartDefinition" && kids(e.id, "PartUsage")) out.push(def(`ibd:${e.qualifiedName}`, "ibd", e.name, e.id));
+    // 設計方案（variation def，底下是 variant 候選零件）不是內部結構，不產生內部連接圖（Mars 決定）
+    if (e.kind === "PartDefinition" && e.category !== "DesignAlternative" && kids(e.id, "PartUsage")) out.push(def(`ibd:${e.qualifiedName}`, "ibd", e.name, e.id));
     if (e.kind === "StateUsage" && (kids(e.id, "StateUsage") || e.category === "Mode") && byKind(e.owner) !== "StateUsage") out.push(def(`stm:${e.qualifiedName}`, "stm", e.name, e.id));
     if (e.kind === "ActionUsage" && kids(e.id, "ActionUsage")) out.push(def(`act:${e.qualifiedName}`, "act", e.name, e.id));
   }
@@ -285,7 +286,7 @@ export const LINK_TOOLS: Record<DiagramKind, LinkTool[]> = {
 };
 export const PALETTE: Record<DiagramKind, string[]> = {
   bdd: ["System", "Subsystem", "Component", "ExternalEntity"],
-  req: ["Need", "Goal", "Objective", "MOE", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "VerificationEvent"],
+  req: ["Need", "Goal", "Objective", "MOE", "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "VerificationEvent"],
   act: ["MissionPhase", "Function"],
   ibd: [],
   uc: ["Stakeholder", "UseCase"],

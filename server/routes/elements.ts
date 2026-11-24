@@ -3,10 +3,11 @@ import type { Element } from "../extract.ts";
 import { ROOT_PACKAGE } from "../engine.ts";
 import { CATEGORIES, CATEGORY, RELATION_LABELS } from "../metamodel.ts";
 import * as store from "../projects.ts";
-import { evaluateProcess, stepOfCategory } from "../process.ts";
+import { holdPoint } from "../process.ts";
+import * as pm from "../pm.ts";
 import { paramLines, paramWord } from "../modernize.ts";
-import { attrForm, moveBlockText, setCategoryText, setCustomAttrText, setMethodText, setUsageTypeText, setVerifiesText, nextShortName } from "../edits.ts";
-import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, snippetFor } from "../edits.ts";
+import { readCondition, setConditionText, attrForm, moveBlockText, setCategoryText, setCustomAttrText, setMethodText, setUsageTypeText, setVerifiesText, nextShortName } from "../edits.ts";
+import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, setCadText, setLayerText, snippetFor } from "../edits.ts";
 import { wrap, author, pid, view, editable, rootFile, inFile, isUserPackage } from "./common.ts";
 import type { An } from "./common.ts";
 import type { NewRelation } from "../edits.ts";
@@ -22,6 +23,7 @@ function planRelation(before: An, kind: string, from: Element | undefined, to: E
   const kind0 = kind;
   // 標準庫的需求衍生連結兩端都必須是需求（F-36）
   if (kind0 === "derive" && !(/RequirementUsage$/.test(from.kind) && /RequirementUsage$/.test(to.kind))) throw new store.UserError("衍生只能連接需求類的項目（需要、目標、目的、量度、各層需求）。其他項目之間請用「追溯」。");
+  if (kind0 === "basis" && !/RequirementUsage$/.test(from.kind)) throw new store.UserError("設計依據的起點必須是需求。");
   const owner0 = before.elements.find((x) => x.id === from.owner);
   // 寫進某個元素主體的關係用該元素的檔案，其餘寫在根套件
   // 追溯到利害關係人：需求用內建的 stakeholder、使用案例用 actor，寫在起點的主體裡（F-37）
@@ -118,16 +120,8 @@ export function mount(app: Express): void {
     if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正後再新增。");
     const cat = CATEGORIES.find((c) => c.id === req.body.category);
     if (!cat) throw new store.UserError("未知的元素類別。");
-    // 流程範本專案：前面的步驟沒完成，不能新增後面步驟的項目
-    if ((await store.readProject(id)).template === "guided") {
-      const step = stepOfCategory(cat.id);
-      const status = evaluateProcess(before);
-      const mine = step ? status.find((s) => s.id === step.id) : undefined;
-      if (mine?.state === "locked") {
-        const cur = status.find((s) => s.state === "current");
-        throw new store.UserError(`還不能新增${cat.zh}。請先完成「${cur?.zh ?? "前面的步驟"}」：${cur?.issues[0]?.text ?? ""}`);
-      }
-    }
+    // 框架卡點（FW-02，Mars 2026-11-24 決定）：不擋，照常建立；上一層設計迴圈沒走完時在回應帶卡點警告（舊 17 步順序鎖已拿掉）
+    const hold = await holdPoint(id, await store.readProject(id), before, (await pm.readPm(id)).docs.length, cat.id);
     const parent0 = req.body.parentId ? before.elements.find((e) => e.id === req.body.parentId) : undefined;
     const file = parent0 ? editable(parent0).file : rootFile(before);
     const content = await store.readFile(id, file);
@@ -138,7 +132,7 @@ export function mount(app: Express): void {
       : insertInto(content, inFile(before, file), ROOT_PACKAGE, cat.pkg, (indent) => snippetFor(req.body, before.elements, indent));
     const r = await store.saveFile(id, file, next, author(req), `新增${cat.zh}：${String(req.body.name).trim()}`);
     if (!r.saved) return res.status(422).json({ saved: false, diagnostics: r.analysis.diagnostics });
-    res.json({ saved: true, ...(await view(id)) });
+    res.json({ saved: true, ...(await view(id)), ...(hold ? { holdWarning: hold } : {}) });
   }));
 
   // 引導模式：新增關係
@@ -196,6 +190,11 @@ export function mount(app: Express): void {
       const d = String(b.source.doc ?? "").trim(), r = String(b.source.ref ?? "").trim();
       if (d !== (target.attrs.sourceDoc ?? "") || r !== (target.attrs.sourceRef ?? "")) steps.push((c, el) => setSourceText(c, el, d, r));
     }
+    if (b.cad && typeof b.cad === "object") {
+      const u = String(b.cad.url ?? "").trim(), v = String(b.cad.version ?? "").trim(), t = String(b.cad.tool ?? "").trim();
+      if (u !== (target.attrs.cadUrl ?? "") || v !== (target.attrs.cadVersion ?? "") || t !== (target.attrs.cadTool ?? "")) steps.push((c, el) => setCadText(c, el, u, v, t));
+    }
+    if (typeof b.layer === "string" && b.layer.trim() !== (target.attrs.layer ?? "")) steps.push((c, el) => setLayerText(c, el, b.layer));
     if (steps.length === 0 && !newId) return res.json({ saved: true, ...(await view(id)) });
     let el: Element = target;
     for (const step of steps) {
@@ -526,6 +525,39 @@ export function mount(app: Express): void {
     res.json({ saved: true, selected: after.id, ...(await view(id)) });
   }));
 
+  // 需求的數值條件（預算配額、尺寸邊界都用它）：讀與寫。對象是結構定義；選到零件時用它的定義
+  app.get("/api/projects/:id/elements/condition", wrap(async (req, res) => {
+    const id = pid(req);
+    const a = await store.analyzeProject(id);
+    const el = a.elements.find((e) => e.id === String(req.query.id ?? ""));
+    if (!el) throw new store.UserError("找不到這個元素。");
+    res.json({ condition: readCondition(await store.readFile(id, el.file), el) });
+  }));
+  app.post("/api/projects/:id/elements/condition", wrap(async (req, res) => {
+    const id = pid(req);
+    const before = await store.analyzeProject(id);
+    if (!before.ok) throw new store.UserError("模型目前有錯誤，請先到模型頁的「原始碼」修正。");
+    const el = before.elements.find((e) => e.id === req.body?.id);
+    if (!el) throw new store.UserError("找不到這個元素。");
+    editable(el);
+    const b = req.body ?? {};
+    let type = "";
+    if (b.subject) {
+      let s = before.elements.find((e) => e.id === b.subject);
+      if (s && /Usage$/.test(s.kind)) s = before.elements.find((e) => s!.typeIds.includes(e.id) && /Definition$/.test(e.kind)) ?? s;
+      if (!s || !/PartDefinition$/.test(s.kind)) throw new store.UserError("條件的對象要選系統、次系統或元件。");
+      type = s.qualifiedName.split("::").map(quote).join("::");
+    }
+    const file = el.file;
+    const content = setConditionText(await store.readFile(id, file), el, { type, attribute: String(b.attribute ?? ""), op: String(b.op ?? ""), value: String(b.value ?? ""), unit: String(b.unit ?? "") });
+    const a = await store.analyzeProject(id, { file, content });
+    if (!a.ok) return broken(res, a, "寫入數值條件");
+    const r = await store.saveFile(id, file, content, author(req), `${type ? "設定" : "清除"}數值條件：${el.name}`);
+    if (!r.saved) return broken(res, r.analysis, "寫入數值條件");
+    const after = a.elements.find((e) => e.qualifiedName === el.qualifiedName && e.kind === el.kind);
+    res.json({ saved: true, selected: after?.id, ...(await view(id)) });
+  }));
+
   // 驗證事件：改方法、增減要驗證的需求
   app.post("/api/projects/:id/verification", wrap(async (req, res) => {
     const id = pid(req);
@@ -571,7 +603,7 @@ export function mount(app: Express): void {
   }));
 
   // 改關係：換對象或換類型。舊的拿掉、新的加上，一次存檔；檢查規則和新增關係相同
-  const TRACE_LIKE = ["derive", "refine", "trace", "satisfy", "allocate"];
+  const TRACE_LIKE = ["derive", "refine", "trace", "basis", "satisfy", "allocate"];
   app.post("/api/projects/:id/relations/change", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);

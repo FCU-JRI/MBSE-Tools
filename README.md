@@ -31,6 +31,12 @@
 
 程式結構：`web/src/App.tsx` 只負責導覽，每頁在 `web/src/pages/*.tsx`（各自的 CSS 同名放在旁邊）；伺服器 API 依功能拆在 `server/routes/*.ts`，`server/index.ts` 只放共用中介層與啟動。
 
+## 框架定義
+
+JRI 的系統工程流程寫成資料：`framework/jri.json`（7 層、共用的設計迴圈、卡點、角色、專案可調參數、需要的 SysML 元素）。`server/framework.ts` 讀檔並檢查前後一致，`npm test` 會跑這個檢查。改流程改這份檔案，不改程式；目前還沒有接上流程頁與卡點。
+
+功能清單：`framework/functions.json`（每個功能的位置、API、讀寫的資料、狀態、依據、驗收方式、跨頁流程）。`npm test` 會檢查框架的每個迴圈步驟與貫穿全程項目都有功能對應。
+
 ## 存取
 
 | 來源 | 連接埠 | 身分 |

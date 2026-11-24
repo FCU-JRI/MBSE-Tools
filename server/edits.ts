@@ -59,15 +59,15 @@ export function snippetFor(n: NewElement, elements: Element[], indent: string): 
     }
   }
   const head =
-    cat.keyword === "part def"
-      ? `part def <'${sn}'> ${quote(name)} :> ${cat.id}`
+    cat.keyword.endsWith("part def")
+      ? `${cat.keyword} <'${sn}'> ${quote(name)} :> ${cat.id}`
       : `${cat.keyword} <'${sn}'> ${quote(name)} : ${cat.id}`;
   if (body.length === 0) return `${indent}${head};\n`;
   return `${indent}${head} {\n${body.map((l) => `${indent}    ${l}\n`).join("")}${indent}}\n`;
 }
 
 export interface NewRelation {
-  kind: "derive" | "refine" | "trace" | "satisfy" | "allocate";
+  kind: "derive" | "refine" | "trace" | "basis" | "satisfy" | "allocate";
   from: string; // 完整名稱
   to: string;
 }
@@ -83,6 +83,9 @@ export function relationSnippet(r: NewRelation, indent: string): string {
       return `${indent}#refinement dependency from ${a} to ${b};\n`;
     case "trace":
       return `${indent}#trace dependency from ${a} to ${b};\n`;
+    case "basis":
+      // from = 下一層需求，to = 上一層設計迴圈的產出
+      return `${indent}#basis dependency from ${a} to ${b};\n`;
     case "satisfy":
       // from = 負責滿足的系統或元件，to = 需求
       return `${indent}satisfy ${b} by ${a};\n`;
@@ -284,6 +287,126 @@ export function setSourceText(content: string, el: Element, doc: string, ref: st
   const loc = el.metaLoc.Source;
   if (loc) return replaceLoc(content, loc, text);
   if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
+/** CAD 連結（@CadLink）：設計迴圈第 5 步。只放連結與版本，不附檔；網址清空就拿掉。 */
+export function setCadText(content: string, el: Element, url: string, version: string, tool: string): string {
+  const u = url.trim(), v = version.trim(), t = tool.trim();
+  let text = "";
+  if (u) {
+    if (!/^https?:\/\/\S{3,300}$/.test(u)) throw new UserError("CAD 連結必須是 http(s) 網址。");
+    if (!v) throw new UserError("請填 CAD 版本。");
+    if (v.length > 40 || t.length > 40) throw new UserError("版本與工具名稱最多 40 字。");
+    text = `@CadLink { cadUrl = ${str(u)}; cadVersion = ${str(v)};${t ? ` cadTool = ${str(t)};` : ""} }`;
+  }
+  const loc = el.metaLoc.CadLink;
+  if (loc) return replaceLoc(content, loc, text);
+  if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
+export const LAYERS = ["mission", "system", "subsystem", "component"] as const;
+/** 層級（@LayerTag）：推不出層級時才手填；空字串就拿掉。 */
+export function setLayerText(content: string, el: Element, layer: string): string {
+  const l = layer.trim();
+  if (l && !(LAYERS as readonly string[]).includes(l)) throw new UserError("層級只能是任務、系統、次系統或元件。");
+  const text = l ? `@LayerTag { layer = ${str(l)}; }` : "";
+  const loc = el.metaLoc.LayerTag;
+  if (loc) return replaceLoc(content, loc, text);
+  if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
+/** 使用者輸入的單位轉成解析器認得的寫法：N*s → 'N⋅s'、m/s^2 → 'm/s²'。 */
+export function unitLiteral(u: string): string {
+  const t = u.trim();
+  if (!t) return "";
+  if (!/^[A-Za-z0-9/*^·⋅²³._-]{1,20}$/.test(t)) throw new UserError("單位寫法不合法，例如 kg、mm、m/s、N*s。");
+  const n = t.replace(/[*·]/g, "⋅").replace(/\^2/g, "²").replace(/\^3/g, "³");
+  return /[/⋅²³]/.test(n) ? `['${n}']` : `[${n}]`;
+}
+
+/** 需求的數值條件：subject＋單行 require constraint，在需求主體的範圍內找。回傳目前的條件（沒有就 null）。 */
+export interface Condition { subjectLine: number | null; constraintLine: number | null; subjectType: string; param: string; expr: string }
+const SUBJECT_RE = /^\s*subject\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+?);\s*$/;
+const REQUIRE_RE = /^\s*require\s+constraint\s*\{\s*(.*?)\s*\}\s*$/;
+export function readCondition(content: string, el: Element): Condition | null {
+  if (!el.line || !el.endLine) return null;
+  const lines = content.split("\n");
+  let subjectLine: number | null = null, constraintLine: number | null = null, subjectType = "", param = "", expr = "";
+  for (let i = el.line; i < el.endLine - 1; i++) {
+    const t = lines[i] ?? "";
+    const m = SUBJECT_RE.exec(t);
+    if (m && subjectLine === null) { subjectLine = i + 1; param = m[1]; subjectType = m[2].trim(); continue; }
+    const c = REQUIRE_RE.exec(t);
+    if (c && constraintLine === null) { constraintLine = i + 1; expr = c[1]; }
+  }
+  return subjectLine || constraintLine ? { subjectLine, constraintLine, subjectType, param, expr } : null;
+}
+
+const OPS = new Set([">=", "<=", "==", ">", "<"]);
+/** 設定或清除需求的數值條件：subject 對象 : 型別; require constraint { 對象.屬性 運算 值 [單位] }。type 為空就清除。 */
+export function setConditionText(content: string, el: Element, c: { type: string; attribute: string; op: string; value: string; unit: string }): string {
+  if (!/RequirementUsage$/.test(el.kind)) throw new UserError("只有需求可以設定數值條件。");
+  const cur = readCondition(content, el);
+  const lines = content.split("\n");
+  if (el.line && el.endLine) for (let i = el.line; i < el.endLine - 1; i++) if (/^\s*require\s+constraint\s*\{\s*$/.test(lines[i] ?? "") || (/^\s*require\s+constraint\b/.test(lines[i] ?? "") && !REQUIRE_RE.test(lines[i] ?? ""))) throw new UserError("這條需求的數值條件寫成多行，請到模型頁的「原始碼」修改。");
+  const drop = (n: number | null) => { if (n) lines[n - 1] = "\u0000"; };
+  if (!c.type.trim()) {
+    drop(cur?.subjectLine ?? null); drop(cur?.constraintLine ?? null);
+    return lines.filter((l) => l !== "\u0000").join("\n");
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(c.attribute)) throw new UserError("屬性名稱只能用英數與底線，例如 mass。");
+  if (!OPS.has(c.op)) throw new UserError("比較方式只能是 ≥、≤、=、>、<。");
+  if (!/^-?\d+(\.\d+)?([eE]-?\d+)?$/.test(c.value.trim())) throw new UserError("值必須是數字。");
+  const unit = unitLiteral(c.unit);
+  const param = cur?.param || "s";
+  const num = c.value.trim().includes(".") || /[eE]/.test(c.value) ? c.value.trim() : `${c.value.trim()}.0`;
+  const expr = `${param}.${c.attribute} ${c.op} ${num}${unit ? ` ${unit}` : ""}`;
+  const indentOf = (n: number) => (lines[n - 1] ?? "").match(/^\s*/)?.[0] ?? "";
+  const subjectText = (ind: string) => `${ind}subject ${param} : ${c.type};`;
+  const reqText = (ind: string) => `${ind}require constraint { ${expr} }`;
+  if (cur?.subjectLine) lines[cur.subjectLine - 1] = subjectText(indentOf(cur.subjectLine));
+  if (cur?.constraintLine) lines[cur.constraintLine - 1] = reqText(indentOf(cur.constraintLine));
+  let out = lines.join("\n");
+  const missing: string[] = [];
+  if (!cur?.subjectLine) missing.push("subject");
+  if (!cur?.constraintLine) missing.push("constraint");
+  if (missing.length) {
+    out = insertInside(out, el, (ind) => missing.map((m) => (m === "subject" ? subjectText(ind) : reqText(ind))).join("\n") + "\n");
+  }
+  return out;
+}
+
+export const MATURITY = ["exists", "tentative", "frozen"] as const;
+export interface InterfaceParam { name: string; a: string; b: string; unit: string }
+const num = (v: string, what: string) => { const t = v.trim(); if (!/^-?\d+(\.\d+)?([eE]-?\d+)?$/.test(t)) throw new UserError(`${what}必須是數字。`); return t.includes(".") || /[eE]/.test(t) ? t : `${t}.0`; };
+const unitText = (u: string) => { const l = unitLiteral(u); return l ? ` ${l}` : ""; };
+/** 介面的宣告文字（寫進系統定義的主體）。兩端連到同名的連接埠；每個關鍵數字寫兩端的值並 assert 相等。 */
+export function interfaceText(sn: string, name: string, kind: string, aPart: string, bPart: string, params: InterfaceParam[], indent: string): string {
+  if (!name.trim() || /[\r\n]/.test(name)) throw new UserError("請填介面名稱。");
+  const k = kind.trim();
+  if (!["機械", "熱", "電", "流體", "資料", "人"].includes(k)) throw new UserError("介面種類只能是機械、熱、電、流體、資料、人。");
+  const body = [`attribute :>> kind = ${JSON.stringify(k)};`];
+  for (const p of params) {
+    if (!p.name.trim()) continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(p.name.trim())) throw new UserError("關鍵數字的名稱只能用英數與底線，例如 diameter。");
+    const n = p.name.trim(), u = unitText(p.unit);
+    body.push(`attribute ${n}A = ${num(p.a, "A 端的值")}${u};`, `attribute ${n}B = ${num(p.b, "B 端的值")}${u};`, `assert constraint { ${n}A == ${n}B }`);
+  }
+  body.push(`@InterfaceStatus { maturity = "exists"; }`);
+  const port = quote(sn);
+  return `${indent}interface <'${sn}'> ${quote(name.trim())} : Interface connect ${quote(aPart)}.${port} to ${quote(bPart)}.${port} {\n${body.map((l) => `${indent}    ${l}\n`).join("")}${indent}}\n`;
+}
+/** 介面狀態（@InterfaceStatus）：成熟度與兩端是否同意。 */
+export function setInterfaceStatusText(content: string, el: Element, maturity: string, agreedA: string, agreedB: string): string {
+  if (!(MATURITY as readonly string[]).includes(maturity)) throw new UserError("介面成熟度只能是存在、暫定或凍結。");
+  const who = (v: string) => { const t = v.trim().slice(0, 40); if (/["\\\r\n]/.test(t)) throw new UserError("同意者名稱不合法。"); return t; };
+  const a = who(agreedA), b = who(agreedB);
+  const text = `@InterfaceStatus { maturity = ${JSON.stringify(maturity)};${a ? ` agreedA = ${JSON.stringify(a)};` : ""}${b ? ` agreedB = ${JSON.stringify(b)};` : ""} }`;
+  const loc = el.metaLoc.InterfaceStatus;
+  if (loc) return replaceLoc(content, loc, text);
   return insertInside(content, el, (indent) => `${indent}${text}\n`);
 }
 

@@ -1,69 +1,92 @@
-import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
-import { api } from "./api.ts";
-import type { Element, Me, Meta, Step, View } from "./api.ts";
+// 流程頁（PROC-01、PROC-02）：照框架檔（framework/jri.json）的 7 層顯示。每層＝需求進來 → 設計迴圈 → 產出設計限制 → 推導下一層需求。
+// 每一步固定「要做什麼／怎麼做／還缺」；進度、卡點、兩個來源都由伺服器從模型證據算出（view.framework），網頁不另外判斷。
+import { useEffect, useState } from "react";
+import type { Me, Meta, View } from "./api.ts";
 import { label, listOf } from "./model.ts";
+import type { Page } from "./workspace.ts";
 
-// 值是 SysML v2 標準庫 VerificationMethodKind 的列舉值
-const METHODS: [string, string][] = [["test", "測試"], ["analyze", "分析"], ["inspect", "檢查"], ["demo", "展示"]];
-const REL_ZH: Record<string, string> = { trace: "追溯到", derive: "衍生自", refine: "細化", allocate: "分配給", compose: "屬於", verify: "驗證" };
-
-/** 伺服器的步驟另外帶指南文案（todo、how）與「數量不足」的計數；api.ts 的 Step 沒列，這裡補上。 */
-export type GuideIssue = Step["issues"][number] & { count?: { category: string; zh: string; have: number; min: number } };
-export type GuideStep = Omit<Step, "issues"> & { todo?: string; how?: string[]; issues: GuideIssue[]; ahead?: GuideIssue[] };
+/** 伺服器 server/framework.ts 的 FrameworkEval（只列網頁用到的欄位） */
+export interface FwIssue { id: string | null; text: string }
+export interface FwStep {
+  id: string; zh: string; where: string | null; owner: string | null; ownerZh: string; produces: string[]; gate: string | null;
+  decision: boolean; holdPoint: boolean; check: string | null; checkZh: string; done: boolean | null; state: "done" | "current" | "todo" | "pending"; issues: FwIssue[]; onNo: string | null;
+}
+export interface FwObject { id: string | null; name: string; steps: FwStep[]; current: string | null; passed: boolean }
+export interface FwLayer { id: string; order: number; zh: string; kind: "chain" | "loop"; subject: string; gate: string | null; outputsZh: string; steps: FwStep[]; before: FwStep[]; objects: FwObject[]; after: FwStep[]; passed: boolean }
+export interface FwEval {
+  name: string; version: number; layers: FwLayer[];
+  settings: { fmeaThreshold: number; minAlternatives: number; budgetMargin: number | null };
+  twoSources: { id: string; name: string; category: string; missing: string[]; text: string }[];
+  holdPoints: { category: string; zh: string; fromLayer: string; fromLayerZh: string; open: boolean; reason: string }[];
+  approval: { ok: boolean; detail: string };
+}
+export const fwOf = (v: View) => (v as View & { framework?: FwEval | null }).framework ?? null;
 
 interface Props {
-  view: View; meta: Meta; user: Me; onChanged: (v: View) => void; onOpen: (elementId: string, category: string | null) => void;
+  view: View; meta: Meta; user: Me;
+  onOpen: (elementId: string) => void;
   /** 到模型頁打開某類別的新增表單 */
-  onNew: (category: string, parentId: string | null) => void;
+  onNew: (category: string) => void;
+  go: (page: Page) => void;
 }
 
-/** 流程指南：一列一步。做完的收成一行，正在做的那步自動展開；每步固定「要做什麼／怎麼做／還缺」。 */
-export function ProcessView(p: Props) {
-  const steps = p.view.process as GuideStep[];
-  const current = steps.find((s) => s.state === "current");
-  const [open, setOpen] = useState<Set<string>>(() => new Set(current ? [current.id] : []));
-  const [all, setAll] = useState(false);
-  // 一步完成後：收起剛完成的，展開新的「正在做」
-  useEffect(() => {
-    setOpen((o) => {
-      const n = new Set([...o].filter((id) => steps.find((s) => s.id === id)?.state !== "done"));
-      if (current) n.add(current.id);
-      return n;
-    });
-  }, [current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (steps.length === 0) return <p className="body">模型有錯誤，請先到模型頁的「原始碼」修正。</p>;
-  const done = steps.filter((s) => s.state === "done").length;
-  const guided = p.view.project.template === "guided";
-  const isOpen = (id: string) => all || open.has(id);
-  const toggle = (id: string) => {
-    if (all) { setAll(false); setOpen(new Set(steps.map((s) => s.id).filter((x) => x !== id))); return; }
-    setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  };
-  const goTo = (id: string) => { setOpen((o) => new Set([...o, id])); requestAnimationFrame(() => document.getElementById(`guide-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" })); };
+const WHERE: Record<string, { zh: string; page: Page | null }> = {
+  model: { zh: "模型頁", page: "model" }, tables: { zh: "表格頁", page: "tables" }, analysis: { zh: "分析頁", page: "analysis" },
+  manage: { zh: "專案管理頁", page: "manage" }, auto: { zh: "工具自動判定", page: null },
+};
+
+const mark = (s: { state: string; done: boolean | null }) => (s.done === true ? "✓" : s.state === "pending" ? "…" : s.state === "current" ? "●" : "");
+const stateClass = (s: FwStep) => (s.done === true ? "done" : s.state === "current" ? "current" : "locked");
+
+export function FrameworkView(p: Props) {
+  const fw = fwOf(p.view);
+  const firstOpen = fw?.layers.find((l) => !l.passed)?.id ?? null;
+  const [open, setOpen] = useState<Set<string>>(() => new Set(firstOpen ? [firstOpen] : []));
+  useEffect(() => { if (firstOpen) setOpen((o) => new Set([...o, firstOpen])); }, [firstOpen]);
+  if (!fw) return <p className="body">模型有錯誤，請先到模型頁的「原始碼」修正。</p>;
+  const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const passed = fw.layers.filter((l) => l.passed).length;
+  const closed = fw.holdPoints.filter((h) => !h.open);
 
   return (
-    <section className="guide" aria-label="流程指南">
+    <section className="guide" aria-label="流程" data-fw-version={fw.version}>
       <div className="guide-head">
-        <h1 className="heading">指南</h1>
-        <span className="label">NASA-HDBK-1009A · {steps.length} 步 · 完成 <span className="data">{done}</span> 步</span>
+        <h1 className="heading">流程</h1>
+        <span className="label">{fw.name} · {fw.layers.length} 層 · 走完 <span className="data">{passed}</span> 層</span>
         <span className="grow" />
-        <button className="tbtn" aria-pressed={all} onClick={() => { setAll(!all); if (all) setOpen(new Set(current ? [current.id] : [])); }}>{all ? "收起" : "全部展開"}</button>
+        <button className="tbtn" onClick={() => setOpen(open.size === fw.layers.length ? new Set(firstOpen ? [firstOpen] : []) : new Set(fw.layers.map((l) => l.id)))}>{open.size === fw.layers.length ? "收起" : "全部展開"}</button>
       </div>
-      {done === steps.length && <p className="msg"><span className="tag done">DONE</span>全部步驟都完成了。接下來到「專案管理」看審查節點還缺什麼。</p>}
+      <p className="caption">需求與設計交替：每一層的設計迴圈沒走到「是否符合需求＝是」，不該推導下一層需求（卡點）。下一層需求要同時連到上一層需求（衍生自）與上一層的設計產出（#basis）。
+        卡點只警告、不擋：還是可以新增，但會標出來。</p>
+
+      {closed.length > 0 && (
+        <div className="section" data-fw="holdpoints">
+          <div className="section-head"><h2 className="section-title">卡點</h2><span className="label">{closed.length}</span></div>
+          <ul className="guide-missing">{closed.map((h) => <li key={h.category}><span className="body"><b>新增{h.zh}會有卡點警告</b>　{h.reason}</span></li>)}</ul>
+        </div>
+      )}
+      {fw.twoSources.length > 0 && (
+        <div className="section" data-fw="twosources">
+          <div className="section-head"><h2 className="section-title">兩個來源不齊</h2><span className="label">{fw.twoSources.length}</span></div>
+          <ul className="guide-missing">{fw.twoSources.map((t) => (
+            <li key={t.id}><span className="body">{t.name}：{t.text}</span><button className="tbtn" onClick={() => p.onOpen(t.id)}>開啟</button></li>
+          ))}</ul>
+        </div>
+      )}
+
       <ol className="guide-list">
-        {steps.map((s, i) => (
-          <li key={s.id} id={`guide-${s.id}`} className={`guide-step ${s.state}`}>
-            <button className="guide-row" aria-expanded={isOpen(s.id)} onClick={() => toggle(s.id)}>
-              <span className="guide-mark" aria-hidden="true">{s.state === "done" ? "✓" : i + 1}</span>
-              <span className="guide-name">{s.zh}</span>
+        {fw.layers.map((l) => (
+          <li key={l.id} id={`fw-${l.id}`} className={`guide-step ${l.passed ? "done" : l.id === firstOpen ? "current" : "locked"}`} data-layer={l.id}>
+            <button className="guide-row" aria-expanded={open.has(l.id)} onClick={() => toggle(l.id)}>
+              <span className="guide-mark" aria-hidden="true">{l.passed ? "✓" : l.order}</span>
+              <span className="guide-name">{l.zh}</span>
+              <span className="caption">{l.kind === "loop" ? "設計迴圈" : "依序"}{l.gate ? ` · 節點 ${l.gate.toUpperCase()}` : ""}</span>
               <span className="grow" />
-              {s.state === "done" ? <span className="caption">{s.count} 項</span>
-                : s.state === "current" ? <span className="tag">進行中</span>
-                : <span className="caption">{s.count ? `${s.count} 項` : ""}</span>}
-              <span className="guide-tw" aria-hidden="true">{isOpen(s.id) ? "−" : "+"}</span>
+              {l.kind === "loop" && <span className="caption">{l.objects.filter((o) => o.passed).length}／{l.objects.length} 個走完</span>}
+              {!l.passed && l.id === firstOpen && <span className="tag">進行中</span>}
+              <span className="guide-tw" aria-hidden="true">{open.has(l.id) ? "−" : "+"}</span>
             </button>
-            {isOpen(s.id) && <StepPanel {...p} key={s.id} step={s} index={i} steps={steps} guided={guided} goTo={goTo} />}
+            {open.has(l.id) && <LayerBody {...p} layer={l} fw={fw} />}
           </li>
         ))}
       </ol>
@@ -71,205 +94,136 @@ export function ProcessView(p: Props) {
   );
 }
 
-/** 「到模型頁做這一步」要打開哪個類別：先挑還不夠數量的類別，否則第一個。 */
-export function targetCategory(step: GuideStep): string {
-  return [...step.issues, ...(step.ahead ?? [])].find((i) => i.count && step.categories.includes(i.count.category))?.count?.category ?? step.categories[0];
+function LayerBody(p: Props & { layer: FwLayer; fw: FwEval }) {
+  const l = p.layer;
+  const out = p.fw.holdPoints.filter((h) => h.fromLayer === l.id);
+  return (
+    <div className="guide-body enter">
+      {l.kind === "chain" ? <StepList {...p} steps={l.steps} /> : (<>
+        {l.before.length > 0 && <><h2 className="label">需求進來</h2><StepList {...p} steps={l.before} /></>}
+        <h2 className="label">設計迴圈{l.subject !== "mission" ? `（每個${p.meta.categories.find((c) => c.id === l.subject)?.zh ?? l.subject}各跑一次）` : ""}</h2>
+        {l.objects.length === 0
+          ? <p className="body muted">還沒有{p.meta.categories.find((c) => c.id === l.subject)?.zh ?? "對象"}。先完成上面的步驟，設計迴圈才會開始。</p>
+          : l.objects.map((o) => <ObjectLoop key={o.id ?? "mission"} {...p} obj={o} />)}
+        {l.outputsZh && <p className="caption">迴圈產出：{l.outputsZh}</p>}
+        {out.map((h) => <p key={h.category} className="body" data-hold={h.category}>{h.open ? <span className="tag done">OPEN</span> : <span className="tag danger">HOLD</span>}　下一層「{h.zh}」{h.open ? "可以推導" : "還不該推導（只警告）"}：{h.reason}</p>)}
+        {l.after.length > 0 && <><h2 className="label">迴圈之後</h2><StepList {...p} steps={l.after} /></>}
+      </>)}
+    </div>
+  );
 }
 
-function StepPanel({ step, index, steps, guided, view, meta, user, onChanged, onOpen, onNew, goTo }: Props & { step: GuideStep; index: number; steps: GuideStep[]; guided: boolean; goTo: (id: string) => void }) {
-  const pid = view.project.id;
+function ObjectLoop(p: Props & { obj: FwObject }) {
+  const o = p.obj;
+  const [open, setOpen] = useState(!o.passed);
+  const cur = o.steps.find((s) => s.id === o.current);
+  return (
+    <div className="section" data-object={o.name}>
+      <button className="guide-row" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="body"><b>{o.name}</b></span>
+        <span className="caption">{o.steps.map((s) => `${mark(s) || "○"}${s.zh}`).join(" → ")}</span>
+        <span className="grow" />
+        {o.passed ? <span className="tag done">走完</span> : <span className="tag" data-current={o.current ?? ""}>目前：{cur?.zh ?? "—"}</span>}
+      </button>
+      {open && <StepList {...p} steps={o.steps} />}
+    </div>
+  );
+}
+
+function StepList(p: Props & { steps: FwStep[]; layer?: FwLayer; obj?: FwObject }) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set(p.steps.filter((s) => s.state === "current").map((s) => s.id)));
+  const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  return (
+    <ol className="guide-list">
+      {p.steps.map((s, i) => (
+        <li key={s.id} className={`guide-step ${stateClass(s)}`} data-step={s.id} data-state={s.state}>
+          <button className="guide-row" aria-expanded={open.has(s.id)} onClick={() => toggle(s.id)}>
+            <span className="guide-mark" aria-hidden="true">{mark(s) || i + 1}</span>
+            <span className="guide-name">{s.zh}</span>
+            {s.decision && <span className="caption">判斷</span>}
+            {s.holdPoint && <span className="caption">卡點</span>}
+            <span className="grow" />
+            {s.ownerZh && <span className="caption">{s.ownerZh}</span>}
+            {s.state === "current" ? <span className="tag">進行中</span> : s.state === "pending" ? <span className="caption">待接</span> : null}
+            <span className="guide-tw" aria-hidden="true">{open.has(s.id) ? "−" : "+"}</span>
+          </button>
+          {open.has(s.id) && <StepBody {...p} step={s} />}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * 給 AI 的提示（PROC-04，TR-09）：依框架步驟產生。使用者貼給自己的 AI（工具不代收任何人的 AI 憑證），
+ * AI 照框架原則一次問一題，最後輸出可以照著新增的清單；工具不自動匯入。
+ */
+export function aiPrompt(view: View, meta: Meta, step: FwStep, layer: FwLayer | undefined, obj: FwObject | undefined): string {
+  const zh = (id: string) => meta.categories.find((c) => c.id === id)?.zh ?? id;
   const els = view.analysis.elements;
-  const cats = step.categories.map((c) => meta.categories.find((x) => x.id === c)).filter((c): c is NonNullable<typeof c> => !!c);
-  const [catId, setCatId] = useState(cats[0]?.id ?? "");
-  const cat = cats.find((c) => c.id === catId) ?? cats[0];
-  const [name, setName] = useState("");
-  const [doc, setDoc] = useState("");
-  const [attrs, setAttrs] = useState<Record<string, string>>({});
-  const [linkTo, setLinkTo] = useState("");
-  const [parentId, setParentId] = useState("");
-  const [method, setMethod] = useState("test");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [aiText, setAiText] = useState("");
-  const [aiOpen, setAiOpen] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
-  const [showExample, setShowExample] = useState(false);
+  const have = step.produces.length ? listOf(els, ...step.produces).filter((e) => !e.shared).map((e) => `- ${label(e)}${e.doc ? `：${e.doc}` : ""}`).join("\n") : "";
+  const reqs = !layer ? [] : listOf(els, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement").filter((e) => !e.shared);
+  const fw = fwOf(view);
+  return [
+    `你正在協助 JRI（學生火箭團隊）依「${fw?.name ?? "JRI 系統工程框架"}」（framework/jri.json）建立 SysML v2 模型。專案：${view.project.name}。`,
+    `框架原則：需求與設計交替；每一層的設計迴圈沒走到「是否符合需求＝是」，不能推導下一層需求；下一層需求要同時衍生自上一層需求並以 #basis 連到上一層的設計產出；pass／fail 只由 constraint 與模擬決定，你的判斷只當參考。不要編造數值、規範或設計參數，不確定就先問我。`,
+    ``,
+    `現在是第 ${layer?.order ?? "?"} 層「${layer?.zh ?? ""}」${obj && obj.id ? `、對象「${obj.name}」` : ""}的「${step.zh}」${step.decision ? "（判斷步驟）" : ""}${step.holdPoint ? "（卡點）" : ""}。`,
+    step.checkZh ? `完成條件：${step.checkZh}` : "",
+    step.produces.length ? `這一步要產出：${step.produces.map(zh).join("、")}` : "",
+    step.ownerZh ? `負責：${step.ownerZh}` : "",
+    step.issues.length ? `工具目前判定還缺：\n${step.issues.map((i) => `- ${i.text}`).join("\n")}` : "",
+    have ? `這一步已經有的項目：\n${have}` : step.produces.length ? "這一步已經有的項目：（還沒有）" : "",
+    reqs.length ? `本專案目前的需求（可供連結）：\n${reqs.slice(0, 40).map((e) => `- ${label(e)}`).join("\n")}` : "",
+    layer?.outputsZh ? `本層設計迴圈的產出：${layer.outputsZh}` : "",
+    ``,
+    `請先針對上面還缺的部分向我提問，一次一題。等我回答完，把結果整理成清單：每項寫類別、名稱、內容（繁體中文${step.produces.some((c) => /Requirement/.test(c)) ? "，需求用「應」字且一條一件事" : ""}），以及要連到哪個既有項目、用什麼關係（衍生自、追溯到、#basis、滿足）。我會自己到模型頁新增。`,
+  ].filter((l) => l !== "").join("\n");
+}
 
-  const items = listOf(els, ...step.categories).filter((e) => !e.shared);
-  const targets = useMemo(() => (step.link ? listOf(els, ...step.link.to).filter((e) => step.link?.kind !== "compose" || e.kind === "PartDefinition") : []), [els, step.link]);
-  const parents = step.parent ? listOf(els, step.parent).filter((e) => !e.shared) : [];
-  const locked = guided && step.state === "locked";
-  const blocker = steps.find((s) => s.state === "current");
-  const canEdit = user.caps.edit && !locked;
-  // 到模型頁新增：任務階段、功能要放在總任務裡（還沒有總任務時，第一個建立的就是總任務）
-  const mission = step.parent ? parents.find((e) => !parents.some((q) => q.id === e.owner)) : undefined;
-  const toModel = () => onNew(targetCategory(step), mission?.id ?? null);
-  // 任務階段：還沒有總任務時，第一個建立的就是總任務
-  const needsParent = step.parent && parents.length > 0;
-  useEffect(() => { if (needsParent && !parentId) setParentId(parents[0].id); }, [needsParent, parentId, parents]);
-
-  /** 建立一個項目並連到上一層。回傳更新後的畫面資料。 */
-  const create = async (v: View, input: { category: string; name: string; doc: string; attrs?: Record<string, string>; linkTo?: string; parentId?: string; method?: string }): Promise<View> => {
-    const target = input.linkTo ? v.analysis.elements.find((e) => e.id === input.linkTo) : undefined;
-    const isVerify = step.link?.kind === "verify";
-    const before = new Set(v.analysis.elements.map((e) => e.id));
-    let nv = await api<View>(`/projects/${pid}/elements`, "POST", {
-      category: input.category, name: input.name, doc: input.doc, attrs: input.attrs ?? {}, parentId: input.parentId || undefined,
-      ...(isVerify ? { verifies: target?.qualifiedName, method: input.method ?? "test" } : {}),
-    });
-    const made = nv.analysis.elements.find((e) => !before.has(e.id) && e.name === input.name.trim());
-    if (made && target && step.link && !isVerify) {
-      const [from, to] = step.link.direction === "out" ? [made.id, target.id] : [target.id, made.id];
-      nv = await api<View>(`/projects/${pid}/relations`, "POST", { kind: step.link.kind, from, to });
-    }
-    return nv;
-  };
-
-  const submit = async (ev: FormEvent) => {
-    ev.preventDefault();
-    setBusy(true); setMsg(null);
-    try {
-      onChanged(await create(view, { category: cat.id, name, doc, attrs, linkTo, parentId: needsParent ? parentId : undefined, method }));
-      setMsg({ ok: true, text: `已加入「${name}」。` });
-      setName(""); setDoc(""); setAttrs({});
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
-    finally { setBusy(false); }
-  };
-
-  const prompt = () => {
-    const upstream = targets.map((t) => `- ${label(t)}${t.doc ? `：${t.doc}` : ""}`).join("\n") || "（沒有）";
-    const have = items.map((t) => `- ${label(t)}`).join("\n") || "（還沒有）";
-    return [
-      `你正在協助 JRI（學生火箭團隊）依 NASA-HDBK-1009A 建立系統模型。專案：${view.project.name}。`,
-      `規則：分析從利害關係人開始逐步拆解；每一項都必須從上一層推導；不要編造數值或規範，不確定就先問我。`,
-      ``,
-      `現在是第 ${index + 1} 步「${step.zh}」（手冊 ${step.nasa}）。要回答的問題：${step.question}`,
-      `說明：${step.why}`,
-      `例：${step.example}`,
-      ``,
-      step.link ? `上一層可以連結的項目：\n${upstream}` : "",
-      `這一步已經有的項目：\n${have}`,
-      ``,
-      `請先用上面的問題向我提問，一次一題。等我回答完，把結果整理成下面的 JSON 給我（只輸出 JSON）：`,
-      `[{"name": "名稱", "doc": "內容，用繁體中文${cat?.keyword === "requirement" ? "，需求用「應」字且一條一件事" : ""}"${step.link ? `, "linkTo": "上一層項目的編號"` : ""}}]`,
-    ].filter((l) => l !== "").join("\n");
-  };
+function StepBody(p: Props & { step: FwStep; steps: FwStep[]; layer?: FwLayer; obj?: FwObject }) {
+  const s = p.step;
+  const [aiMsg, setAiMsg] = useState("");
+  const prompt = () => aiPrompt(p.view, p.meta, s, p.layer, p.obj);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(prompt()); setMsg({ ok: true, text: "已複製。貼到你的 AI，回答它的提問後，把它給的 JSON 貼回下面。" }); }
-    catch { setMsg({ ok: false, text: "無法自動複製，請手動選取下方文字。" }); }
-    setAiOpen(true); setFormOpen(true);
+    try { await navigator.clipboard.writeText(prompt()); setAiMsg("已複製。貼到你自己的 AI，回答它的提問；它整理好的清單請自己檢查後到模型頁新增。"); }
+    catch { setAiMsg("無法自動複製，請展開「看提示內容」手動選取。"); }
   };
-  const importAi = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      const m = aiText.match(/\[[\s\S]*\]/);
-      if (!m) throw new Error("找不到 JSON 陣列。請貼上 AI 回覆中以 [ 開頭、] 結尾的部分。");
-      const list = JSON.parse(m[0]) as { name?: unknown; doc?: unknown; linkTo?: unknown }[];
-      if (!Array.isArray(list) || list.length === 0) throw new Error("沒有可匯入的項目。");
-      if (list.length > 30) throw new Error("一次最多匯入 30 項。");
-      let v = view, n = 0;
-      for (const it of list) {
-        const nm = String(it.name ?? "").trim();
-        if (!nm) continue;
-        const key = String(it.linkTo ?? "").trim();
-        const t = key ? listOf(v.analysis.elements, ...(step.link?.to ?? [])).find((e) => e.shortName === key || e.name === key || label(e) === key) : undefined;
-        if (step.link && key && !t) throw new Error(`「${nm}」要連結的「${key}」不存在。已匯入 ${n} 項。`);
-        v = await create(v, { category: cat.id, name: nm, doc: String(it.doc ?? ""), linkTo: t?.id, parentId: needsParent ? parentId : undefined, method });
-        onChanged(v); n++;
-      }
-      setAiText(""); setMsg({ ok: true, text: `已匯入 ${n} 項。請逐項檢查內容是否正確。` });
-    } catch (e) { setMsg({ ok: false, text: e instanceof SyntaxError ? "JSON 格式不正確，請確認貼上的是完整的陣列。" : (e as Error).message }); }
-    finally { setBusy(false); }
-  };
-
-  const gaps = step.state === "locked" ? step.ahead ?? [] : step.issues;
-  const issueText = (it: GuideIssue) => it.count ? `${it.count.zh} ${it.count.have} 個（至少 ${it.count.min} 個）` : it.text;
-
+  const where = s.where ? WHERE[s.where] : null;
+  const cat = (id: string) => p.meta.categories.find((c) => c.id === id);
+  const creatable = s.produces.filter((c) => cat(c) && !cat(c)?.special);
+  const back = s.onNo ? p.steps.find((x) => x.id === s.onNo)?.zh ?? s.onNo : null;
   return (
     <div className="guide-body enter">
       <div className="guide-part">
         <h2 className="label">要做什麼</h2>
-        <p className="body guide-todo">{step.todo ?? step.question}</p>
+        <p className="body guide-todo">{s.gate ? `通過審查節點 ${s.gate.toUpperCase()}。` : s.checkZh || s.zh}</p>
       </div>
-      {(step.how ?? []).length > 0 && (
-        <div className="guide-part">
-          <h2 className="label">怎麼做</h2>
-          <ol className="guide-how">{(step.how ?? []).map((h, i) => <li key={i} className="body">{h}</li>)}</ol>
+      <div className="guide-part">
+        <h2 className="label">怎麼做</h2>
+        <ol className="guide-how">
+          {s.gate && <li className="body">到專案管理頁的審查節點卡，看檢查清單並送審。</li>}
+          {!s.gate && where && s.where !== "auto" && <li className="body">在{where.zh}{creatable.length ? `新增「${creatable.map((c) => cat(c)?.zh ?? c).join("、")}」` : "完成這一步"}{s.produces.includes("DesignAlternative") ? "，用「追溯」連到它要滿足的需求" : ""}{s.produces.includes("Risk") ? "，填嚴重度、可能性與緩解措施，並追溯到設計方案或對象" : ""}。</li>}
+          {s.where === "auto" && <li className="body">工具依模型自動判定，不用手動勾選。{s.decision && back ? `答否時回到「${back}」修改。` : ""}</li>}
+          {s.ownerZh && <li className="body">負責：{s.ownerZh}（專案設定可改）。</li>}
+        </ol>
+        <div className="tbtn-row guide-actions">
+          {creatable.slice(0, 3).map((c) => <button key={c} className="btn" disabled={!p.user.caps.edit} onClick={() => p.onNew(c)}>到模型頁新增{cat(c)?.zh} →</button>)}
+          {where?.page && where.page !== "model" && <button className="tbtn" onClick={() => p.go(where.page as Page)}>到{where.zh} →</button>}
+          {s.gate && <button className="tbtn" onClick={() => p.go("manage")}>到專案管理頁 →</button>}
+          {!s.gate && s.where !== "auto" && <button type="button" className="tbtn primary" data-ai-prompt={s.id} onClick={copy}>複製給 AI 的提示</button>}
         </div>
-      )}
+        {aiMsg && <p className="msg" role="status">{aiMsg}</p>}
+        {!s.gate && s.where !== "auto" && <details><summary className="tbtn">看提示內容</summary><pre className="code" style={{ maxHeight: 220, whiteSpace: "pre-wrap" }}>{prompt()}</pre></details>}
+      </div>
       <div className="guide-part">
         <h2 className="label">還缺</h2>
-        {step.state === "locked" && <p className="body muted">{locked ? "要先完成" : "建議先完成"}第 {steps.indexOf(blocker as GuideStep) + 1} 步「{blocker?.zh}」{locked ? "，才能新增這一步的項目" : ""}。
-          {blocker && <button className="tbtn" onClick={() => goTo(blocker.id)}>前往</button>}</p>}
-        {locked ? null
-          : gaps.length === 0 ? <p className="body muted">{step.state === "locked" ? "這一步本身不缺。" : "沒有，這一步完成了。"}</p>
-          : <ul className="guide-missing">{gaps.map((it, i) => (
-              <li key={i}><span className="body">{issueText(it)}</span>
-                {it.id && <button className="tbtn" onClick={() => onOpen(it.id as string, els.find((e) => e.id === it.id)?.category ?? null)}>開啟</button>}</li>
+        {s.done === true ? <p className="body muted">沒有，這一步完成了。</p>
+          : s.issues.length === 0 ? <p className="body muted">{s.gate ? "等節點核可。" : s.state === "pending" ? "待接：工具還沒有這項檢查，先人工確認。" : "前面的步驟完成後再看。"}</p>
+          : <ul className="guide-missing">{s.issues.map((it, i) => (
+              <li key={i}><span className="body">{it.text}</span>{it.id && <button className="tbtn" onClick={() => p.onOpen(it.id as string)}>開啟</button>}</li>
             ))}</ul>}
       </div>
-      <div className="tbtn-row guide-actions">
-        <button className="btn" disabled={!canEdit} onClick={toModel} title={locked ? "流程範本專案要依序完成" : undefined}>到模型頁做這一步 →</button>
-        {canEdit && <button type="button" className="tbtn primary" onClick={copy}>複製給 AI 的提示</button>}
-        <button type="button" className="tbtn" aria-pressed={showExample} onClick={() => setShowExample(!showExample)}>看範例</button>
-      </div>
-      {msg && !formOpen && <p className="msg" role="status">{!msg.ok && <span className="tag danger">ERR</span>}{msg.text}</p>}
-      {showExample && <p className="caption guide-example">例：{step.example}</p>}
-
-      <div className="guide-more">
-        <p className="caption">手冊 {step.nasa} · 要回答的問題：{step.question}</p>
-        <p className="caption">為什麼：{step.why}</p>
-      </div>
-
-      <div className="section">
-        <div className="section-head"><h2 className="section-title">已有的{step.zh}</h2><span className="label">{items.length}</span></div>
-        {items.length === 0 ? <p className="caption">還沒有。</p> : items.map((e) => {
-          const up = view.analysis.relations.filter((r) => r.from === e.id && ["trace", "derive", "refine", "allocate", "verify"].includes(r.kind)).map((r) => els.find((x) => x.id === r.to)).filter((x): x is Element => !!x);
-          return (
-            <button className="proc-item" key={e.id} onClick={() => onOpen(e.id, e.category)}>
-              <span className="tid">{e.shortName ?? ""}</span>
-              <span className="body">{e.name}{e.doc && <span className="muted">　{e.doc}</span>}</span>
-              <span className="caption">{up.map((u) => u.shortName ?? u.name).join("、")}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {canEdit && cat && !formOpen && <div><button className="tbtn" onClick={() => setFormOpen(true)}>在這裡直接加入（不離開流程頁）</button></div>}
-      {canEdit && cat && formOpen && (
-        <form className="section" onSubmit={submit}>
-          <div className="section-head"><h2 className="section-title">在這裡直接加入</h2><button type="button" className="tbtn" onClick={() => setFormOpen(false)}>收起</button></div>
-          <div className="row">
-            {cats.length > 1 && <label className="field" style={{ flex: "0 0 10rem" }}><span className="label">類別</span><select className="input" value={cat.id} onChange={(e) => setCatId(e.target.value)}>{cats.map((c) => <option key={c.id} value={c.id}>{c.zh}</option>)}</select></label>}
-            <label className="field"><span className="label">名稱</span><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></label>
-            {step.link && (
-              <label className="field"><span className="label">{step.link.zh}</span>
-                <select className="input" required={targets.length > 0} value={linkTo} onChange={(e) => setLinkTo(e.target.value)}><option value="">請選擇</option>{targets.map((t) => <option key={t.id} value={t.id}>{label(t)}</option>)}</select></label>
-            )}
-            {needsParent && <label className="field" style={{ flex: "0 0 12rem" }}><span className="label">放在哪個任務或階段內</span><select className="input" value={parentId} onChange={(e) => setParentId(e.target.value)}>{parents.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
-            {step.link?.kind === "verify" && <label className="field" style={{ flex: "0 0 8rem" }}><span className="label">方法</span><select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>{METHODS.map(([k, zh]) => <option key={k} value={k}>{zh}</option>)}</select></label>}
-          </div>
-          <label className="field"><span className="label">{cat.keyword === "requirement" ? "內容（需求用「應」字，一條只寫一件事）" : "說明"}</span><textarea className="input" rows={2} value={doc} onChange={(e) => setDoc(e.target.value)} /></label>
-          {(cat.fields ?? []).length > 0 && <div className="row">{(cat.fields ?? []).map((f) => (
-            <label className="field" key={f.name} style={{ minWidth: f.type === "text" ? "12rem" : "8rem" }}><span className="label">{f.zh}</span><input className="input" inputMode={f.type === "text" ? "text" : "decimal"} value={attrs[f.name] ?? ""} onChange={(e) => setAttrs({ ...attrs, [f.name]: e.target.value })} /></label>
-          ))}</div>}
-          {step.parent && parents.length === 0 && <p className="caption">第一個建立的會成為總任務，之後的階段加在它裡面。</p>}
-          {step.link && targets.length === 0 && <p className="caption">上一層還沒有可以連結的項目。</p>}
-          {msg && <p className="msg" role="status">{!msg.ok && <span className="tag danger">ERR</span>}{msg.text}</p>}
-          <div className="tbtn-row" style={{ paddingLeft: 0, marginTop: 8 }}>
-            <button className="btn" disabled={busy}>{busy ? "寫入中" : "加入"}</button>
-            <button type="button" className="tbtn" onClick={() => setAiOpen(!aiOpen)}>{aiOpen ? "收起" : "貼上 AI 的回覆"}</button>
-          </div>
-          {aiOpen && (
-            <div style={{ marginTop: 12 }}>
-              <p className="caption" style={{ marginBottom: 8 }}>把提示貼給你自己的 AI（任何一種都可以），它會用同一套方法向你提問。回答完後，把它輸出的 JSON 貼在這裡匯入。匯入前請自己看過內容。</p>
-              <textarea className="input" rows={5} value={aiText} onChange={(e) => setAiText(e.target.value)} placeholder='[{"name": "…", "doc": "…"}]' spellCheck={false} />
-              <div className="tbtn-row"><button type="button" className="tbtn primary" disabled={busy || !aiText.trim()} onClick={importAi}>匯入</button>
-                <details><summary className="tbtn">看提示內容</summary><pre className="code" style={{ maxHeight: 220, whiteSpace: "pre-wrap" }}>{prompt()}</pre></details></div>
-            </div>
-          )}
-        </form>
-      )}
     </div>
   );
 }

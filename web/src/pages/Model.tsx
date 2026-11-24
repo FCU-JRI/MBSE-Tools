@@ -1,23 +1,22 @@
-// 模型：原「圖」加上左欄（篩選、圖依種類、模型元素），原「原始碼」收成下方抽屜，右欄只在選取時顯示。
+// 模型：左欄依框架的層長出來（MOD-02，見 model/LayerTree.tsx），中間是圖或某類別的元素列表，原始碼收成下方抽屜，右欄只在選取時顯示。
+// 圖上方名稱列有「匯出 ▾」（MOD-14）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { api } from "../api.ts";
 import type { Diagrams, Meta, View } from "../api.ts";
-import { diagramsOf, label, listOf } from "../model.ts";
-import type { DiagramDef, DiagramKind } from "../model.ts";
+import { diagramsOf, PALETTE } from "../model.ts";
+import type { DiagramDef } from "../model.ts";
 import { Diagram } from "../Diagram.tsx";
+import type { DiagramHandle } from "../Diagram.tsx";
 import { SourceTab } from "../SourceTab.tsx";
 import { Columns, SelectionPane } from "../layout.tsx";
 import type { PageProps } from "../workspace.ts";
+import { LayerTree } from "./model/LayerTree.tsx";
+import type { ListSpec } from "./model/LayerTree.tsx";
+import { CategoryList } from "./model/CategoryList.tsx";
+import { diagramLayer, fileLayers, layerTools } from "./model/framework.ts";
+import { fwOf } from "../Process.tsx";
 import "./model.css";
-
-/** 圖依種類分組；沒有圖的種類不顯示。 */
-const KINDS: { zh: string; kinds: DiagramKind[] }[] = [
-  { zh: "一般檢視", kinds: ["bdd", "req", "uc"] },
-  { zh: "內部連接圖", kinds: ["ibd"] },
-  { zh: "活動圖", kinds: ["act"] },
-  { zh: "狀態機圖", kinds: ["stm"] },
-  { zh: "自訂圖", kinds: ["custom"] },
-];
 
 export function ModelPage(p: PageProps) {
   const { id, view, meta, readOnly } = p;
@@ -45,20 +44,37 @@ export function ModelPage(p: PageProps) {
   const selectElement = (eid: string | null) => p.setSel(eid ? { type: "element", id: eid } : null);
   const source = p.spot.source;
 
-  const left = <ModelTree view={view} meta={meta} diagrams={diagrams} diagramId={def.id} selectedId={selectedId} onAddDiagram={readOnly ? undefined : addDiagram}
-    onDiagram={(d) => p.setSpot({ diagramId: d })} onCategory={(c) => p.setSel({ type: "new", category: c, parentId: null })} onElement={(eid) => p.setSel({ type: "element", id: eid })} />;
+  // 左欄點了某層的類別：中間改列出這個類別的元素；換圖就回到圖
+  const [listCat, setListCat] = useState<ListSpec | null>(null);
+  const openDiagram = (d: string) => { setListCat(null); p.setSpot({ diagramId: d }); };
+  const handle = useRef<DiagramHandle | null>(null);
+  // 工具箱依框架（MOD-14）：這張圖在哪一層，就列那層框架自動化需要的元素與關係
+  const fw = fwOf(view);
+  const ctxCat = def.context ? view.analysis.elements.find((e) => e.id === def.context)?.category ?? null : null;
+  const toolLayer = diagramLayer(ctxCat, PALETTE[def.kind], fw?.layers.find((l) => !l.passed)?.id ?? fileLayers()[0]?.id ?? null);
+  const tools = toolLayer ? { layerZh: fileLayers().find((l) => l.id === toolLayer)?.zh ?? "", ...layerTools(toolLayer) } : undefined;
+  const left = <LayerTree view={view} meta={meta} diagrams={diagrams} diagramId={def.id} selectedId={selectedId} listCat={listCat} onAddDiagram={readOnly ? undefined : (t) => { setListCat(null); addDiagram(t); }}
+    onDiagram={openDiagram} onList={setListCat} onCategory={(c) => p.setSel({ type: "new", category: c, parentId: null })} onElement={(eid) => p.setSel({ type: "element", id: eid })} />;
 
   return (
     <Columns left={left} right={p.sel ? <SelectionPane {...p} /> : undefined}>
       <div className="model-bar">
         <span className="label">{def.code}</span><span className="heading">{def.title}</span>
+        <select className="input model-pick" value={def.id} onChange={(e) => openDiagram(e.target.value)} aria-label="切換圖" title="切換圖">
+          {diagrams.map((d) => <option key={d.id} value={d.id}>{d.code} {d.title}</option>)}
+        </select>
+        {listCat && <span className="tag">列表中</span>}
         <span className="grow" />
+        {!listCat && <ExportMenu handle={handle} />}
         <button className="tbtn" aria-pressed={source} onClick={() => p.setSpot({ source: !source })} title="SysML v2 文字原始碼">{"</>"} 原始碼</button>
       </div>
       <div className={`model-main ${source ? "with-source" : ""}`}>
-        <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} pickOnOpen={def.id === justCreated} onPicked={() => setJustCreated(null)} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
-          onSelectEdge={(e) => e && p.setSel({ type: "edge", edge: e })} onNew={(c, parentId) => p.setSel({ type: "new", category: c, parentId })}
-          onChanged={(v: View) => { p.setView(v); p.onNotice(""); }} onError={p.onNotice} />
+        {listCat
+          ? <CategoryList key={`${listCat.layer}:${listCat.category}`} view={view} meta={meta} spec={listCat} selectedId={selectedId} readOnly={readOnly} onElement={(eid) => p.setSel({ type: "element", id: eid })}
+              onNew={(c) => p.setSel({ type: "new", category: c, parentId: null })} onClose={() => setListCat(null)} />
+          : <Diagram readOnly={readOnly} view={view} meta={meta} def={def} extra={extra} pickOnOpen={def.id === justCreated} onPicked={() => setJustCreated(null)} onExtra={saveExtra} selectedId={selectedId} onSelectElement={selectElement}
+              onSelectEdge={(e) => e && p.setSel({ type: "edge", edge: e })} onNew={(c, parentId) => p.setSel({ type: "new", category: c, parentId })}
+              onChanged={(v: View) => { p.setView(v); p.onNotice(""); }} onError={p.onNotice} handle={handle} framework={tools} />}
       </div>
       {source && (
         <div className="source-drawer" role="region" aria-label="原始碼">
@@ -70,85 +86,29 @@ export function ModelPage(p: PageProps) {
   );
 }
 
-interface TreeProps {
-  view: View; meta: Meta; diagrams: DiagramDef[]; diagramId: string; selectedId: string | null;
-  onDiagram: (id: string) => void; onAddDiagram?: (title: string) => void; onCategory: (id: string) => void; onElement: (id: string) => void;
-}
-
-/** 左欄：篩選、圖（依種類）、模型元素（支柱 → 類別 → 元素）。篩選時只留名稱或編號符合的項目，並全部展開。 */
-function ModelTree({ view, meta, diagrams, onAddDiagram, diagramId, selectedId, onDiagram, onCategory, onElement }: TreeProps) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ "k:一般檢視": true, "k:自訂圖": true, requirements: true, structure: true });
-  const [q, setQ] = useState("");
-  const [naming, setNaming] = useState(false);
-  const els = view.analysis.elements;
-  const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
-  const needle = q.trim().toLowerCase();
-  const hit = (...s: (string | null | undefined)[]) => !needle || s.some((x) => (x ?? "").toLowerCase().includes(needle));
-  // 選到的元素所在的支柱與類別自動展開，從別頁跳過來時看得到它
-  const picked = selectedId ? els.find((e) => e.id === selectedId) : undefined;
-  const pickedCat = picked?.category ? meta.categories.find((c) => c.id === picked.category) : undefined;
-  const isOpen = (k: string) => !!needle || !!open[k] || (!!pickedCat && (k === pickedCat.pillar || k === `c:${pickedCat.id}`));
-  const finish = (v: string) => { setNaming(false); if (v.trim()) onAddDiagram?.(v); };
-  const shownDiagrams = diagrams.filter((d) => hit(d.title, d.code));
+/** 名稱列的「匯出 ▾」：SVG／PNG；有草稿標註時可選要不要一起匯出（偏好存在瀏覽器）。 */
+function ExportMenu({ handle }: { handle: RefObject<DiagramHandle | null> }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(() => { try { return !!JSON.parse(localStorage.getItem("jri.export") ?? "{}").draft; } catch { return false; } });
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+  const run = (kind: "svg" | "png") => { setOpen(false); handle.current?.exportAs(kind, draft); };
+  const toggleDraft = () => setDraft((v) => { try { localStorage.setItem("jri.export", JSON.stringify({ draft: !v })); } catch { /* 只在本次有效 */ } return !v; });
   return (
-    <>
-      <div className="section model-filter">
-        <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="篩選名稱或編號" aria-label="篩選圖與模型元素" />
-      </div>
-      <div className="section">
-        <div className="section-head"><h2 className="section-title">圖</h2><span className="label">{shownDiagrams.length}</span></div>
-        <ul className="tree">{KINDS.map((k) => {
-          const list = shownDiagrams.filter((d) => k.kinds.includes(d.kind));
-          const custom = k.kinds.includes("custom");
-          if (list.length === 0 && !(custom && onAddDiagram && !needle)) return null;
-          const key = `k:${k.zh}`;
-          return (
-            <li key={k.zh}>
-              <button className="tree-row" aria-expanded={isOpen(key)} onClick={() => toggle(key)}><span className="tw">{isOpen(key) ? "−" : "+"}</span><span className="tn" style={{ fontWeight: 500 }}>{k.zh}</span><span className="tc">{list.length}</span></button>
-              {isOpen(key) && <ul>
-                {list.map((d) => (
-                  <li key={d.id}><button className="tree-row" aria-current={d.id === diagramId} onClick={() => onDiagram(d.id)}>
-                    <span className="tid">{d.code}</span><span className="tn">{d.title}</span>
-                  </button></li>
-                ))}
-                {custom && onAddDiagram && <li>{naming
-                  ? <input className="input" autoFocus placeholder="圖的名稱，例如：任務總覽" maxLength={60} aria-label="新自訂圖的名稱"
-                      onKeyDown={(e) => { if (e.key === "Enter") finish((e.target as HTMLInputElement).value); if (e.key === "Escape") setNaming(false); }} onBlur={(e) => finish(e.target.value)} />
-                  : <button className="tbtn" onClick={() => setNaming(true)} title="自己決定放哪些項目的圖，任何類別都能放在一起">＋ 新增自訂圖</button>}</li>}
-              </ul>}
-            </li>
-          );
-        })}</ul>
-      </div>
-      <div className="section">
-        <div className="section-head"><h2 className="section-title">模型元素</h2><span className="label">{els.filter((e) => e.category).length}</span></div>
-        <ul className="tree">{Object.entries(meta.pillars).map(([pid, pzh]) => {
-          const cats = meta.categories.filter((c) => c.pillar === pid).map((c) => ({ c, items: listOf(els, c.id).filter((e) => hit(e.name, e.shortName)) }))
-            .filter(({ c, items }) => !needle || items.length > 0 || hit(c.zh));
-          if (needle && cats.length === 0) return null;
-          return (
-            <li key={pid}>
-              <button className="tree-row" aria-expanded={isOpen(pid)} onClick={() => toggle(pid)}><span className="tw">{isOpen(pid) ? "−" : "+"}</span><span className="tn" style={{ fontWeight: 500 }}>{pzh}</span></button>
-              {isOpen(pid) && <ul>{cats.map(({ c, items }) => {
-                const k = `c:${c.id}`;
-                return (
-                  <li key={c.id}>
-                    <div style={{ display: "flex" }}>
-                      <button className="tree-row" style={{ width: 18 }} aria-label={isOpen(k) ? "收合" : "展開"} aria-expanded={isOpen(k)} onClick={() => toggle(k)} disabled={items.length === 0}><span className="tw">{items.length ? (isOpen(k) ? "−" : "+") : ""}</span></button>
-                      <button className="tree-row" onClick={() => onCategory(c.id)} title={`新增${c.zh}`}><span className="tn">{c.zh}</span><span className="tc">{items.length}</span></button>
-                    </div>
-                    {isOpen(k) && <ul>{items.map((e) => (
-                      <li key={e.id}><button className="tree-row" aria-current={e.id === selectedId} onClick={() => onElement(e.id)} title={label(e)}>
-                        <span className="tn">{e.name}</span>{e.shared && <span className="tid">共用</span>}{e.shortName && <span className="tid">{e.shortName}</span>}
-                      </button></li>
-                    ))}</ul>}
-                  </li>
-                );
-              })}</ul>}
-            </li>
-          );
-        })}</ul>
-      </div>
-    </>
+    <div className="export-menu" ref={ref}>
+      <button className="tbtn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="把這張圖匯出成檔案，放進審查報告">匯出 ▾</button>
+      {open && (
+        <div className="ctx-menu" role="menu">
+          <button role="menuitem" onClick={() => run("svg")}>SVG（向量，可縮放）</button>
+          <button role="menuitem" onClick={() => run("png")}>PNG（圖片）</button>
+          {(handle.current?.notes ?? 0) > 0 && <label className="caption export-draft"><input type="checkbox" checked={draft} onChange={toggleDraft} /> 含草稿標註</label>}
+        </div>
+      )}
+    </div>
   );
 }

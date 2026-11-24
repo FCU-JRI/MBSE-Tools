@@ -17,7 +17,7 @@ interface Section { heading: string; level: 1 | 2; paragraphs: string[]; table?:
 export interface Report { title: string; subtitle: string; meta: [string, string][]; sections: Section[] }
 
 const METHOD: Record<string, string> = { "VerificationMethodKind::test": "測試", "VerificationMethodKind::analyze": "分析", "VerificationMethodKind::inspect": "檢查", "VerificationMethodKind::demo": "展示" };
-const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
+const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
 
 function diagramSvg(_title: string, a: Analysis, id: string): string | null {
   const def = diagramsOf(a as any).find((d) => d.id === id || d.kind === id);
@@ -65,7 +65,7 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
   if (stm) S.push({ heading: "3.3　模式與狀態", level: 2, paragraphs: [], svg: stm });
 
   chapter("4　需求與驗證");
-  const reqs = of("SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
+  const reqs = of("MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
   add("4.1　需求表", [], { head: ["編號", "層級", "名稱", "需求內容", "衍生自", "滿足者", "計算判定"], rows: reqs.map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "derive", "refine", "trace"), ins(e, "satisfy"), verdict(e)]) }, { svg: diagramSvg(project.name, a, "req") ?? undefined });
   const rvm: string[][] = [];
   for (const r of reqs) {

@@ -35,7 +35,7 @@ export function TableView({ view, meta, catId, selectedId, onSelect }: { view: V
 export function TraceView({ view, selectedId, onSelect }: { view: View; selectedId: string | null; onSelect: (id: string) => void }) {
   const els = view.analysis.elements;
   const byId = new Map(els.map((e) => [e.id, e]));
-  const reqs = listOf(els, "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
+  const reqs = listOf(els, "MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement");
   const sat = new Map(view.analysis.satisfaction.map((s) => [s.requirement, s.status]));
   const cell = (list: (Element | undefined)[]): ReactNode => (list.length ? list.map((e, i) => e && <div key={i}>{label(e)}</div>) : <span className="tag danger">MISS</span>);
   const outs = (e: Element, ...k: string[]) => view.analysis.relations.filter((r) => r.from === e.id && k.includes(r.kind)).map((r) => byId.get(r.to));

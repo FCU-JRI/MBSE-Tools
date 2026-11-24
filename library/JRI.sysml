@@ -4,6 +4,14 @@
  */
 package JRI {
     private import ScalarValues::*;
+    private import MeasurementReferences::*;
+    private import ISQ::*;
+    private import SI::*;
+
+    // ───────── 單位（SI 標準庫沒有帶的常用前綴單位） ─────────
+    // 需求門檻可寫 3 [km]、300 [kPa]。用標準的 ConversionByPrefix 定義，換算由解析器做。
+    attribute <km> kilometre : LengthUnit { :>> unitConversion : ConversionByPrefix { :>> prefix = kilo; :>> referenceUnit = m; } }
+    attribute <kPa> kilopascal : PressureUnit { :>> unitConversion : ConversionByPrefix { :>> prefix = kilo; :>> referenceUnit = Pa; } }
 
     // ───────── 需求支柱 Requirements ─────────
 
@@ -20,10 +28,14 @@ package JRI {
     requirement def Goal;
     /* 目的 Objective */
     requirement def Objective;
-    /* 效能量度 Measure of Effectiveness */
-    requirement def MOE;
+    /* 效能量度 Measure of Effectiveness。successLevel：成功判準三級（最低、完全、額外） */
+    requirement def MOE {
+        attribute successLevel : String[0..1];
+    }
     /* 性能量度 Measure of Performance */
     requirement def MOP;
+    /* 任務需求：第 1 層的出口（來源：成功判準與來源文件的硬條件），第 2 層任務剖面的輸入 */
+    requirement def MissionRequirement;
     /* 系統層需求 */
     requirement def SystemRequirement;
     /* 次系統層需求 */
@@ -43,12 +55,29 @@ package JRI {
     // 一般追溯在標準庫沒有對應的標記，沿用自訂的：
     //   #trace dependency from 下層 to 上層;
     metadata def <trace> TraceLink;
+    // 設計依據：下一層需求根據上一層設計迴圈的哪個產出（介面、邊界、配額、選定方案、決策）推出來
+    //   #basis dependency from 下層需求 to 設計產出;
+    metadata def <basis> BasisLink;
 
     /* 出處：這個項目來自哪一份文件的哪一節。文件清單在專案的 pm.json（docs）。
        用法：@Source { sourceDoc = "DOC-001"; sourceRef = "3.2"; } */
     metadata def Source {
         attribute sourceDoc : String;
         attribute sourceRef : String[0..1];
+    }
+
+    /* CAD 連結：設計迴圈第 5 步。模型只放連結與版本，不附檔。
+       用法：@CadLink { cadUrl = "https://..."; cadVersion = "v3"; cadTool = "Onshape"; } */
+    metadata def CadLink {
+        attribute cadUrl : String;
+        attribute cadVersion : String;
+        attribute cadTool : String[0..1];
+    }
+
+    /* 層級：mission（任務）、system（系統）、subsystem（次系統）、component（元件）。推不出層級時才手填。
+       用法：@LayerTag { layer = "subsystem"; } */
+    metadata def LayerTag {
+        attribute layer : String;
     }
 
     // ───────── 結構支柱 Structure ─────────
@@ -58,6 +87,34 @@ package JRI {
     part def Component;
     /* 系統脈絡中的外部對象 */
     part def ExternalEntity;
+
+    /* 介面：兩個次系統之間的連接，屬於上一層（系統）的設計產出。
+       kind：機械、熱、電、流體、資料、人。兩端的關鍵數字寫在介面上（名稱A、名稱B），用 assert constraint 檢查是否對得上。
+       兩端各有一個同名的連接埠：port <'IF-001-A'> 'IF-001' : InterfacePort; */
+    port def InterfacePort;
+    interface def Interface {
+        attribute kind : String;
+        end a : InterfacePort;
+        end b : InterfacePort;
+    }
+    /* 介面狀態：maturity＝exists（存在）、tentative（暫定）、frozen（凍結）；agreedA／agreedB：兩端負責人是否同意 */
+    metadata def InterfaceStatus {
+        attribute maturity : String;
+        attribute agreedA : String[0..1];
+        attribute agreedB : String[0..1];
+    }
+
+    /* 設計方案：用 SysML v2 的 variation／variant 列出候選，例如
+       variation part def <'ALT-001'> '回收方案' :> DesignAlternative { variant part <'ALT-001-1'> '單段傘'; } */
+    part def DesignAlternative;
+
+    /* 方案評分：準則就是連到方案的需求。權重寫在需求上：@TradeWeight { weight = 3.0; }（沒寫當 1）。
+       候選對準則的分數寫在候選上，一個準則一個值，名稱是 score_ 加需求編號（- 換成 _）：
+       variant part <'ALT-001-1'> '單段傘' { attribute score_REQ_SYS_001 : TradeScore = 4.0; } */
+    metadata def TradeWeight {
+        attribute weight : Real;
+    }
+    attribute def TradeScore :> Real;
 
     // ───────── 行為支柱 Behavior ─────────
 
@@ -107,6 +164,15 @@ package JRI {
         attribute residualSeverity : Integer;
         attribute residualLikelihood : Integer;
         attribute status : String;
+        /* 風險種類：技術、時程、預算、場地、人員（風險登錄用） */
+        attribute riskKind : String[0..1];
+    }
+
+    /* 設計決策：方案選定、衝突裁決都留理由、裁決者與日期（TR-08） */
+    item def DesignDecision {
+        attribute rationale : String;
+        attribute decidedBy : String;
+        attribute decidedOn : String;
     }
 
     /* 安全係數 Factor of Safety */

@@ -40,7 +40,7 @@ interface Ctx {
   hasIn: (e: Element, ...kinds: string[]) => boolean; // e 是關係的終點
 }
 
-const REQS = ["SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
+const REQS = ["MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement"];
 
 const atLeastOne = (label: string, ...cats: string[]) => (c: Ctx) => {
   const n = c.of(...cats).length;
@@ -196,7 +196,7 @@ export function evaluateGates(a: Analysis, enabled: string[], manualDone: Record
     hasIn: (e, ...kinds) => kinds.some((k) => inn.has(`${e.id}|${k}`)),
   };
   // 結構類別同時有定義與使用（part def 與 part），計數時只算定義，避免重複。
-  const structural = new Set(["System", "Subsystem", "Component", "ExternalEntity"]);
+  const structural = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
   ctx.of = (...cats) =>
     a.elements.filter((e) => {
       if (e.category === null || !cats.includes(e.category)) return false;

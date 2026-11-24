@@ -44,7 +44,7 @@ test("每一步都有「要做什麼」一句話與「怎麼做」步驟；既�
   }
 });
 
-test("流程範本：API 帶指南文案；還缺附計數並即時更新；跳步仍擋", async () => {
+test("流程範本：API 帶指南文案；還缺附計數並即時更新；跳步不再擋", async () => {
   assert.equal((await call(`${I}/api/projects`, "POST", { id: "gd1", name: "指南合成", kind: "annual", template: "guided" })).status, 200);
   const base = `${I}/api/projects/gd1`;
   let v = (await call(base)).data;
@@ -58,8 +58,14 @@ test("流程範本：API 帶指南文案；還缺附計數並即時更新；跳�
   assert.deepEqual(step("expectations").issues, [], "鎖定的步驟 issues 維持空（伺服器順序檢查用）");
   assert.deepEqual(step("context").ahead.map((i) => i.count?.category), ["System", "ExternalEntity"], "鎖定步驟本身的還缺放在 ahead");
 
-  // 前一步沒完成不能新增後一步（規則不變）
-  assert.equal((await call(`${base}/elements`, "POST", { category: "Expectation", name: "跳步的期望" })).status, 400);
+  // 舊順序鎖已拿掉（Mars 2026-11-24）：跳步照常建立；期望不是下一層需求，框架沒有卡點警告。建完刪掉，後面的斷言不受影響
+  {
+    const j = await call(`${base}/elements`, "POST", { category: "Expectation", name: "跳步的期望" });
+    assert.equal(j.status, 200);
+    assert.equal(j.data.holdWarning, undefined);
+    const e = j.data.analysis.elements.find((x: any) => x.name === "跳步的期望");
+    assert.equal((await call(`${base}/elements/delete`, "POST", { id: e.id })).status, 200);
+  }
 
   // 加一位利害關係人：第 1 步完成，第 2 步的還缺改成指向元素
   let r = await call(`${base}/elements`, "POST", { category: "Stakeholder", name: "合成主辦方" });

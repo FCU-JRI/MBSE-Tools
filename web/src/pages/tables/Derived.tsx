@@ -6,7 +6,7 @@ import type { Props } from "../../Deliverables.tsx";
 import { DataTable } from "./DataTable.tsx";
 import type { Col } from "./DataTable.tsx";
 
-const REQ = ["SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
+const REQ = ["MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP"];
 
 export function VerifyMatrix({ view, selectedId, onSelect }: Props) {
   const a = view.analysis;

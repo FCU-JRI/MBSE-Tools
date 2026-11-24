@@ -7,7 +7,7 @@ import type { Element } from "../extract.ts";
 import * as auth from "../auth.ts";
 import * as versions from "../versions.ts";
 import * as pm from "../pm.ts";
-import { evaluateProcess } from "../process.ts";
+import { evaluateProcess, frameworkView, withFrameworkChecks } from "../process.ts";
 import type { User } from "../auth.ts";
 
 // 各路由檔共用的小工具與專案畫面資料
@@ -42,8 +42,9 @@ export async function view(id: string) {
   const project = { ...(await store.readProject(id)), id };
   const analysis = await store.analyzeProject(id);
   const plan = await pm.readPm(id);
-  const gates = evaluateGates(analysis, project.gates, project.manual, plan.tasks.length);
-  return { project, analysis, gates, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id), branch: await versions.branchState(id), warning: versions.syncWarning(id) };
+  const framework = await frameworkView(id, project, analysis, plan.docs.length);
+  const gates = withFrameworkChecks(evaluateGates(analysis, project.gates, project.manual, plan.tasks.length), framework, analysis);
+  return { project, analysis, gates, framework, docs: plan.docs, milestones: plan.milestones, process: analysis.ok ? evaluateProcess(analysis) : [], history: await store.historyState(id), branch: await versions.branchState(id), warning: versions.syncWarning(id) };
 }
 
 // ───────── 管理：成員、唯讀連結、登入設定 ─────────

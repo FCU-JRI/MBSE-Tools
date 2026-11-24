@@ -16,10 +16,15 @@ import { mount as diagrams } from "./routes/diagrams.ts";
 import { mount as gates } from "./routes/gates.ts";
 import { mount as pm } from "./routes/pm.ts";
 import { mount as sim } from "./routes/sim.ts";
+import { mount as calc } from "./routes/calc.ts";
 import { mount as versionRoutes } from "./routes/versions.ts";
 import { mount as xlsx } from "./routes/export.ts";
 import { mount as tables } from "./routes/tables.ts";
+import { mount as trade } from "./routes/trade.ts";
 import { mount as board } from "./routes/board.ts";
+import { mount as reviewRoutes } from "./routes/reviews.ts";
+import { mount as design } from "./routes/design.ts";
+import { mount as conflicts } from "./routes/conflicts.ts";
 
 // 這個檔只負責共用的中介層、靜態檔與啟動；各功能的 API 在 server/routes/*.ts
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -83,7 +88,7 @@ app.get("/api/me", wrap(async (req, res) => {
 }));
 
 // 各功能的路由，依原本的順序掛上
-for (const m of [admin, projects, elements, diagrams, gates, pm, sim, versionRoutes, xlsx, tables, board]) m(app);
+for (const m of [admin, projects, elements, diagrams, gates, pm, sim, calc, versionRoutes, xlsx, tables, trade, board, design, conflicts, reviewRoutes]) m(app);
 
 const dist = path.join(ROOT, "dist");
 if (fs.existsSync(dist)) {

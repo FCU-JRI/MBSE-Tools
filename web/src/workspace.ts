@@ -7,7 +7,7 @@ export type Page = "home" | "process" | "model" | "tables" | "analysis" | "manag
 export const PAGES: [Page, string][] = [["home", "首頁"], ["process", "流程"], ["model", "模型"], ["tables", "表格"], ["analysis", "分析"], ["manage", "專案管理"]];
 
 /** 表格頁左欄選的是哪一張表。cat:類別代號 是模型元素清單裡的某個類別。 */
-export type TableGroup = "req" | "verify" | "fmea" | "params" | "formula" | "docs" | `cat:${string}`;
+export type TableGroup = "req" | "verify" | "fmea" | "params" | "formula" | "docs" | "conflicts" | "trade" | "n2" | `cat:${string}`;
 
 /** 切換分頁時要留住的位置：看到哪張圖、哪張表、哪個節點、原始碼抽屜開著沒。 */
 export interface Spot { diagramId: string; table: TableGroup; gateId: string | null; source: boolean }
