@@ -308,3 +308,25 @@ details > summary { list-style: none; cursor: pointer; } details > summary::-web
 .version-btn[aria-pressed="true"] { color: var(--ink); font-weight: 700; }
 .pane-head { padding-top: var(--space-2); }
 .pane-head .grow { flex: 1; }
+
+/* ───────── 協作感知（F-38）：在線頭像與別人的選取 ───────── */
+.pz-bar { position: relative; display: flex; align-items: center; }
+.pz-stack { display: flex; align-items: center; background: none; border: 0; padding: 0; cursor: pointer; }
+.pz-stack .pz-avatar + .pz-avatar { margin-left: -8px; }
+.pz-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 50%; border: 2px solid; color: #fff; font-weight: 600; line-height: 1; overflow: hidden; box-sizing: border-box; user-select: none; }
+.pz-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pz-more { width: 26px; height: 26px; background: var(--line); border-color: var(--line); color: var(--ink); font-size: 11px; margin-left: -8px; }
+.pz-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; min-width: 260px; max-width: 360px; max-height: 60vh; overflow: auto; padding: var(--space-2); background: var(--surface-1); border: var(--stroke-hair) solid var(--line-strong); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); display: grid; gap: 2px; }
+.pz-row { display: flex; gap: var(--space-2); align-items: center; text-align: left; background: none; border: 0; padding: 6px; border-radius: 6px; color: inherit; font: inherit; cursor: pointer; }
+.pz-row:hover:not(:disabled) { background: var(--line); }
+.pz-row:disabled { cursor: default; }
+.pz-who { display: grid; font-size: 13px; min-width: 0; }
+.pz-where { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pz-marks { display: inline-flex; vertical-align: middle; margin-right: 4px; }
+.pz-marks .pz-avatar + .pz-avatar { margin-left: -5px; }
+.sysml-node { position: relative; }
+.sysml-node > .pz-marks { position: absolute; top: -10px; right: -10px; z-index: 3; margin: 0; pointer-events: none; }
+.sysml-node.pz-on { outline: 2px solid var(--pz); outline-offset: 3px; border-radius: 3px; }
+tr.pz-on > td:first-child { box-shadow: inset 3px 0 0 var(--pz); }
+.board-frame.pz-on, .board-note.pz-on { outline: 2px solid var(--pz); outline-offset: 2px; }
+.board-frame > .pz-marks, .board-note > .pz-marks { position: absolute; top: -10px; right: -10px; z-index: 3; margin: 0; pointer-events: none; }

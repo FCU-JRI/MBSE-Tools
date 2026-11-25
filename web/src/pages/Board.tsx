@@ -6,6 +6,7 @@ import type { PointerEvent as RPointerEvent } from "react";
 import { api } from "../api.ts";
 import type { PageProps } from "../workspace.ts";
 import "./board.css";
+import { PeerMarks, usePeerColor, useReportCard } from "../presence.tsx";
 
 type Kind = "note" | "frame" | "link";
 type Color = "yellow" | "blue" | "green" | "pink" | "gray";
@@ -199,6 +200,7 @@ export function BoardSection(p: PageProps) {
   const links = items.filter((i) => i.kind === "link");
   const size = boxes.reduce((s, i) => { const b = box(i); return { w: Math.max(s.w, b.x + b.w + 200), h: Math.max(s.h, b.y + b.h + 120) }; }, { w: 1400, h: 560 });
   const selected = sel ? byId.get(sel) ?? null : null;
+  useReportCard(selected && selected.kind !== "link" ? { kind: "card", id: selected.id, label: (selected.text || (selected.kind === "frame" ? "框" : "便利貼")).slice(0, 40) } : null);
 
   const openRef = (id: string) => { p.setSel({ type: "element", id }); p.go("model"); };
 
@@ -249,7 +251,7 @@ export function BoardSection(p: PageProps) {
           {frames.map((f) => {
             const b = box(f);
             return (
-              <div key={f.id} className={`board-frame${sel === f.id ? " sel" : ""}${linkFrom === f.id ? " from" : ""}`} data-id={f.id} style={{ left: b.x, top: b.y, width: b.w, height: b.h }}
+              <PeerBox key={f.id} id={f.id} className={`board-frame${sel === f.id ? " sel" : ""}${linkFrom === f.id ? " from" : ""}`} style={{ left: b.x, top: b.y, width: b.w, height: b.h }}
                 onPointerDown={(e) => { if (e.target === e.currentTarget) clickBox(f.id); }}>
                 <div className="board-frame-title" onPointerDown={(e) => { clickBox(f.id); startDrag(e, f, "move"); }} onDoubleClick={() => canEdit && setEditing(f.id)}>
                   {editing === f.id
@@ -258,7 +260,7 @@ export function BoardSection(p: PageProps) {
                     : <span>框：{f.text}</span>}
                 </div>
                 {canEdit && <div className="board-resize" aria-hidden onPointerDown={(e) => startDrag(e, f, "size")} />}
-              </div>
+              </PeerBox>
             );
           })}
           <svg className="board-links" width={size.w} height={size.h} aria-hidden>
@@ -280,7 +282,7 @@ export function BoardSection(p: PageProps) {
             const b = box(n);
             const el = n.ref ? elById.get(n.ref) : undefined;
             return (
-              <div key={n.id} className={`board-note c-${n.color ?? "yellow"}${sel === n.id ? " sel" : ""}${linkFrom === n.id ? " from" : ""}`} data-id={n.id}
+              <PeerBox key={n.id} id={n.id} className={`board-note c-${n.color ?? "yellow"}${sel === n.id ? " sel" : ""}${linkFrom === n.id ? " from" : ""}`}
                 style={{ left: b.x, top: b.y, width: b.w, height: b.h }}
                 onPointerDown={(e) => { if (editing !== n.id) { clickBox(n.id); startDrag(e, n, "move"); } }}
                 onDoubleClick={() => { if (canEdit) { busy.current.add(n.id); setEditing(n.id); } }}>
@@ -295,11 +297,22 @@ export function BoardSection(p: PageProps) {
                 )}
                 <div className="board-by">{n.author}{n.at ? ` · ${when(n.at)}` : ""}{n.by && n.by !== n.author ? `（${n.by} 改過）` : ""}</div>
                 {canEdit && <div className="board-resize" aria-hidden onPointerDown={(e) => startDrag(e, n, "size")} />}
-              </div>
+              </PeerBox>
             );
           })}
         </div>
       </div>
     </section>
+  );
+}
+
+/** 白板上的框或便利貼：別人選了它時用他的顏色描邊並掛小頭像（協作感知 F-38）。 */
+function PeerBox({ id, className, style, children, ...rest }: { id: string; className: string; style: React.CSSProperties; children: React.ReactNode } & Omit<React.HTMLAttributes<HTMLDivElement>, "className" | "style" | "children">) {
+  const peer = usePeerColor(id);
+  return (
+    <div {...rest} data-id={id} className={`${className}${peer ? " pz-on" : ""}`} style={peer ? { ...style, "--pz": peer } as React.CSSProperties : style}>
+      <PeerMarks id={id} />
+      {children}
+    </div>
   );
 }

@@ -6,6 +6,7 @@ import { label, listOf } from "./model.ts";
 import { methodZh } from "./Inspector.tsx";
 import { DataTable } from "./pages/tables/DataTable.tsx";
 import type { Col } from "./pages/tables/DataTable.tsx";
+import { PeerMarks } from "./presence.tsx";
 
 
 export function TableView({ view, meta, catId, selectedId, onSelect }: { view: View; meta: Meta; catId: string; selectedId: string | null; onSelect: (id: string) => void }) {
@@ -51,7 +52,7 @@ export function TraceView({ view, selectedId, onSelect }: { view: View; selected
             const s = sat.get(e.qualifiedName);
             return (
               <tr key={e.id} className="rowbtn" aria-selected={e.id === selectedId} onClick={() => onSelect(e.id)} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") onSelect(e.id); }}>
-                <td className="id">{e.shortName ?? "—"}</td>
+                <td className="id"><PeerMarks id={e.id} size={16} />{e.shortName ?? "—"}</td>
                 <td><div>{e.name}</div><div className="caption">{e.doc}</div></td>
                 <td>{cell(outs(e, "derive", "refine", "trace"))}</td>
                 <td>{cell(ins(e, "satisfy"))}</td>

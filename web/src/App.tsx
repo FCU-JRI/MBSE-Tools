@@ -14,6 +14,8 @@ import { TablesPage } from "./pages/Tables.tsx";
 import { AnalysisPage } from "./pages/Analysis.tsx";
 import { ManagePage } from "./pages/Manage.tsx";
 import { VersionsPage } from "./pages/Versions.tsx";
+import { PresenceBar, reportSpot, startPresence } from "./presence.tsx";
+import type { Peer } from "./presence.tsx";
 
 // 這個檔只負責導覽：登入、專案列表與專案工作區之間的切換，以及工作區上方的分頁列。各頁內容在 pages/*.tsx。
 
@@ -30,6 +32,10 @@ export function App() {
   }, []);
   const open = (id: string | null) => { setProjectId(id); setPage("home"); rememberProject(id); history.pushState(null, "", id ? `?p=${id}` : location.pathname); };
   const [welcomed, setWelcomed] = useState(seenWelcome);
+  // 協作感知：登入後開始回報；在專案列表與管理頁時只算「在線」
+  const signedIn = !!me?.user;
+  useEffect(() => { if (signedIn) startPresence(); }, [signedIn]);
+  useEffect(() => { if (signedIn && !projectId) reportSpot(null); }, [signedIn, projectId]);
   const logout = async () => { await fetch("/auth/logout", { method: "POST" }); location.href = "/"; };
 
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p></div>;
@@ -53,6 +59,7 @@ export function App() {
       <header className="topbar">
         <button className="brand" onClick={() => setPage("home")}>JRI MBSE</button><span className="label">噴射推進研究社</span><span className="grow" />
         {user.caps.admin && <nav className="seg" role="tablist"><button role="tab" aria-selected={page === "home"} onClick={() => setPage("home")}>專案</button><button role="tab" aria-selected={page === "admin"} onClick={() => setPage("admin")}>管理</button></nav>}
+        <PresenceBar here={null} />
         {who}
       </header>
       {page === "admin" && user.caps.admin ? <Admin /> : <ProjectsPage meta={meta} user={user} onOpen={open} />}
@@ -65,6 +72,8 @@ function lastProject(): string | null { try { return localStorage.getItem("jri.l
 function rememberProject(id: string | null): void { try { if (id) localStorage.setItem("jri.last", id); else localStorage.removeItem("jri.last"); } catch { /* 無法儲存時略過 */ } }
 function seenWelcome(): boolean { try { return sessionStorage.getItem("jri.welcome") === "1"; } catch { return true; } }
 function markWelcome(): void { try { sessionStorage.setItem("jri.welcome", "1"); } catch { /* 略過 */ } }
+
+const PAGE_ZH: Record<Page, string> = { ...Object.fromEntries(PAGES), versions: "版本" } as Record<Page, string>;
 
 /** 每一頁的元件。 */
 const VIEWS: Record<Page, (p: PageProps) => React.ReactNode> = {
@@ -84,6 +93,14 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
   const reload = useCallback(() => api<View>(`/projects/${id}`).then(setView).catch((e) => setError(e.message)), [id]);
   useEffect(() => { reload(); }, [reload]);
 
+  // 協作感知：回報自己在哪一頁、看哪張圖／哪張表、選了哪個元素
+  const selId = sel?.type === "element" ? sel.id : null;
+  const selName = selId ? view?.analysis.elements.find((e) => e.id === selId)?.name ?? selId : "";
+  useEffect(() => {
+    const detail = page === "model" ? spot.diagramId : page === "tables" ? spot.table : page === "manage" ? spot.gateId ?? "" : "";
+    reportSpot({ project: id, page, pageZh: PAGE_ZH[page], detail, target: selId ? { kind: "element", id: selId, label: selName } : null });
+  }, [id, page, spot.diagramId, spot.table, spot.gateId, selId, selName]);
+
   if (error) return <div className="page"><p className="msg"><span className="tag danger">ERR</span>{error}</p><div className="tbtn-row">{id !== baseOf(id) && <button className="tbtn primary" onClick={() => onOpen(baseOf(id))}>回到 main</button>}<button className={`tbtn ${id === baseOf(id) ? "primary" : ""}`} onClick={onHome}>回專案列表</button></div></div>;
   if (!view) return <div className="page"><p className="label">載入模型中</p></div>;
 
@@ -98,6 +115,15 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
   };
   // 點上方分頁是換一件事做，右欄的選取不帶過去；頁內的「在模型中開啟」等跳轉才保留選取
   const switchTab = (to: Page) => { setSel(null); go(to); };
+  /** 從右上的在線名單跳到某人的位置：同一頁、同一張圖或表，並選取他選的元素。 */
+  const jump = (p: Peer) => {
+    const s = p.spot;
+    if (!s || !(s.page in VIEWS)) return;
+    const to = s.page as Page;
+    if (to === "model" && s.detail) setSpot({ diagramId: s.detail });
+    go(to, to === "tables" || to === "manage" ? s.detail || undefined : undefined);
+    if (s.target?.kind === "element") setSel({ type: "element", id: s.target.id });
+  };
   const props: PageProps = { id, view, meta, user, readOnly, setView, reload, onNotice: setNotice, sel, setSel, spot, setSpot, go, onOpenRef: onOpen };
   const Current = VIEWS[page];
 
@@ -110,6 +136,7 @@ function Workspace({ id, meta, user, onHome, onOpen, who }: { id: string; meta: 
         <nav className="seg" role="tablist">{PAGES.map(([m, zh]) => <button key={m} role="tab" aria-selected={page === m} onClick={() => switchTab(m)}>{zh}</button>)}</nav>
         <span className="grow" />
         <VersionButton id={id} view={view} active={page === "versions"} onClick={() => switchTab("versions")} />
+        <PresenceBar here={id} onJump={jump} />
         {who}
       </header>
       <div className="ws-main">

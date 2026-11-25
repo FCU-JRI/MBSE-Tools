@@ -12,7 +12,7 @@ export const GOOGLE = {
 const ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
 const SKEW_SEC = 60; // 容許的時鐘誤差
 
-export interface GoogleIdentity { email: string; name: string; sub: string }
+export interface GoogleIdentity { email: string; name: string; sub: string; picture?: string }
 
 export class IdTokenError extends Error {}
 
@@ -60,7 +60,7 @@ export async function verifyIdToken(idToken: string, opts: { clientId: string; n
   if (c.email_verified !== true) throw new IdTokenError("這個 Google 帳號的 email 尚未驗證。");
   const email = typeof c.email === "string" ? c.email.trim().toLowerCase() : "";
   if (!email) throw new IdTokenError("無法取得 Google 帳號的 email。");
-  return { email, name: typeof c.name === "string" ? c.name.trim().slice(0, 60) : "", sub: String(c.sub ?? "") };
+  return { email, name: typeof c.name === "string" ? c.name.trim().slice(0, 60) : "", sub: String(c.sub ?? ""), ...(typeof c.picture === "string" && c.picture ? { picture: c.picture } : {}) };
 }
 
 /** 用授權碼換 id_token（伺服器直接向 Google 要，不經瀏覽器）。 */
