@@ -9,6 +9,7 @@ import type { NextFunction, Request, Response } from "express";
 import { GITHUB_OWNER, UserError } from "./projects.ts";
 import type { AutoRepo } from "./projects.ts";
 import { GOOGLE, IdTokenError, exchangeCode, verifyIdToken } from "./google.ts";
+import * as presence from "./presence.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA = path.resolve(process.env.JRI_HOME ?? path.join(ROOT, "data"));
@@ -461,6 +462,7 @@ export function mountAuthRoutes(app: import("express").Express): void {
       setCookie(res, "jri_state", "", 0, isSecure(req));
       return page(res, 403, `Google 帳號 ${who.email} 還不在成員名單中。已送出加入申請，請等總工程師核准後再登入。`);
     }
+    await presence.rememberAvatar(who.email, who.picture).catch(() => undefined);
     startSession(req, res, { email: who.email }, c.sessionSecret);
   }));
 
@@ -483,12 +485,14 @@ export function mountAuthRoutes(app: import("express").Express): void {
     });
     const token = (await tokenRes.json()) as { access_token?: string };
     if (!token.access_token) return res.status(400).send("GitHub 沒有核發權杖，請重新登入。");
-    const me = (await (await fetch("https://api.github.com/user", { headers: { authorization: `Bearer ${token.access_token}`, "user-agent": "jri-mbse", accept: "application/vnd.github+json" } })).json()) as { login?: string };
+    const me = (await (await fetch("https://api.github.com/user", { headers: { authorization: `Bearer ${token.access_token}`, "user-agent": "jri-mbse", accept: "application/vnd.github+json" } })).json()) as { login?: string; avatar_url?: string };
     const login = String(me.login ?? "").toLowerCase();
     if (!login) return res.status(400).send("無法取得 GitHub 帳號。");
     if (!(await listMembers()).some((m) => m.github === login)) {
       return res.status(403).send(`GitHub 帳號 ${login} 還不在成員名單中。請把這個帳號告訴總工程師，由他加入後再登入；或改用 Google 登入。`);
     }
+    const m = (await listMembers()).find((x) => x.github === login);
+    if (m) await presence.rememberAvatar(m.email || login, me.avatar_url).catch(() => undefined);
     startSession(req, res, { login }, c.sessionSecret);
   }));
 

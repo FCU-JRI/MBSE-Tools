@@ -1,6 +1,7 @@
 // 表格頁共用的資料表：統一的搜尋、快速篩選標籤、篩選、欄位顯示、匯出（Excel 整本／這張表 CSV）、列印，表頭可點排序。
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { PeerMarks, usePeerColor } from "../../presence.tsx";
 
 export interface Col<R> {
   key: string; title: string;
@@ -112,14 +113,24 @@ export function DataTable<R>(p: Props<R>) {
             <tbody>{rows.map((r) => {
               const id = p.rowId(r);
               return (
-                <tr key={id} className={`rowbtn ${p.rowClass?.(r) ?? ""}`} aria-selected={id === p.selectedId} onClick={() => p.onSelect?.(r)} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") p.onSelect?.(r); }}>
-                  {cols.map((c) => <td key={c.key} className={c.cls}>{c.render ? c.render(r) : c.text(r)}</td>)}
-                </tr>
+                <PeerRow key={id} id={id} className={`rowbtn ${p.rowClass?.(r) ?? ""}`} selected={id === p.selectedId} onSelect={() => p.onSelect?.(r)}>
+                  {cols.map((c, i) => <td key={c.key} className={c.cls}>{i === 0 && <PeerMarks id={id} size={16} />}{c.render ? c.render(r) : c.text(r)}</td>)}
+                </PeerRow>
               );
             })}</tbody>
           </table>
         </div>
       )}
     </section>
+  );
+}
+
+/** 一列：別人選了這一列時，左邊加一條他的顏色並掛小頭像（協作感知 F-38）。 */
+function PeerRow({ id, className, selected, onSelect, children }: { id: string; className: string; selected: boolean; onSelect: () => void; children: React.ReactNode }) {
+  const peer = usePeerColor(id);
+  return (
+    <tr className={`${className}${peer ? " pz-on" : ""}`} style={peer ? ({ "--pz": peer } as React.CSSProperties) : undefined} aria-selected={selected} onClick={onSelect} tabIndex={0} onKeyDown={(k) => { if (k.key === "Enter") onSelect(); }}>
+      {children}
+    </tr>
   );
 }

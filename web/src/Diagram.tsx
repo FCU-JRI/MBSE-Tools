@@ -9,6 +9,7 @@ import { ALL_LINKS, buildGraph, CATEGORY_SHAPE, CUSTOM_DEFAULT, frameLabel, LINK
 import type { DiagramDef, GEdge, GNode, Graph, LinkTool } from "./model.ts";
 import { annotationSvg, FRAME_HEAD, frameSvg, iconSvg, nodeSvg, SCREEN } from "./shapes.ts";
 import { downloadPng, downloadSvg, toSvg } from "./exportSvg.ts";
+import { PeerMarks, usePeerColor } from "./presence.tsx";
 
 /** g：模型元素的節點；a：草稿標註（便箋、外框、文字，不進模型）。 */
 type NData = { g?: GNode; a?: Annotation; editable?: boolean; onResize?: (id: string, box: { x: number; y: number; w: number; h: number }) => void };
@@ -19,8 +20,10 @@ const SIDES = [Position.Top, Position.Right, Position.Bottom, Position.Left];
 function ElementNode({ data, selected }: NodeProps<FlowNode>) {
   const g = data.g!;
   const svg = useMemo(() => nodeSvg(g, 0, 0, SCREEN, selected ? 2 : 1), [g, selected]);
+  const peer = usePeerColor(g.el ? g.id : null); // 別人選了這個元素：外框用他的顏色
   return (
-    <div className={`sysml-node ${selected ? "is-selected" : ""}`} style={{ width: g.width, height: g.height }}>
+    <div className={`sysml-node ${selected ? "is-selected" : ""}${peer ? " pz-on" : ""}`} style={{ width: g.width, height: g.height, ...(peer ? { "--pz": peer } as React.CSSProperties : {}) }}>
+      {g.el && <PeerMarks id={g.id} />}
       <svg width={g.width} height={g.height} viewBox={`0 0 ${g.width} ${g.height}`} role="img" aria-label={`${g.keyword} ${g.name}`.trim() || g.shape} dangerouslySetInnerHTML={{ __html: svg }} />
       {SIDES.map((p) => <Handle key={p} id={p} type="source" position={p} isConnectable={!!g.el} style={g.el ? undefined : { visibility: "hidden" }} />)}
     </div>
