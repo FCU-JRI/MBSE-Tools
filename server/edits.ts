@@ -2,6 +2,7 @@
 // 只做局部插入，不重排檔案其他內容。
 import type { Element } from "./extract.ts";
 import { CATEGORY } from "./metamodel.ts";
+import type { MetaSpec } from "./metamodel.ts";
 import { UserError } from "./projects.ts";
 import { methodKind } from "./upgrade.ts";
 
@@ -67,7 +68,7 @@ export function snippetFor(n: NewElement, elements: Element[], indent: string): 
 }
 
 export interface NewRelation {
-  kind: "derive" | "refine" | "trace" | "basis" | "satisfy" | "allocate";
+  kind: "derive" | "refine" | "trace" | "basis" | "fix" | "satisfy" | "allocate";
   from: string; // 完整名稱
   to: string;
 }
@@ -86,6 +87,9 @@ export function relationSnippet(r: NewRelation, indent: string): string {
     case "basis":
       // from = 下一層需求，to = 上一層設計迴圈的產出
       return `${indent}#basis dependency from ${a} to ${b};\n`;
+    case "fix":
+      // from = 風險，to = 為了這個風險回頭修正的元素
+      return `${indent}#fix dependency from ${a} to ${b};\n`;
     case "satisfy":
       // from = 負責滿足的系統或元件，to = 需求
       return `${indent}satisfy ${b} by ${a};\n`;
@@ -206,9 +210,10 @@ export function setDocText(content: string, el: Element, doc: string): string {
   return insertInside(content, el, (indent) => `${indent}${text}\n`);
 }
 
-export function setAttrText(content: string, el: Element, field: { name: string; zh: string; type: string }, value: string): string {
+export function setAttrText(content: string, el: Element, field: { name: string; zh: string; type: string; options?: { value: string; zh: string }[] }, value: string): string {
   const v = value.trim();
   let literal = "";
+  if (v && field.options && !field.options.some((o) => o.value === v)) throw new UserError(`「${field.zh}」只能是${field.options.map((o) => `${o.zh}（${o.value}）`).join("或")}。`);
   if (v) {
     if (field.type === "text") literal = str(v);
     else if (!/^-?\d+(\.\d+)?$/.test(v)) throw new UserError(`「${field.zh}」必須是數字。`);
@@ -301,6 +306,30 @@ export function setCadText(content: string, el: Element, url: string, version: s
     text = `@CadLink { cadUrl = ${str(u)}; cadVersion = ${str(v)};${t ? ` cadTool = ${str(t)};` : ""} }`;
   }
   const loc = el.metaLoc.CadLink;
+  if (loc) return replaceLoc(content, loc, text);
+  if (!text) return content;
+  return insertInside(content, el, (indent) => `${indent}${text}\n`);
+}
+
+/**
+ * 說明性標記（@DesignRationale、@Rejection、@CriterionScale、@TradeSensitivity、@TpmTrend）：values 只帶要改的欄位，
+ * 沒帶的欄位保留元素上原本的值；全部欄位都空就整個標記拿掉。文字最多 500 字。
+ */
+export function setMetaText(content: string, el: Element, spec: MetaSpec, values: Record<string, string>): string {
+  const parts: string[] = [];
+  for (const f of spec.fields) {
+    const v = (f.name in values ? String(values[f.name] ?? "") : el.attrs[f.name] ?? "").trim();
+    if (!v) continue;
+    if (f.type === "text") {
+      if (v.length > 500) throw new UserError(`「${f.zh}」最多 500 字。`);
+      parts.push(`${f.name} = ${str(v)};`);
+    } else {
+      if (!/^-?\d+(\.\d+)?$/.test(v) || Math.abs(Number(v)) > 1e9) throw new UserError(`「${f.zh}」必須是數字。`);
+      parts.push(`${f.name} = ${f.type === "real" && !v.includes(".") ? v + ".0" : v};`);
+    }
+  }
+  const text = parts.length ? `@${spec.id} { ${parts.join(" ")} }` : "";
+  const loc = el.metaLoc[spec.id];
   if (loc) return replaceLoc(content, loc, text);
   if (!text) return content;
   return insertInside(content, el, (indent) => `${indent}${text}\n`);

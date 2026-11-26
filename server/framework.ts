@@ -213,9 +213,12 @@ export interface LayerResult {
 export interface TwoSourcesIssue { id: string; name: string; category: string; missing: ("derivation" | "basis")[]; text: string }
 export interface HoldPoint { category: string; zh: string; fromLayer: string; fromLayerZh: string; open: boolean; reason: string }
 export interface Approval { ok: boolean; detail: string; source: "branches" }
+/** 缺「為什麼／判定條件」（@DesignRationale）的元素。只是警告：不影響迴圈進度、卡點與節點檢查。 */
+export interface RationaleGap { id: string; name: string; category: string; missing: ("why" | "judge")[]; text: string }
 export interface FrameworkEval {
   name: string; version: number; settings: FwSettings; layers: LayerResult[];
   twoSources: TwoSourcesIssue[]; holdPoints: HoldPoint[]; approval: Approval; problems: string[];
+  rationaleGaps: RationaleGap[];
 }
 export interface FwContext { a: Analysis; settings: FwSettings; docs: number; approval: Approval; catZh?: (id: string) => string }
 
@@ -526,7 +529,19 @@ export function evaluateFramework(f: Framework, ctx: FwContext): FrameworkEval {
         : `第 ${from.order} 層「${from.zh}」的設計迴圈還沒全部走到「是否符合需求＝是」${passed.length ? `（${passed.length}／${from.objects.length} 個走完）` : ""}：${blocking.join("；")}。`,
     });
   }
-  return { name: f.name, version: f.version, settings: ctx.settings, layers, twoSources, holdPoints, approval: ctx.approval, problems: [] };
+  return { name: f.name, version: f.version, settings: ctx.settings, layers, twoSources, holdPoints, approval: ctx.approval, problems: [], rationaleGaps: rationaleGaps(h) };
+}
+
+/** 有 JRI 類別的元素，缺 why 或 judge 的列出來（只警告）。 */
+function rationaleGaps(h: Helpers): RationaleGap[] {
+  const cats = [...new Set(h.a.elements.map((e) => e.category).filter((c): c is string => !!c))];
+  const out: RationaleGap[] = [];
+  for (const e of h.of(...cats)) {
+    const missing = (["why", "judge"] as const).filter((k) => !(e.attrs[k] ?? "").trim());
+    if (missing.length) out.push({ id: e.id, name: h.name(e), category: e.category ?? "", missing: [...missing],
+      text: missing.map((m) => (m === "why" ? "缺「為什麼」" : "缺「判定條件」")).join("、") });
+  }
+  return out;
 }
 
 /** 新增某類別的元素時的卡點警告（不擋）。null＝沒有卡點。 */

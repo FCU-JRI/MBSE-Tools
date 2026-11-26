@@ -553,7 +553,7 @@
    "sources": "白板 貫穿全程；METHOD",
    "framework": "crossCutting.tpm",
    "verify": "每個節點記一次估計值並畫趨勢",
-   "note": "#tpm 標記已有；歷次值沒有記錄"
+   "note": "WP-A：@TpmTrend 可存各節點的值，右欄可填（MOD-35）；趨勢圖與自動檢查 tpmUpdatedPerGate 還沒做"
   },
   {
    "id": "HOME-01",
@@ -1293,6 +1293,120 @@
    "framework": "designLoop.tradeStudy",
    "verify": "每次選定方案與裁決都有理由、裁決者、日期",
    "note": "WP1：DesignDecision（理由、裁決者、日期）；連到選定方案與受影響需求留待 WP1 第二部分"
+  },
+  {
+   "id": "MOD-30",
+   "zh": "說明：為什麼這樣定／判定條件",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "designLoop.tradeStudy",
+   "verify": "任何元素可填、可改、可拿掉；缺的只出警告，不擋卡點",
+   "note": "WP-A：@DesignRationale（why、judge）；框架評估回傳 rationaleGaps（只警告，不影響迴圈與卡點）"
+  },
+  {
+   "id": "MOD-31",
+   "zh": "候選的否決原因",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "designLoop.tradeStudy",
+   "verify": "設計方案底下的候選可填否決原因；選定的不用寫",
+   "note": "WP-A：@Rejection（rejectWhy），只能掛在 variant 上"
+  },
+  {
+   "id": "MOD-32",
+   "zh": "準則評分標準與權重敏感度",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "designLoop.tradeStudy",
+   "verify": "準則需求可填 1／3／5 分各代表什麼；設計方案可填權重敏感度說明",
+   "note": "WP-A：@CriterionScale（scale1、scale3、scale5）掛在準則需求；@TradeSensitivity（sensitivity）掛在設計方案。表格欄位留給工作包 F"
+  },
+  {
+   "id": "MOD-33",
+   "zh": "風險回頭修正與調整分數",
+   "area": "模型",
+   "where": "右欄、伺服器",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "partial",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "designLoop.resolved",
+   "verify": "風險可寫修正內容並以「修正了」指向被修正的元素；候選可存調整後分數",
+   "note": "WP-A：Risk.fixNote＋#fix dependency（FixLink，關係種類 fix）；候選 adjusted_<需求編號> : TradeScore，寫回 /trade/adjusted。調整分數的表格輸入留給工作包 F"
+  },
+  {
+   "id": "MOD-34",
+   "zh": "決策喊卡（放行／喊卡與原因）",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "designLoop.outputs",
+   "verify": "設計決策可切放行／喊卡並寫原因",
+   "note": "WP-A：DesignDecision.releaseStatus（ok／hold）、holdReason；沒寫視為放行。卡點判定尚未讀這個欄位"
+  },
+  {
+   "id": "MOD-35",
+   "zh": "TPM 各審查節點的值",
+   "area": "模型",
+   "where": "右欄",
+   "api": "",
+   "reads": [
+    "model"
+   ],
+   "writes": [
+    "model",
+    "git"
+   ],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "crossCutting.tpm",
+   "verify": "#tpm 屬性可填 SRR、SDR、MDR、PDR、CDR、TRR、FRR 各節點的值",
+   "note": "WP-A：@TpmTrend（atSRR…atFRR，Real）寫在 TPM 屬性主體內；趨勢圖留給後續工作包"
   },
   {
    "id": "TAB-01",

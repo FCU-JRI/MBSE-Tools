@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api } from "./api.ts";
-import type { Category, Element, Meta, View } from "./api.ts";
+import type { Category, Element, Meta, MetaSpec, View } from "./api.ts";
 import { label, listOf, stereotype } from "./model.ts";
 import type { GEdge } from "./model.ts";
 
@@ -48,7 +48,7 @@ function NewButton({ meta, setSel, category }: Props & { category: string | null
 const OUT_ZH: Record<string, string> = { connect: "連接", succession: "之後是", transition: "轉換到", compose: "組成" };
 const IN_ZH: Record<string, string> = {
   derive: "衍生出", refine: "被細化", trace: "被追溯", basis: "作為依據", satisfy: "被滿足", verify: "被驗證", allocate: "被分配",
-  include: "被包含", connect: "連接", succession: "之前是", transition: "轉換自", compose: "屬於",
+  include: "被包含", connect: "連接", succession: "之前是", transition: "轉換自", compose: "屬於", fix: "被風險修正",
 };
 export const relLabel = (meta: Meta, kind: string, outgoing: boolean) =>
   outgoing ? meta.relations[kind]?.zh ?? OUT_ZH[kind] ?? kind : IN_ZH[kind] ?? `被${meta.relations[kind]?.zh ?? OUT_ZH[kind] ?? kind}`;
@@ -104,7 +104,11 @@ function SourceFields({ view, doc, section, onChange }: { view: View; doc: strin
 function Fields({ cat, attrs, setAttrs }: { cat: Category | undefined; attrs: Record<string, string>; setAttrs: (a: Record<string, string>) => void }) {
   return <>{(cat?.fields ?? []).map((f) => (
     <label key={f.name} className="field"><span className="label">{f.zh}</span>
-      <input className="input" value={attrs[f.name] ?? ""} inputMode={f.type === "text" ? "text" : "decimal"} onChange={(e) => setAttrs({ ...attrs, [f.name]: e.target.value })} />
+      {f.options
+        ? <select className="input" value={attrs[f.name] ?? ""} onChange={(e) => setAttrs({ ...attrs, [f.name]: e.target.value })}>
+            <option value="">（未填）</option>{f.options.map((o) => <option key={o.value} value={o.value}>{o.zh}</option>)}
+          </select>
+        : <input className="input" value={attrs[f.name] ?? ""} inputMode={f.type === "text" ? "text" : "decimal"} onChange={(e) => setAttrs({ ...attrs, [f.name]: e.target.value })} />}
     </label>
   ))}</>;
 }
@@ -204,7 +208,10 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
   const rels = view.analysis.relations;
   const out = rels.filter((r) => r.from === el.id).map((r) => ({ r, zh: relLabel(meta, r.kind, true), other: byId.get(r.to) }));
   const inn = rels.filter((r) => r.to === el.id).map((r) => ({ r, zh: relLabel(meta, r.kind, false), other: byId.get(r.from) }));
-  const targets = els.filter((e) => e.category && e.kind !== "ReferenceUsage" && e.id !== el.id);
+  // 「修正了」可以指向設計方案底下的候選（候選本身沒有 JRI 類別）
+  const isVariant = (e: Element) => e.kind === "PartUsage" && byId.get(e.owner ?? "")?.category === "DesignAlternative";
+  const targets = els.filter((e) => (e.category || (relKind === "fix" && isVariant(e))) && e.kind !== "ReferenceUsage" && e.id !== el.id);
+  const relKinds = ["derive", "refine", "trace", "basis", "satisfy", "allocate", ...(el.category === "Risk" ? ["fix"] : [])];
   const sat = view.analysis.satisfaction.find((s) => s.requirement === el.qualifiedName);
 
   return (
@@ -235,6 +242,8 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
         {cat?.keyword === "verification" && <VerifyFields view={view} el={el} busy={busy} call={call} setSel={setSel} />}
         <CustomAttrs view={view} el={el} cat={cat} busy={busy} call={call} />
         <DesignTags view={view} el={el} cat={cat} busy={busy} call={call} />
+        <MetaFields view={view} meta={meta} el={el} busy={busy} call={call} />
+        <TpmTrends view={view} meta={meta} el={el} busy={busy} call={call} />
         {/RequirementUsage$/.test(el.kind) && <ConditionField view={view} el={el} busy={busy} call={call} />}
         {cat?.id === "DesignAlternative" && <Variants view={view} el={el} busy={busy} call={call} setSel={setSel} />}
         {el.kind === "PartDefinition" && cat?.keyword === "part def" && <Interfaces view={view} el={el} busy={busy} call={call} setSel={setSel} />}
@@ -249,7 +258,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
         {out.length + inn.length === 0 && <p className="caption">還沒有關係。</p>}
         <div className="row" style={{ marginTop: 12 }}>
           <label className="field" style={{ flex: "0 0 5.5rem", minWidth: 0 }}><span className="label">類型</span>
-            <select className="input" value={relKind} onChange={(e) => setRelKind(e.target.value)}>{["derive", "refine", "trace", "basis", "satisfy", "allocate"].map((k) => <option key={k} value={k}>{meta.relations[k]?.zh}</option>)}</select>
+            <select className="input" value={relKind} onChange={(e) => setRelKind(e.target.value)}>{relKinds.map((k) => <option key={k} value={k}>{meta.relations[k]?.zh}</option>)}</select>
           </label>
           <label className="field"><span className="label">對象</span>
             <select className="input" value={relTo} onChange={(e) => setRelTo(e.target.value)}><option value="">請選擇</option>{targets.map((t) => <option key={t.id} value={t.id}>{label(t)}</option>)}</select>
@@ -313,7 +322,7 @@ function EdgePanel({ view, meta, setSel, onChanged, edge }: Props & { edge: GEdg
 // 做不到的地方直接在畫面上說明原因，不讓人存了才發現。
 
 type Call = (fn: () => Promise<View & { selected?: string }>, done?: string) => Promise<boolean>;
-const TRACE_LIKE = ["derive", "refine", "trace", "basis", "satisfy", "allocate"];
+const TRACE_LIKE = ["derive", "refine", "trace", "basis", "fix", "satisfy", "allocate"];
 const LOCAL_KINDS = ["succession", "connect", "transition"];
 const CHANGE_KINDS = [...TRACE_LIKE, "include", ...LOCAL_KINDS];
 const KIND_ZH: Record<string, string> = { compose: "組成", connect: "連接", succession: "先後順序", transition: "狀態轉換", include: "包含", verify: "驗證" };
@@ -600,6 +609,70 @@ function DesignTags({ view, el, cat, busy, call }: { view: View; el: Element; ca
       </label>}
     </>
   );
+}
+
+const CRITERION = /Requirement$|^MOP$/;
+/** 這個說明性標記能不能掛在 el 上；和 server/routes/elements.ts 的 metaApplies 同一套規則。criterion 只在需求已是某個方案的準則（或已經填過）時顯示。 */
+function metaShown(spec: MetaSpec, el: Element, view: View): boolean {
+  const els = view.analysis.elements;
+  const owner = els.find((x) => x.id === el.owner);
+  const has = spec.fields.some((f) => (el.attrs[f.name] ?? "").trim());
+  switch (spec.for) {
+    case "any": return el.kind !== "Package" && el.kind !== "Comment";
+    case "variant": return el.kind === "PartUsage" && owner?.category === "DesignAlternative";
+    case "alternative": return el.category === "DesignAlternative" && el.kind === "PartDefinition";
+    case "tpm": return false; // 在所屬元素的「TPM 各節點的值」編
+    case "criterion": {
+      if (el.kind !== "RequirementUsage" || !CRITERION.test(el.category ?? "")) return false;
+      if (has) return true;
+      const alt = new Set(els.filter((x) => x.category === "DesignAlternative" || els.find((o) => o.id === x.owner)?.category === "DesignAlternative").map((x) => x.id));
+      return view.analysis.relations.some((r) => (r.to === el.id && alt.has(r.from)) || (r.from === el.id && alt.has(r.to)));
+    }
+  }
+}
+
+/** 說明性標記：為什麼／判定條件（任何元素）、否決原因（候選）、評分標準（準則需求）、權重敏感度（設計方案）。 */
+function MetaFields({ view, meta, el, busy, call }: { view: View; meta: Meta; el: Element; busy: boolean; call: Call }) {
+  const specs = (meta.meta ?? []).filter((s) => metaShown(s, el, view));
+  if (!specs.length) return null;
+  return <>{specs.map((s) => <MetaForm key={`${s.id}:${el.id}`} pid={view.project.id} spec={s} el={el} busy={busy} call={call} />)}</>;
+}
+
+function MetaForm({ pid, spec, el, busy, call, title }: { pid: string; spec: MetaSpec; el: Element; busy: boolean; call: Call; title?: string }) {
+  const init = () => Object.fromEntries(spec.fields.map((f) => [f.name, el.attrs[f.name] ?? ""]));
+  const [v, setV] = useState<Record<string, string>>(init);
+  useEffect(() => setV(init()), [el]);
+  const dirty = spec.fields.some((f) => (v[f.name] ?? "").trim() !== (el.attrs[f.name] ?? "").trim());
+  const filled = spec.fields.some((f) => (el.attrs[f.name] ?? "").trim());
+  const missing = spec.id === "DesignRationale" ? spec.fields.filter((f) => !(el.attrs[f.name] ?? "").trim()) : [];
+  const numeric = spec.fields.every((f) => f.type !== "text");
+  const save = (vals: Record<string, string>, done: string) => call(() => api(`/projects/${pid}/elements`, "PATCH", { id: el.id, meta: { [spec.id]: vals } }), done);
+  return (
+    <div className="field">
+      <span className="label">{title ?? spec.zh}</span>
+      {numeric
+        ? <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>{spec.fields.map((f) => (
+            <label key={f.name} style={{ flex: "1 0 4rem", minWidth: 0 }}><span className="caption">{f.zh}</span>
+              <input className="input" inputMode="decimal" value={v[f.name] ?? ""} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} aria-label={`${title ?? spec.zh} ${f.zh}`} /></label>))}
+          </div>
+        : spec.fields.map((f) => (
+            <label key={f.name} style={{ display: "block", marginTop: 4 }}>{spec.fields.length > 1 && <span className="caption">{f.zh}</span>}
+              <textarea className="input" rows={2} value={v[f.name] ?? ""} onChange={(e) => setV({ ...v, [f.name]: e.target.value })} aria-label={f.zh} placeholder={spec.fields.length === 1 ? f.zh : ""} /></label>))}
+      <div className="tbtn-row" style={{ paddingLeft: 0 }}>
+        <button type="button" className="tbtn" disabled={busy || !dirty} onClick={() => save(v, `已寫入${title ?? spec.zh}。`)}>寫入{title ?? spec.zh}</button>
+        {filled && <button type="button" className="tbtn" disabled={busy} onClick={() => save(Object.fromEntries(spec.fields.map((f) => [f.name, ""])), `已拿掉${title ?? spec.zh}。`)}>拿掉</button>}
+      </div>
+      {missing.length > 0 && <span className="caption">提醒：缺{missing.map((f) => `「${f.zh.replace(/（.*$/, "")}」`).join("、")}。只是警告，不擋卡點。</span>}
+    </div>
+  );
+}
+
+/** 所屬元素上的 TPM（#tpm 屬性）：每個審查節點的值（FW-10）。 */
+function TpmTrends({ view, meta, el, busy, call }: { view: View; meta: Meta; el: Element; busy: boolean; call: Call }) {
+  const spec = (meta.meta ?? []).find((s) => s.id === "TpmTrend");
+  const tpms = view.analysis.elements.filter((x) => x.owner === el.id && x.tags.includes("TPM"));
+  if (!spec || !tpms.length) return null;
+  return <>{tpms.map((t) => <MetaForm key={`${t.id}`} pid={view.project.id} spec={spec} el={t} busy={busy} call={call} title={`TPM ${t.name} 各節點的值`} />)}</>;
 }
 
 function CustomAttrs({ view, el, cat, busy, call }: { view: View; el: Element; cat: Category | undefined; busy: boolean; call: Call }) {

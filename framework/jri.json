@@ -70,7 +70,13 @@
     { "id": "layer", "zh": "層級", "values": ["mission", "system", "subsystem", "component"], "note": "推不出層級時才手填" },
     { "id": "cad", "zh": "CAD 連結", "fields": ["url", "version", "tool"] },
     { "id": "basis", "zh": "設計產出來源", "note": "下一層需求指向上一層的設計產出" },
-    { "id": "interfaceStatus", "zh": "介面狀態", "fields": ["maturity", "agreedBy"], "maturity": ["exists", "tentative", "frozen"] }
+    { "id": "interfaceStatus", "zh": "介面狀態", "fields": ["maturity", "agreedBy"], "maturity": ["exists", "tentative", "frozen"] },
+    { "id": "rationale", "zh": "說明：為什麼這樣定、判定條件", "sysml": "@DesignRationale", "fields": ["why", "judge"], "note": "任何元素都可以掛；缺了只出警告，不擋卡點" },
+    { "id": "rejection", "zh": "候選的否決原因", "sysml": "@Rejection", "fields": ["rejectWhy"], "note": "寫在被否決的 variant 上；選定的不用寫" },
+    { "id": "criterionScale", "zh": "準則評分標準", "sysml": "@CriterionScale", "fields": ["scale1", "scale3", "scale5"], "note": "寫在當準則的需求上" },
+    { "id": "tradeSensitivity", "zh": "權重敏感度", "sysml": "@TradeSensitivity", "fields": ["sensitivity"], "note": "寫在設計方案上" },
+    { "id": "fix", "zh": "風險回頭修正", "sysml": "#fix dependency＋Risk.fixNote", "note": "從風險指向被修正的元素；修正後的分數寫在候選的 adjusted_<需求編號>" },
+    { "id": "tpmTrend", "zh": "TPM 各節點的值", "sysml": "@TpmTrend", "fields": ["atSRR", "atSDR", "atMDR", "atPDR", "atCDR", "atTRR", "atFRR"] }
   ],
 
   "designLoop": {

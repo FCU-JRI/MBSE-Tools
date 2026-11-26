@@ -1,13 +1,14 @@
 import type { Express } from "express";
 import type { Element } from "../extract.ts";
 import { ROOT_PACKAGE } from "../engine.ts";
-import { CATEGORIES, CATEGORY, RELATION_LABELS } from "../metamodel.ts";
+import { CATEGORIES, CATEGORY, META_SPEC, RELATION_LABELS } from "../metamodel.ts";
+import type { MetaSpec } from "../metamodel.ts";
 import * as store from "../projects.ts";
 import { holdPoint } from "../process.ts";
 import * as pm from "../pm.ts";
 import { paramLines, paramWord } from "../modernize.ts";
 import { readCondition, setConditionText, attrForm, moveBlockText, setCategoryText, setCustomAttrText, setMethodText, setUsageTypeText, setVerifiesText, nextShortName } from "../edits.ts";
-import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, setCadText, setLayerText, snippetFor } from "../edits.ts";
+import { commentText, deletePackageText, insertBody, moveIntoPackage, moveOutOfPackage, packageText, setCommentText, deleteElementText, insertInside, insertInto, quote, relationSnippet, removeLocs, renameText, setAttrText, setDocText, setShortNameText, setSourceText, setCadText, setLayerText, setMetaText, snippetFor } from "../edits.ts";
 import { wrap, author, pid, view, editable, rootFile, inFile, isUserPackage } from "./common.ts";
 import type { An } from "./common.ts";
 import type { NewRelation } from "../edits.ts";
@@ -24,6 +25,7 @@ function planRelation(before: An, kind: string, from: Element | undefined, to: E
   // 標準庫的需求衍生連結兩端都必須是需求（F-36）
   if (kind0 === "derive" && !(/RequirementUsage$/.test(from.kind) && /RequirementUsage$/.test(to.kind))) throw new store.UserError("衍生只能連接需求類的項目（需要、目標、目的、量度、各層需求）。其他項目之間請用「追溯」。");
   if (kind0 === "basis" && !/RequirementUsage$/.test(from.kind)) throw new store.UserError("設計依據的起點必須是需求。");
+  if (kind0 === "fix" && from.category !== "Risk") throw new store.UserError("「修正了」的起點必須是風險。");
   const owner0 = before.elements.find((x) => x.id === from.owner);
   // 寫進某個元素主體的關係用該元素的檔案，其餘寫在根套件
   // 追溯到利害關係人：需求用內建的 stakeholder、使用案例用 actor，寫在起點的主體裡（F-37）
@@ -87,6 +89,18 @@ function planRelation(before: An, kind: string, from: Element | undefined, to: E
       relationSnippet({ kind: kind as NewRelation["kind"], from: from.qualifiedName, to: to.qualifiedName }, indent));
   }
   return { file, kind, from, to, apply: next };
+}
+
+/** 說明性標記能不能掛在這個元素上（metamodel.ts 的 META[].for）。 */
+export function metaApplies(spec: MetaSpec, el: Element, a: An): boolean {
+  const owner = a.elements.find((x) => x.id === el.owner);
+  switch (spec.for) {
+    case "any": return true;
+    case "variant": return el.kind === "PartUsage" && owner?.category === "DesignAlternative" && owner.kind === "PartDefinition";
+    case "criterion": return el.kind === "RequirementUsage" && /Requirement$|^MOP$/.test(el.category ?? "");
+    case "alternative": return el.category === "DesignAlternative" && el.kind === "PartDefinition";
+    case "tpm": return el.tags.includes("TPM");
+  }
 }
 
 type Rel = An["relations"][number];
@@ -195,6 +209,16 @@ export function mount(app: Express): void {
       if (u !== (target.attrs.cadUrl ?? "") || v !== (target.attrs.cadVersion ?? "") || t !== (target.attrs.cadTool ?? "")) steps.push((c, el) => setCadText(c, el, u, v, t));
     }
     if (typeof b.layer === "string" && b.layer.trim() !== (target.attrs.layer ?? "")) steps.push((c, el) => setLayerText(c, el, b.layer));
+    // 說明性標記：meta = { DesignRationale: { why, judge }, Rejection: { rejectWhy }, … }，只帶要改的欄位
+    if (b.meta && typeof b.meta === "object") for (const [mid, vals] of Object.entries(b.meta as Record<string, unknown>)) {
+      const spec = META_SPEC.get(mid);
+      if (!spec) throw new store.UserError(`不認得的標記 ${mid}。`);
+      if (!metaApplies(spec, target, a)) throw new store.UserError(`「${spec.zh}」不能寫在這個元素上。`);
+      if (!vals || typeof vals !== "object") continue;
+      const v: Record<string, string> = {};
+      for (const f of spec.fields) if (f.name in (vals as object)) v[f.name] = String((vals as Record<string, unknown>)[f.name] ?? "");
+      if (spec.fields.some((f) => f.name in v && v[f.name].trim() !== (target.attrs[f.name] ?? "").trim())) steps.push((c, el) => setMetaText(c, el, spec, v));
+    }
     if (steps.length === 0 && !newId) return res.json({ saved: true, ...(await view(id)) });
     let el: Element = target;
     for (const step of steps) {
@@ -603,7 +627,7 @@ export function mount(app: Express): void {
   }));
 
   // 改關係：換對象或換類型。舊的拿掉、新的加上，一次存檔；檢查規則和新增關係相同
-  const TRACE_LIKE = ["derive", "refine", "trace", "basis", "satisfy", "allocate"];
+  const TRACE_LIKE = ["derive", "refine", "trace", "basis", "fix", "satisfy", "allocate"];
   app.post("/api/projects/:id/relations/change", wrap(async (req, res) => {
     const id = pid(req);
     const before = await store.analyzeProject(id);
