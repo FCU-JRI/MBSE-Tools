@@ -215,6 +215,8 @@ export function mount(app: Express): void {
       if (!spec) throw new store.UserError(`不認得的標記 ${mid}。`);
       if (!metaApplies(spec, target, a)) throw new store.UserError(`「${spec.zh}」不能寫在這個元素上。`);
       if (!vals || typeof vals !== "object") continue;
+      const unknown = Object.keys(vals as object).find((k) => !spec.fields.some((f) => f.name === k));
+      if (unknown) throw new store.UserError(`「${spec.zh}」沒有「${unknown}」這個欄位。`);
       const v: Record<string, string> = {};
       for (const f of spec.fields) if (f.name in (vals as object)) v[f.name] = String((vals as Record<string, unknown>)[f.name] ?? "");
       if (spec.fields.some((f) => f.name in v && v[f.name].trim() !== (target.attrs[f.name] ?? "").trim())) steps.push((c, el) => setMetaText(c, el, spec, v));

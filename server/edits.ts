@@ -316,6 +316,8 @@ export function setCadText(content: string, el: Element, url: string, version: s
  * 沒帶的欄位保留元素上原本的值；全部欄位都空就整個標記拿掉。文字最多 500 字。
  */
 export function setMetaText(content: string, el: Element, spec: MetaSpec, values: Record<string, string>): string {
+  const unknown = Object.keys(values).find((k) => !spec.fields.some((f) => f.name === k));
+  if (unknown) throw new UserError(`「${spec.zh}」沒有「${unknown}」這個欄位。`);
   const parts: string[] = [];
   for (const f of spec.fields) {
     const v = (f.name in values ? String(values[f.name] ?? "") : el.attrs[f.name] ?? "").trim();

@@ -215,10 +215,12 @@ export interface HoldPoint { category: string; zh: string; fromLayer: string; fr
 export interface Approval { ok: boolean; detail: string; source: "branches" }
 /** 缺「為什麼／判定條件」（@DesignRationale）的元素。只是警告：不影響迴圈進度、卡點與節點檢查。 */
 export interface RationaleGap { id: string; name: string; category: string; missing: ("why" | "judge")[]; text: string }
+/** 喊卡中的設計決策（releaseStatus = "hold"，Mars 2026-11-27 決定只警告）：下一層照常可寫，但顯示這則警告；不擋迴圈、卡點與節點檢查。 */
+export interface HoldDecision { id: string; name: string; reason: string; text: string }
 export interface FrameworkEval {
   name: string; version: number; settings: FwSettings; layers: LayerResult[];
   twoSources: TwoSourcesIssue[]; holdPoints: HoldPoint[]; approval: Approval; problems: string[];
-  rationaleGaps: RationaleGap[];
+  rationaleGaps: RationaleGap[]; holdDecisions: HoldDecision[];
 }
 export interface FwContext { a: Analysis; settings: FwSettings; docs: number; approval: Approval; catZh?: (id: string) => string }
 
@@ -529,7 +531,7 @@ export function evaluateFramework(f: Framework, ctx: FwContext): FrameworkEval {
         : `第 ${from.order} 層「${from.zh}」的設計迴圈還沒全部走到「是否符合需求＝是」${passed.length ? `（${passed.length}／${from.objects.length} 個走完）` : ""}：${blocking.join("；")}。`,
     });
   }
-  return { name: f.name, version: f.version, settings: ctx.settings, layers, twoSources, holdPoints, approval: ctx.approval, problems: [], rationaleGaps: rationaleGaps(h) };
+  return { name: f.name, version: f.version, settings: ctx.settings, layers, twoSources, holdPoints, approval: ctx.approval, problems: [], rationaleGaps: rationaleGaps(h), holdDecisions: holdDecisions(h) };
 }
 
 /** 有 JRI 類別的元素，缺 why 或 judge 的列出來（只警告）。 */
@@ -542,6 +544,20 @@ function rationaleGaps(h: Helpers): RationaleGap[] {
       text: missing.map((m) => (m === "why" ? "缺「為什麼」" : "缺「判定條件」")).join("、") });
   }
   return out;
+}
+
+/** 喊卡中的設計決策（只警告）。 */
+function holdDecisions(h: Helpers): HoldDecision[] {
+  return h.of("DesignDecision").filter((e) => (e.attrs.releaseStatus ?? "").trim() === "hold").map((e) => {
+    const reason = (e.attrs.holdReason ?? "").trim();
+    return { id: e.id, name: h.name(e), reason, text: `${h.name(e)} 喊卡中：${reason || "（沒寫原因）"}；下一層可以寫，但會顯示警告。` };
+  });
+}
+
+/** 新增某類別的元素時，喊卡中的決策警告（不擋）。只在新增的是下一層的類別（有卡點的類別）時帶；null＝沒有。 */
+export function holdDecisionNote(ev: FrameworkEval, category: string): string | null {
+  if (!ev.holdDecisions.length || !ev.holdPoints.some((x) => x.category === category)) return null;
+  return ev.holdDecisions.map((d) => d.text).join("\n");
 }
 
 /** 新增某類別的元素時的卡點警告（不擋）。null＝沒有卡點。 */

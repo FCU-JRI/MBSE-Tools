@@ -168,11 +168,11 @@ package JRI {
         attribute target : String[0..1];
         attribute status : String[0..1];
     }
-    /* TPM 在各審查節點的值（單位同所標記的屬性），寫在屬性的主體內。沒到的節點不寫。
-       用法：#tpm attribute mtow : MassValue { @TpmTrend { atSRR = 7.9; atSDR = 7.6; atPDR = 7.2; } } */
+    /* TPM 在各審查節點的值（單位同所標記的屬性），寫在屬性的主體內。一個審查節點一個欄位（計畫提案、MDR、PDR、CDR、TRR、FRR），
+       右欄只顯示專案啟用的節點；沒到的節點不寫。
+       用法：#tpm attribute mtow : MassValue { @TpmTrend { atProposal = 7.9; atMDR = 7.6; atPDR = 7.2; } } */
     metadata def TpmTrend {
-        attribute atSRR : Real[0..1];
-        attribute atSDR : Real[0..1];
+        attribute atProposal : Real[0..1];
         attribute atMDR : Real[0..1];
         attribute atPDR : Real[0..1];
         attribute atCDR : Real[0..1];

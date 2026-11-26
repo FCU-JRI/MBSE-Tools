@@ -1386,8 +1386,8 @@
    "status": "ok",
    "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
    "framework": "designLoop.outputs",
-   "verify": "設計決策可切放行／喊卡並寫原因",
-   "note": "WP-A：DesignDecision.releaseStatus（ok／hold）、holdReason；沒寫視為放行。卡點判定尚未讀這個欄位"
+   "verify": "設計決策可切放行／喊卡並寫原因；喊卡時框架評估與右欄顯示警告",
+   "note": "WP-A：DesignDecision.releaseStatus（ok／hold）、holdReason；沒寫視為放行。喊卡只警告（Mars 2026-11-27）：框架評估回傳 holdDecisions，新增下一層元素時回應帶警告；不擋迴圈與卡點，FW-02 不變"
   },
   {
    "id": "MOD-35",
@@ -1406,7 +1406,7 @@
    "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
    "framework": "crossCutting.tpm",
    "verify": "#tpm 屬性可填 SRR、SDR、MDR、PDR、CDR、TRR、FRR 各節點的值",
-   "note": "WP-A：@TpmTrend（atSRR…atFRR，Real）寫在 TPM 屬性主體內；趨勢圖留給後續工作包"
+   "note": "WP-A：@TpmTrend（atProposal、atMDR、atPDR、atCDR、atTRR、atFRR，Real，跟著審查節點）寫在 TPM 屬性主體內；右欄只顯示專案啟用的節點；趨勢圖留給後續工作包"
   },
   {
    "id": "TAB-01",

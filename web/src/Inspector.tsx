@@ -224,6 +224,7 @@ function EditPanel({ view, meta, setSel, onChanged, el }: Props & { el: Element 
           <textarea className="input" rows={4} value={doc} onChange={(e) => setDoc(e.target.value)} />
         </label>
         <Fields cat={cat} attrs={attrs} setAttrs={setAttrs} />
+        <HoldNotes view={view} el={el} />
         <SourceFields view={view} doc={src.doc} section={src.ref} onChange={(d, r) => setSrc({ doc: d, ref: r })} />
         {sat && <div className="field"><span className="label">計算判定</span><span>{sat.status === "holds" ? <span className="tag done">PASS</span> : sat.status === "fails" ? <span className="tag danger">FAIL</span> : <span className="tag">未判定</span>}</span></div>}
         <Msg m={msg} />
@@ -667,12 +668,31 @@ function MetaForm({ pid, spec, el, busy, call, title }: { pid: string; spec: Met
   );
 }
 
-/** 所屬元素上的 TPM（#tpm 屬性）：每個審查節點的值（FW-10）。 */
+/** 喊卡中的設計決策（server/framework.ts 的 holdDecisions，只警告）：在該決策與下一層（有卡點的類別）的元素上顯示。 */
+function HoldNotes({ view, el }: { view: View; el: Element }) {
+  const fw = (view as View & { framework?: { holdDecisions?: { id: string; text: string }[]; holdPoints?: { category: string }[] } | null }).framework;
+  const all = fw?.holdDecisions ?? [];
+  const nextLayer = !!el.category && (fw?.holdPoints ?? []).some((h) => h.category === el.category);
+  const shown = all.filter((d) => d.id === el.id || nextLayer);
+  if (!shown.length) return null;
+  return <>{shown.map((d) => <p key={d.id} className="msg"><span className="tag warn">喊卡</span><span>{d.text}</span></p>)}</>;
+}
+
+/** 所屬元素上的 TPM（#tpm 屬性）：每個審查節點的值（FW-10）。只顯示專案啟用的節點；沒啟用的節點若原始碼裡有值，照樣保留並列出。 */
 function TpmTrends({ view, meta, el, busy, call }: { view: View; meta: Meta; el: Element; busy: boolean; call: Call }) {
-  const spec = (meta.meta ?? []).find((s) => s.id === "TpmTrend");
+  const all = (meta.meta ?? []).find((s) => s.id === "TpmTrend");
   const tpms = view.analysis.elements.filter((x) => x.owner === el.id && x.tags.includes("TPM"));
-  if (!spec || !tpms.length) return null;
-  return <>{tpms.map((t) => <MetaForm key={`${t.id}`} pid={view.project.id} spec={spec} el={t} busy={busy} call={call} title={`TPM ${t.name} 各節點的值`} />)}</>;
+  if (!all || !tpms.length) return null;
+  const on = new Set(view.project.gates);
+  const spec = { ...all, fields: all.fields.filter((f) => !f.gate || on.has(f.gate)) };
+  const off = all.fields.filter((f) => f.gate && !on.has(f.gate));
+  return <>{tpms.map((t) => {
+    const kept = off.filter((f) => (t.attrs[f.name] ?? "").trim());
+    return <div key={t.id}>
+      {spec.fields.length > 0 && <MetaForm pid={view.project.id} spec={spec} el={t} busy={busy} call={call} title={`TPM ${t.name} 各節點的值`} />}
+      {kept.length > 0 && <p className="caption">專案沒啟用的節點（原始碼裡的值保留）：{kept.map((f) => `${f.zh} ${t.attrs[f.name]}`).join("、")}</p>}
+    </div>;
+  })}</>;
 }
 
 function CustomAttrs({ view, el, cat, busy, call }: { view: View; el: Element; cat: Category | undefined; busy: boolean; call: Call }) {

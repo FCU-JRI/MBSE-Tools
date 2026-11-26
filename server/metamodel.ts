@@ -2,7 +2,8 @@
 // 說明文字給沒有系統工程背景的成員看，力求白話。
 
 /** options：只能填這幾個值（下拉選單），空字串＝不寫 */
-export interface Field { name: string; zh: string; type: "text" | "int" | "real"; options?: { value: string; zh: string }[] }
+/** gate：TPM 各節點的值專用，對應的審查節點 id（右欄只顯示專案啟用的節點） */
+export interface Field { name: string; zh: string; type: "text" | "int" | "real"; options?: { value: string; zh: string }[]; gate?: string }
 
 export interface Category {
   id: string;
@@ -139,12 +140,17 @@ export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
  * 說明性標記（library/JRI.sysml）：右欄可編，寫成 @名稱 { 欄位 = 值; }。欄位值會出現在 Element.attrs，位置在 metaLoc[名稱]。
  * for：掛在哪種元素上（any＝任何元素；variant＝設計方案底下的候選；criterion＝需求；alternative＝設計方案；tpm＝有 #tpm 的屬性）。
  */
+/** TPM 各節點的值：一個設計審查節點一個欄位，id 對應 server/gates.ts 的 GATES（Mars 2026-11-27 決定跟著審查節點走；異常審查、計畫收束不更新估計值）。
+ * library/JRI.sysml 的 TpmTrend 要宣告同樣的欄位；專案沒啟用的節點，原始碼裡的值照樣解析、保留。 */
+export const TPM_GATES: [gate: string, suffix: string, zh: string][] = [
+  ["proposal", "Proposal", "提案"], ["mdr", "MDR", "MDR"], ["pdr", "PDR", "PDR"], ["cdr", "CDR", "CDR"], ["trr", "TRR", "TRR"], ["frr", "FRR", "FRR"],
+];
 export interface MetaSpec { id: string; zh: string; for: "any" | "variant" | "criterion" | "alternative" | "tpm"; fields: Field[] }
 export const META: MetaSpec[] = [
   { id: "DesignRationale", zh: "說明", for: "any", fields: [{ name: "why", zh: "為什麼這樣定", type: "text" }, { name: "judge", zh: "判定條件（用什麼條件判定通過）", type: "text" }] },
   { id: "Rejection", zh: "否決原因", for: "variant", fields: [{ name: "rejectWhy", zh: "否決原因（選定的不用寫）", type: "text" }] },
   { id: "CriterionScale", zh: "評分標準", for: "criterion", fields: [{ name: "scale1", zh: "1 分", type: "text" }, { name: "scale3", zh: "3 分", type: "text" }, { name: "scale5", zh: "5 分", type: "text" }] },
   { id: "TradeSensitivity", zh: "權重敏感度", for: "alternative", fields: [{ name: "sensitivity", zh: "權重敏感度說明", type: "text" }] },
-  { id: "TpmTrend", zh: "各節點的值", for: "tpm", fields: ["SRR", "SDR", "MDR", "PDR", "CDR", "TRR", "FRR"].map((g) => ({ name: `at${g}`, zh: g, type: "real" as const })) },
+  { id: "TpmTrend", zh: "各節點的值", for: "tpm", fields: TPM_GATES.map(([gate, suffix, zh]) => ({ name: `at${suffix}`, zh, type: "real" as const, gate })) },
 ];
 export const META_SPEC = new Map(META.map((m) => [m.id, m]));

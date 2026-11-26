@@ -8,6 +8,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { upgradeText } from "./upgrade.ts";
+import { GATES } from "./gates.ts";
+import { META_SPEC } from "./metamodel.ts";
 
 const PORT = 18997, PUB = 18998; // 和其他測試檔錯開
 const I = `http://127.0.0.1:${PORT}`;
@@ -73,7 +75,7 @@ test("升級：既有專案沒有這些欄位照常開啟，不自動填內容�
   const fresh = [
     "#fix dependency from 'RISK-1' to 'ALT-1'::'甲';",
     "@DesignRationale { why = \"合成理由\"; judge = \"合成條件\"; }",
-    "@TpmTrend { atSRR = 7.9; atPDR = 7.2; }",
+    "@TpmTrend { atProposal = 7.9; atPDR = 7.2; }",
     "attribute adjusted_REQ_SYS_001 : TradeScore = 5.0;",
   ].join("\n");
   assert.equal(upgradeText(fresh), fresh, "新寫法原樣保留");
@@ -183,12 +185,26 @@ test("風險回頭修正：修正內容＋「修正了」關係；起點不是�
   assert.equal(named("合成風險").attrs.fixNote, undefined);
 });
 
-test("決策喊卡：切放行／喊卡與原因；不在清單的值被拒絕", async () => {
+test("決策喊卡：切放行／喊卡與原因；不在清單的值被拒絕；喊卡只警告", async () => {
   await send("/elements", "PATCH", { id: named("合成決策").id, attrs: { releaseStatus: "hold", holdReason: "合成：待秤重" } });
   assert.equal(named("合成決策").attrs.releaseStatus, "hold");
   assert.equal(named("合成決策").attrs.holdReason, "合成：待秤重");
+  const hd = v.framework.holdDecisions.find((d: any) => d.id === named("合成決策").id);
+  assert.equal(hd?.text, "DEC-901 合成決策 喊卡中：合成：待秤重；下一層可以寫，但會顯示警告。");
+  // 下一層照常可寫，回應帶警告；卡點與迴圈判定和放行時一樣
+  const next = v.framework.holdPoints[0].category;
+  const holdPointsHeld = JSON.stringify(v.framework.holdPoints), layersHeld = JSON.stringify(v.framework.layers.map((l: any) => l.passed));
+  const made = await send("/elements", "POST", { category: next, name: "合成下一層" });
+  assert.match(made.holdWarning, /DEC-901 合成決策 喊卡中：合成：待秤重/);
+  await send("/elements/delete", "POST", { id: named("合成下一層").id });
   await send("/elements", "PATCH", { id: named("合成決策").id, attrs: { releaseStatus: "ok" } });
   assert.equal(named("合成決策").attrs.releaseStatus, "ok");
+  assert.equal(v.framework.holdDecisions.length, 0, "放行後沒有喊卡警告");
+  assert.equal(JSON.stringify(v.framework.holdPoints), holdPointsHeld, "喊卡不改卡點（FW-02 不變）");
+  assert.equal(JSON.stringify(v.framework.layers.map((l: any) => l.passed)), layersHeld, "喊卡不改迴圈進度");
+  const again = await send("/elements", "POST", { category: next, name: "合成下一層" });
+  assert.doesNotMatch(again.holdWarning ?? "", /喊卡/);
+  await send("/elements/delete", "POST", { id: named("合成下一層").id });
   const before = await model();
   await send("/elements", "PATCH", { id: named("合成決策").id, attrs: { releaseStatus: "maybe" } }, 400);
   assert.equal(await model(), before, "被拒絕時模型不變");
@@ -196,18 +212,32 @@ test("決策喊卡：切放行／喊卡與原因；不在清單的值被拒絕",
   assert.equal(named("合成決策").attrs.releaseStatus, undefined);
 });
 
-test("TPM 各節點的值：寫在 #tpm 屬性上、改一個節點、非數字被拒絕、清空", async () => {
+test("TPM 各節點的值：欄位跟著審查節點；寫、改一個節點、非數字被拒絕、專案沒啟用的節點值保留、清空", async () => {
+  // 一個設計審查節點一個欄位（異常審查、計畫收束不更新 TPM 估計值）
+  assert.deepEqual(META_SPEC.get("TpmTrend")!.fields.map((f) => f.gate), ["proposal", "mdr", "pdr", "cdr", "trr", "frr"]);
+  for (const f of META_SPEC.get("TpmTrend")!.fields) assert.ok(GATES.some((g) => g.id === f.gate), `${f.gate} 是審查節點`);
+  const lib = await fs.readFile(path.join(process.cwd(), "library", "JRI.sysml"), "utf8");
+  for (const f of META_SPEC.get("TpmTrend")!.fields) assert.match(lib, new RegExp(`attribute ${f.name} : Real\\[0\\.\\.1\\];`), `JRI.sysml 宣告 ${f.name}`);
   const tpm = () => els().find((e) => e.name === "dryMass" && e.tags.includes("TPM"));
   assert.ok(tpm(), "範例專案有 #tpm 屬性");
-  await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atSRR: "7.9", atSDR: "7.6", atPDR: "7.2" } } });
-  assert.deepEqual([tpm().attrs.atSRR, tpm().attrs.atSDR, tpm().attrs.atPDR], ["7.9", "7.6", "7.2"]);
+  await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atProposal: "7.9", atMDR: "7.6", atPDR: "7.2", atFRR: "6.9" } } });
+  assert.deepEqual([tpm().attrs.atProposal, tpm().attrs.atMDR, tpm().attrs.atPDR], ["7.9", "7.6", "7.2"]);
   assert.ok(tpm().tags.includes("TPM"), "仍是 TPM");
   await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atPDR: "7" } } });
   assert.equal(tpm().attrs.atPDR, "7.0");
-  assert.equal(tpm().attrs.atSRR, "7.9");
+  assert.equal(tpm().attrs.atProposal, "7.9");
   await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atCDR: "很重" } } }, 400);
-  await send("/elements", "PATCH", { id: named("合成準則").id, meta: { TpmTrend: { atSRR: "1" } } }, 400);
-  await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atSRR: "", atSDR: "", atPDR: "" } } });
+  await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atSRR: "7" } } }, 400);
+  await send("/elements", "PATCH", { id: named("合成準則").id, meta: { TpmTrend: { atProposal: "1" } } }, 400);
+  // 改成只啟用 PDR 的小型專案：原始碼裡 FRR 等節點的值照樣解析、寫 PDR 時不會被丟掉
+  assert.equal((await call(`${I}/api/projects/wa`, "PATCH", { kind: "small", gates: ["pdr"] })).status, 200);
+  await reload();
+  assert.deepEqual(v.project.gates, ["pdr"]);
+  assert.equal(tpm().attrs.atFRR, "6.9");
+  await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atPDR: "7.1" } } });
+  assert.deepEqual([tpm().attrs.atPDR, tpm().attrs.atFRR, tpm().attrs.atProposal], ["7.1", "6.9", "7.9"]);
+  assert.equal((await call(`${I}/api/projects/wa`, "PATCH", { kind: "annual" })).status, 200);
+  await send("/elements", "PATCH", { id: tpm().id, meta: { TpmTrend: { atProposal: "", atMDR: "", atPDR: "", atFRR: "" } } });
   assert.equal(tpm().attrs.atPDR, undefined);
   assert.doesNotMatch(await model(), /@TpmTrend/);
 });
