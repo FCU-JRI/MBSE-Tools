@@ -135,3 +135,23 @@ test("喊卡範圍：只列同一棵子樹（所在層與上層鏈）的喊卡�
   assert.deepEqual(holdScope(M, B), [], "次乙不在同一棵子樹");
   assert.deepEqual(holdScope(M, C), [DEC], "元丙本身的圖在次甲之下");
 });
+
+test("框架：設計方案經由方案比較表（套件）連到本層需求，也算有設計提案（Mars 2026-11-27）", async () => {
+  const { evaluateFramework, loadFramework, defaultSettings } = await import("./framework.ts");
+  const xs: any[] = [], rs: any[] = [];
+  const mk = (kind: string, category: string | null, name: string, owner: string | null = null, typeIds: string[] = []) => { const id = `x${xs.length + 1}`; xs.push({ id, kind, category, name, shortName: name, qualifiedName: `P::${name}`, owner, doc: "", types: [], typeIds, file: "m.sysml", shared: false, attrs: {}, tags: [], line: null }); return id; };
+  const sys = mk("PartDefinition", "System", "S"), sub = mk("PartDefinition", "Subsystem", "B");
+  mk("PartUsage", null, "b", sys, [sub]);
+  const req = mk("RequirementUsage", "SubsystemRequirement", "SSR-B");
+  rs.push({ kind: "satisfy", from: sub, to: req });
+  const alt = mk("PartDefinition", "DesignAlternative", "ALT-B"); mk("PartUsage", null, "甲", alt); mk("PartUsage", null, "乙", alt);
+  const crit = mk("RequirementUsage", "MOP", "TS-B-1");
+  rs.push({ kind: "trace", from: alt, to: crit });
+  const f = loadFramework();
+  const run = () => evaluateFramework(f, { a: { ok: true, diagnostics: [], elements: xs, relations: rs, satisfaction: [] } as any, settings: defaultSettings(f), docs: 0, approval: { ok: true, detail: "", source: "branches" } });
+  const proposal = () => run().layers.find((l: any) => l.id === "subsystem")!.objects![0].steps.find((s: any) => s.id === "proposal")!.done;
+  assert.equal(proposal(), false, "方案只連到評分準則時，還不算");
+  const pkg = mk("Package", null, "TS-B");
+  rs.push({ kind: "trace", from: pkg, to: alt }, { kind: "trace", from: pkg, to: req });
+  assert.equal(proposal(), true, "比較表套件連到方案與本層需求，算有設計提案");
+});
