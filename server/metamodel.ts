@@ -1,6 +1,10 @@
 // JRI 類別（對應 library/JRI.sysml）的顯示名稱、說明與新增元素時的寫法。
 // 說明文字給沒有系統工程背景的成員看，力求白話。
 
+/** options：只能填這幾個值（下拉選單），空字串＝不寫 */
+/** gate：TPM 各節點的值專用，對應的審查節點 id（右欄只顯示專案啟用的節點） */
+export interface Field { name: string; zh: string; type: "text" | "int" | "real"; options?: { value: string; zh: string }[]; gate?: string }
+
 export interface Category {
   id: string;
   zh: string;
@@ -11,7 +15,7 @@ export interface Category {
   keyword: string; // SysML v2 關鍵字
   help: string;
   example: string;
-  fields?: { name: string; zh: string; type: "text" | "int" | "real" }[];
+  fields?: Field[];
   /** 不用一般的新增表單建立（例如介面要選兩端），由專門的入口建立 */
   special?: boolean;
 }
@@ -83,10 +87,13 @@ export const CATEGORIES: Category[] = [
       { name: "likelihood", zh: "可能性 1–5", type: "int" }, { name: "detection", zh: "偵測度 1–5（越難發現越高）", type: "int" },
       { name: "mitigation", zh: "緩解措施", type: "text" }, { name: "residualSeverity", zh: "緩解後嚴重度 1–5", type: "int" },
       { name: "residualLikelihood", zh: "緩解後可能性 1–5", type: "int" }, { name: "owner", zh: "負責人", type: "text" },
-      { name: "status", zh: "狀態（開啟／結案）", type: "text" }, { name: "riskKind", zh: "種類（技術／時程／預算／場地／人員）", type: "text" } ] },
+      { name: "status", zh: "狀態（開啟／結案）", type: "text" }, { name: "riskKind", zh: "種類（技術／時程／預算／場地／人員）", type: "text" },
+      { name: "fixNote", zh: "回頭修正（改了模型哪裡；被修正的元素用「修正了」關係指過去）", type: "text" } ] },
   { id: "DesignDecision", zh: "設計決策", en: "Design Decision", pillar: "parametrics", prefix: "DEC", pkg: "Decisions", keyword: "item",
     help: "方案選定或衝突裁決的紀錄：選了什麼、為什麼、誰決定、何時。下一屆看得懂為什麼這樣設計。", example: "回收改用雙段開傘",
-    fields: [{ name: "rationale", zh: "理由", type: "text" }, { name: "decidedBy", zh: "裁決者", type: "text" }, { name: "decidedOn", zh: "日期", type: "text" }] },
+    fields: [{ name: "rationale", zh: "理由", type: "text" }, { name: "decidedBy", zh: "裁決者", type: "text" }, { name: "decidedOn", zh: "日期", type: "text" },
+      { name: "releaseStatus", zh: "放行／喊卡", type: "text", options: [{ value: "ok", zh: "放行" }, { value: "hold", zh: "喊卡" }] },
+      { name: "holdReason", zh: "喊卡原因與放行條件", type: "text" }] },
   { id: "SafetyFactor", zh: "安全係數", en: "Factor of Safety", pillar: "risk", prefix: "FOS", pkg: "Safety", keyword: "item",
     help: "結構或壓力元件的實際安全係數與要求值。", example: "燃燒室爆破安全係數",
     fields: [
@@ -126,4 +133,24 @@ export const RELATION_LABELS: Record<string, { zh: string; help: string }> = {
   verify: { zh: "驗證", help: "哪個驗證事件用來證明這條需求。" },
   allocate: { zh: "分配給", help: "這個功能由哪個次系統或元件執行。" },
   include: { zh: "包含", help: "這個使用案例進行時會用到另一個使用案例。" },
+  fix: { zh: "修正了", help: "風險的回頭修正：為了這個風險改了哪個元素（候選、零件、需求…）。修正內容寫在風險的「回頭修正」欄。" },
 };
+
+/**
+ * 說明性標記（library/JRI.sysml）：右欄可編，寫成 @名稱 { 欄位 = 值; }。欄位值會出現在 Element.attrs，位置在 metaLoc[名稱]。
+ * for：掛在哪種元素上（any＝任何元素；variant＝設計方案底下的候選；criterion＝需求；alternative＝設計方案；tpm＝有 #tpm 的屬性）。
+ */
+/** TPM 各節點的值：一個設計審查節點一個欄位，id 對應 server/gates.ts 的 GATES（Mars 2026-11-27 決定跟著審查節點走；異常審查、計畫收束不更新估計值）。
+ * library/JRI.sysml 的 TpmTrend 要宣告同樣的欄位；專案沒啟用的節點，原始碼裡的值照樣解析、保留。 */
+export const TPM_GATES: [gate: string, suffix: string, zh: string][] = [
+  ["proposal", "Proposal", "提案"], ["mdr", "MDR", "MDR"], ["pdr", "PDR", "PDR"], ["cdr", "CDR", "CDR"], ["trr", "TRR", "TRR"], ["frr", "FRR", "FRR"],
+];
+export interface MetaSpec { id: string; zh: string; for: "any" | "variant" | "criterion" | "alternative" | "tpm"; fields: Field[] }
+export const META: MetaSpec[] = [
+  { id: "DesignRationale", zh: "說明", for: "any", fields: [{ name: "why", zh: "為什麼這樣定", type: "text" }, { name: "judge", zh: "判定條件（用什麼條件判定通過）", type: "text" }] },
+  { id: "Rejection", zh: "否決原因", for: "variant", fields: [{ name: "rejectWhy", zh: "否決原因（選定的不用寫）", type: "text" }] },
+  { id: "CriterionScale", zh: "評分標準", for: "criterion", fields: [{ name: "scale1", zh: "1 分", type: "text" }, { name: "scale3", zh: "3 分", type: "text" }, { name: "scale5", zh: "5 分", type: "text" }] },
+  { id: "TradeSensitivity", zh: "權重敏感度", for: "alternative", fields: [{ name: "sensitivity", zh: "權重敏感度說明", type: "text" }] },
+  { id: "TpmTrend", zh: "各節點的值", for: "tpm", fields: TPM_GATES.map(([gate, suffix, zh]) => ({ name: `at${suffix}`, zh, type: "real" as const, gate })) },
+];
+export const META_SPEC = new Map(META.map((m) => [m.id, m]));

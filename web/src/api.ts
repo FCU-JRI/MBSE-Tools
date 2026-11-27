@@ -26,10 +26,12 @@ export interface View { project: Project; analysis: Analysis; gates: Gate[]; doc
   warning?: string }
 export const baseOf = (ref: string) => ref.split("@")[0];
 export const refOf = (ref: string, branch: string) => `${baseOf(ref)}@${branch.replaceAll("/", "~")}`;
-export interface Field { name: string; zh: string; type: "text" | "int" | "real" }
+export interface Field { name: string; zh: string; type: "text" | "int" | "real"; options?: { value: string; zh: string }[]; gate?: string }
+/** 說明性標記（server/metamodel.ts 的 META）：欄位值在 Element.attrs，例如 attrs.why、attrs.judge、attrs.rejectWhy、attrs.atPDR；TpmTrend 的欄位帶 gate（審查節點 id） */
+export interface MetaSpec { id: string; zh: string; for: "any" | "variant" | "criterion" | "alternative" | "tpm"; fields: Field[] }
 export interface Category { id: string; zh: string; en: string; pillar: string; prefix: string; pkg: string; keyword: string; help: string; example: string; fields?: Field[]; special?: boolean }
 export interface Meta {
-  categories: Category[]; pillars: Record<string, string>; relations: Record<string, { zh: string; help: string }>;
+  categories: Category[]; pillars: Record<string, string>; relations: Record<string, { zh: string; help: string }>; meta?: MetaSpec[];
   gates: { id: string; zh: string; en: string; deadline: string | null; approver: string; purpose: string; perSubsystem: boolean }[];
 }
 

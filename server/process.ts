@@ -285,7 +285,9 @@ export async function frameworkView(ref: string, project: Project, a: Analysis, 
 export async function holdPoint(ref: string, project: Project, a: Analysis, docs: number, category: string): Promise<string | null> {
   if (!a.ok) return null;
   const ev = await frameworkView(ref, project, a, docs);
-  return ev ? fw.holdPointBlock(ev, category) : null;
+  if (!ev) return null;
+  const notes = [fw.holdPointBlock(ev, category), fw.holdDecisionNote(ev, category)].filter((x): x is string => !!x);
+  return notes.length ? notes.join("\n") : null;
 }
 
 /** 審查節點加上框架檢查（MGT-02）；既有檢查與 done／total 不動。 */

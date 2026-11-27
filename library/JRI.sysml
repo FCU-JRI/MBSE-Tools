@@ -80,6 +80,18 @@ package JRI {
         attribute layer : String;
     }
 
+    /* 說明：為什麼這樣定（why）、用什麼條件判定通過（judge）。任何元素都可以掛；缺了只出警告，不擋卡點。
+       名稱避開標準庫 ModelingMetadata::Rationale，兩者可以同時匯入。
+       用法：@DesignRationale { why = "掃描段 40 min 加備援後取整"; judge = "計算值 ≥ 60 min；飛測後以實測值取代"; } */
+    metadata def DesignRationale {
+        attribute why : String[0..1];
+        attribute judge : String[0..1];
+    }
+
+    /* 修正：FixLink 從風險指向被回頭修正的元素（候選、零件、需求…），修正內容寫在風險的 fixNote。
+       用法：#fix dependency from 'R-30' to '拉進式'; */
+    metadata def <fix> FixLink;
+
     // ───────── 結構支柱 Structure ─────────
 
     part def System;
@@ -115,6 +127,28 @@ package JRI {
         attribute weight : Real;
     }
     attribute def TradeScore :> Real;
+    /* 風險修正後的調整分數：名稱是 adjusted_ 加需求編號，寫在候選上，和 score_ 並列；沒有調整就不寫。
+       variant part <'ALT-001-1'> '單段傘' { attribute adjusted_REQ_SYS_001 : TradeScore = 5.0; } */
+
+    /* 被否決的候選為什麼被否決；選定的不用寫。
+       用法（寫在 variant 裡）：@Rejection { rejectWhy = "重量超出配額"; } */
+    metadata def Rejection {
+        attribute rejectWhy : String;
+    }
+
+    /* 準則的評分標準：1／3／5 分各代表什麼，寫在當準則的需求上。
+       用法：@CriterionScale { scale1 = "< 45 min"; scale3 = "約 60 min"; scale5 = "> 75 min"; } */
+    metadata def CriterionScale {
+        attribute scale1 : String[0..1];
+        attribute scale3 : String[0..1];
+        attribute scale5 : String[0..1];
+    }
+
+    /* 方案比較整體的權重敏感度說明，寫在設計方案（variation part def）上。
+       用法：@TradeSensitivity { sensitivity = "航時權重 3→5 時排序不變"; } */
+    metadata def TradeSensitivity {
+        attribute sensitivity : String;
+    }
 
     // ───────── 行為支柱 Behavior ─────────
 
@@ -133,6 +167,17 @@ package JRI {
     metadata def <tpm> TPM {
         attribute target : String[0..1];
         attribute status : String[0..1];
+    }
+    /* TPM 在各審查節點的值（單位同所標記的屬性），寫在屬性的主體內。一個審查節點一個欄位（計畫提案、MDR、PDR、CDR、TRR、FRR），
+       右欄只顯示專案啟用的節點；沒到的節點不寫。
+       用法：#tpm attribute mtow : MassValue { @TpmTrend { atProposal = 7.9; atMDR = 7.6; atPDR = 7.2; } } */
+    metadata def TpmTrend {
+        attribute atProposal : Real[0..1];
+        attribute atMDR : Real[0..1];
+        attribute atPDR : Real[0..1];
+        attribute atCDR : Real[0..1];
+        attribute atTRR : Real[0..1];
+        attribute atFRR : Real[0..1];
     }
 
     // ───────── 驗證與確認 V&V ─────────
@@ -166,6 +211,8 @@ package JRI {
         attribute status : String;
         /* 風險種類：技術、時程、預算、場地、人員（風險登錄用） */
         attribute riskKind : String[0..1];
+        /* 回頭修正：為了這個風險改了模型哪裡。被修正的元素用 #fix dependency 指過去 */
+        attribute fixNote : String[0..1];
     }
 
     /* 設計決策：方案選定、衝突裁決都留理由、裁決者與日期（TR-08） */
@@ -173,6 +220,10 @@ package JRI {
         attribute rationale : String;
         attribute decidedBy : String;
         attribute decidedOn : String;
+        /* 放行（ok）或喊卡（hold）；沒寫視為放行 */
+        attribute releaseStatus : String[0..1];
+        /* 喊卡原因與放行條件 */
+        attribute holdReason : String[0..1];
     }
 
     /* 安全係數 Factor of Safety */

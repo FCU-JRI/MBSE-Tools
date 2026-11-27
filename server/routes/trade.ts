@@ -73,14 +73,15 @@ export function mount(app: Express): void {
     res.json({ saved: true, ...(await view(id)) });
   }));
 
-  // 填、改、刪分數（空字串＝刪）
-  app.post("/api/projects/:id/trade/score", wrap(async (req0, res) => {
+  // 填、改、刪分數（空字串＝刪）。trade/adjusted 是風險修正後的調整分數，寫法相同
+  for (const kind of ["score", "adjusted"] as const) app.post(`/api/projects/:id/trade/${kind}`, wrap(async (req0, res) => {
     const id = pid(req0), b = req0.body ?? {};
     const a0 = await ready(id);
     const v0 = a0.elements.find((x) => x.id === b.variant && x.kind === "PartUsage" && a0.elements.find((p) => p.id === x.owner)?.category === "DesignAlternative");
     if (!v0) throw new store.UserError("請選方案底下的候選。");
     const r0 = req(a0, b.requirement);
-    await run(id, author(req0), `方案比較：${v0.name} 對 ${r0.shortName ?? r0.name} 的分數`, [(a) => { const v = fresh(a, v0); return { file: editable(v).file, make: (c) => setScoreText(c, v, fresh(a, r0), String(b.score ?? "")) }; }]);
+    const adj = kind === "adjusted";
+    await run(id, author(req0), `方案比較：${v0.name} 對 ${r0.shortName ?? r0.name} 的${adj ? "調整" : ""}分數`, [(a) => { const v = fresh(a, v0); return { file: editable(v).file, make: (c) => setScoreText(c, v, fresh(a, r0), String(b.score ?? ""), adj) }; }]);
     res.json({ saved: true, ...(await view(id)) });
   }));
 
@@ -92,7 +93,7 @@ export function mount(app: Express): void {
     const files = await store.listFiles(id);
     const mine = linksOf(a0, al0, r0).filter((x) => x.loc && files.includes(x.file) && x.kind === "trace");
     if (!mine.length && !linksOf(a0, al0, r0).length) throw new store.UserError("這條需求不是這個方案的準則。");
-    const steps: Step[] = variantsOf(a0, al0).map((v0) => (a) => { const v = fresh(a, v0); return v.attrLoc[`score_${(r0.shortName ?? "").replace(/\W/g, "_")}`] ? { file: editable(v).file, make: (c: string) => setScoreText(c, v, fresh(a, r0), "") } : null; });
+    const steps: Step[] = variantsOf(a0, al0).flatMap((v0) => [false, true].map((adj) => (a: An) => { const v = fresh(a, v0); return v.attrLoc[`${adj ? "adjusted" : "score"}_${(r0.shortName ?? "").replace(/\W/g, "_")}`] ? { file: editable(v).file, make: (c: string) => setScoreText(c, v, fresh(a, r0), "", adj) } : null; }));
     for (const link of mine) steps.push((a) => {
       const l = a.relations.find((x) => x.kind === "trace" && x.from === link.from && x.to === link.to && x.file === link.file);
       return l?.loc ? { file: l.file, make: (c) => removeLocs(c, [l.loc!]) } : null;

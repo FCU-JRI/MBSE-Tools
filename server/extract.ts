@@ -31,7 +31,7 @@ export interface Element {
 }
 
 export interface Relation {
-  kind: "derive" | "trace" | "basis" | "refine" | "satisfy" | "verify" | "allocate" | "succession" | "connect" | "transition" | "include";
+  kind: "derive" | "trace" | "basis" | "fix" | "refine" | "satisfy" | "verify" | "allocate" | "succession" | "connect" | "transition" | "include";
   from: string;
   to: string;
   /** 追溯到利害關係人時，是不是用語言內建的寫法：需求裡的 stakeholder，或使用案例裡的 actor（F-37）。相依（#trace）沒有這個欄位 */
@@ -55,6 +55,7 @@ const LIB_PREFIX = "JRI::";
 const LINK_KINDS: Record<string, Relation["kind"]> = {
   TraceLink: "trace",
   BasisLink: "basis",
+  FixLink: "fix",
   Refinement: "refine",
 };
 // 衍生用標準庫 RequirementDerivation 的連結：連結本身標 #derivation，兩端分別標 #original（母）與 #derive（子）

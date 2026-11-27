@@ -1,4 +1,5 @@
-// 方案比較的權重與分數：寫入文字的邏輯。準則＝連到方案（或候選）的需求；權重是需求上的 @TradeWeight，分數是候選上的 score_<需求編號> 屬性。
+// 方案比較的權重與分數：寫入文字的邏輯。準則＝連到方案（或候選）的需求；權重是需求上的 @TradeWeight，分數是候選上的 score_<需求編號> 屬性，
+// 風險修正後的調整分數是候選上的 adjusted_<需求編號> 屬性（沒有調整就不寫）。
 import type { Element } from "./extract.ts";
 import { UserError } from "./projects.ts";
 import { insertInside, replaceLoc } from "./edits.ts";
@@ -8,6 +9,9 @@ export function scoreKey(req: Element): string {
   if (!req.shortName) throw new UserError("這條需求沒有編號，無法當準則。請先到屬性欄填編號。");
   return `score_${req.shortName.replace(/\W/g, "_")}`;
 }
+
+/** 調整分數的屬性名稱：REQ-SYS-001 → adjusted_REQ_SYS_001 */
+export const adjustedKey = (req: Element): string => scoreKey(req).replace(/^score_/, "adjusted_");
 
 const real = (v: string, what: string): string => {
   const t = v.trim();
@@ -28,9 +32,9 @@ export function setWeightText(content: string, req: Element, weight: string): st
   return insertInside(content, req, (indent) => `${indent}${text}\n`);
 }
 
-/** 候選對準則的分數：空字串＝刪除。 */
-export function setScoreText(content: string, variant: Element, req: Element, score: string): string {
-  const key = scoreKey(req);
+/** 候選對準則的分數：空字串＝刪除。adjusted＝寫調整分數（風險修正後）。 */
+export function setScoreText(content: string, variant: Element, req: Element, score: string, adjusted = false): string {
+  const key = adjusted ? adjustedKey(req) : scoreKey(req);
   const loc = variant.attrLoc[key];
   const s = score.trim();
   if (!s) return loc ? replaceLoc(content, loc, "") : content;

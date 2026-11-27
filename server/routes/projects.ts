@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { GATES } from "../gates.ts";
 import { ownerSlots } from "../framework.ts";
 import { framework } from "../process.ts";
-import { CATEGORIES, PILLARS, RELATION_LABELS } from "../metamodel.ts";
+import { CATEGORIES, META, PILLARS, RELATION_LABELS } from "../metamodel.ts";
 import * as store from "../projects.ts";
 import * as auth from "../auth.ts";
 import { wrap, me, author, pid, view, admin } from "./common.ts";
@@ -14,6 +14,7 @@ export function mount(app: Express): void {
       categories: CATEGORIES,
       pillars: PILLARS,
       relations: RELATION_LABELS,
+      meta: META,
       // 框架（PRJ-05 設定頁用）：可設定的參數、角色、各步負責人的預設
       framework: { settings: framework().settings, roles: framework().roles, owners: ownerSlots(framework()) },
       gates: GATES.map((g) => ({ id: g.id, zh: g.zh, en: g.en, deadline: g.deadline, approver: g.approver, purpose: g.purpose, perSubsystem: g.perSubsystem })),
