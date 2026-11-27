@@ -824,51 +824,6 @@ test("重複的關係被拒絕；復原上一步會還原模型修改", async ()
   assert.equal((await call(`${I}/api/projects/t6/redo`, "POST", {})).status, 400, "沒有可以重做的步驟");
 });
 
-test("圖的資料依 SysML v2 記法：定義方角、使用圓角、關鍵字與連線樣式", async () => {
-  const { buildGraph, diagramsOf, frameLabel } = await import("../web/src/model.ts");
-  const { toSvg } = await import("../web/src/exportSvg.ts");
-  const a = (await call(`${I}/api/projects/t6`)).data.analysis;
-  const name = (id: string) => a.elements.find((e: any) => e.id === id)?.name;
-  const defs = diagramsOf(a);
-  const g = (kind: string) => buildGraph(defs.find((d: any) => d.kind === kind) as any, a);
-  // 圖框：«view» 名稱 : 標準檢視定義
-  assert.equal(frameLabel(defs.find((d: any) => d.kind === "bdd") as any), "«view» 結構分解 : GeneralView");
-  assert.deepEqual(["ibd", "act", "stm"].map((k) => defs.find((d: any) => d.kind === k)?.viewDef), ["InterconnectionView", "ActionFlowView", "StateTransitionView"]);
-  const uc = g("uc");
-  assert.ok(uc.nodes.some((n: any) => n.keyword === "«use case»" && n.shape === "usage"), "使用案例是圓角的 «use case»");
-  // 參與者是使用案例的 actor 參數：節點標 «actor»，用沒有箭頭、沒有標籤的實線連到使用案例（8.2.3.21）；沒有參與任何使用案例的仍是 «part»
-  const people = uc.nodes.filter((n: any) => / : Stakeholder$/.test(n.title.join("")));
-  assert.ok(people.length >= 2);
-  assert.equal(people.find((n: any) => n.name === "指導老師")?.keyword, "«actor»");
-  for (const n of people) assert.equal(n.keyword, uc.edges.some((e: any) => e.target === n.id && e.head === "none") ? "«actor»" : "«part»", n.name);
-  const tr = uc.edges.find((e: any) => name(e.source) === "執行發射");
-  assert.deepEqual([tr?.kind, tr?.dashed, tr?.head, tr?.label], ["trace", false, "none", ""]);
-  const req = g("req");
-  const st = req.edges.find((e: any) => name(e.source) === "安全發射與回收" && name(e.target) === "指導老師");
-  assert.deepEqual([st?.dashed, st?.head, st?.label, req.nodes.find((x: any) => x.name === "指導老師")?.keyword], [false, "none", "", "«stakeholder»"], "期望的利害關係人");
-  assert.ok(req.edges.some((e: any) => e.label === "«#refinement»" && e.dashed && e.head === "open"), "相依為虛線開放箭頭");
-  assert.ok(req.edges.some((e: any) => e.label === "«#derivation»" && !e.dashed && e.head === "open"), "需求衍生是連結，實線開放箭頭（8.2.3.13）");
-  assert.ok(req.edges.some((e: any) => e.label === "«satisfy»" && !e.dashed) && req.edges.some((e: any) => e.label === "«verify»" && !e.dashed), "satisfy、verify 為實線");
-  const r1 = req.nodes.find((n: any) => n.keyword === "«requirement»" && n.title.join("").startsWith("<REQ-"));
-  assert.ok(r1 && r1.shape === "usage" && r1.compartments[0]?.[0] === "doc", "需求顯示編號與 doc 隔間");
-  assert.ok(req.nodes.some((n: any) => n.keyword === "«verification»"));
-  const bdd = g("bdd");
-  assert.ok(bdd.nodes.filter((n: any) => n.shape === "def").every((n: any) => n.keyword === "«part def»"));
-  // 組成：定義 ◆— 零件（使用），零件再以「defined by」指向它的定義
-  const comp = bdd.edges.filter((e: any) => e.kind === "compose");
-  assert.ok(comp.length >= 3 && comp.every((e: any) => e.tail === "diamond" && bdd.nodes.find((n: any) => n.id === e.target)?.keyword === "«part»"));
-  assert.ok(bdd.edges.filter((e: any) => e.kind === "define").every((e: any) => e.head === "typing" && bdd.nodes.find((n: any) => n.id === e.target)?.shape === "def"));
-  const act = g("act");
-  assert.deepEqual([act.nodes[0].shape, act.nodes[act.nodes.length - 1].shape], ["start", "done"]);
-  assert.ok(act.nodes.filter((n: any) => n.el).every((n: any) => n.keyword === "«action»" && n.shape === "usage"));
-  const stm = g("stm");
-  assert.ok(stm.nodes.some((n: any) => n.keyword === "«state»") && stm.nodes.some((n: any) => n.shape === "start"));
-  const svg = toSvg("«view» t : GeneralView", bdd.nodes.map((n: any, i: number) => ({ g: n, x: i * 240, y: 0 })), bdd.edges);
-  assert.match(svg, /«view» t : GeneralView/);
-  assert.match(svg, /rx="10"/);
-  assert.match(svg, /url\(#typ\)/);
-});
-
 test("套件：建立、搬進搬出、原有引用不受影響、版面識別碼跟著換", async () => {
   await call(`${I}/api/projects`, "POST", { id: "p1", name: "套件測試", kind: "annual", template: "sample" });
   const base = `${I}/api/projects/p1`;
@@ -944,12 +899,6 @@ test("註解寫進模型：comment about 對象，可修改與刪除", async () 
   r = await call(`${base}/comments`, "POST", { text: "整體說明" });
   const c2 = r.data.analysis.elements.find((e: any) => e.id === r.data.created);
   assert.deepEqual([c2.name, c2.about.length <= 1], ["Note2", true]);
-  // 圖上：註解節點與虛線連到對象
-  const { buildGraph, diagramsOf } = await import("../web/src/model.ts");
-  const a = r.data.analysis;
-  const g = buildGraph(diagramsOf(a).find((d: any) => d.kind === "uc") as any, a, { packages: new Set(["Stakeholders"]), shown: new Set() });
-  assert.ok(g.nodes.some((n: any) => n.id === c.id && n.shape === "comment"));
-  assert.ok(g.edges.some((e: any) => e.kind === "annotate" && e.source === c.id && e.target === teacher.id && e.dashed && e.head === "none"));
   r = await call(`${base}/elements/delete`, "POST", { id: c.id });
   assert.equal(r.status, 200);
   assert.equal(r.data.analysis.elements.some((e: any) => e.id === c.id), false);

@@ -7,7 +7,7 @@
 - `model/*.sysml`：專案模型。根套件必須是 `Project`。
 - `lib/JRI.sysml`：JRI 元模型庫（依 NASA-HDBK-1009A 與 AEAS-EXB-REG-1001）。不要修改；要改請到工具的儲存庫提出。
 - `lib/shared-*.sysml`：跨專案的共用元件庫。不要在專案內修改。
-- `project.json`、`pm.json`、`sim.json`、`layout.json`：節點與簽核、時程成本、模擬參數與結果、圖的版面。由工具維護，不要手動修改。
+- `project.json`、`pm.json`、`sim.json`：節點與簽核、時程成本、模擬參數與結果（舊專案可能還有 `layout.json`，是舊版圖的版面，已不使用）。由工具維護，不要手動修改。
 
 ## 建模規則
 
@@ -24,7 +24,8 @@
   - `satisfy 需求 by 元件;`　滿足
   - 驗證寫在驗證事件內：`objective { verify 需求; }`，方法寫成 `@VerificationMethod { kind = VerificationMethodKind::test; }`（test、analyze、inspect、demo）
   - 衍生、細化、驗證方法用的是 SysML v2 標準庫的寫法。舊的 `#derive dependency`、`#refine dependency`、`@VVMethod` 工具會自動轉換，但請不要再寫
-- 技術性能量度在屬性前加 `#tpm`。
+- 技術性能量度在屬性前加 `#tpm`，各審查節點的值寫在 `@TpmTrend { atPDR = …; }`。
+- 每個元素寫 `@DesignRationale { why = "…"; judge = "…"; }`（為什麼這樣定、用什麼條件判定）；其他說明性欄位見 `.claude/skills/jri-mbse/SKILL.md`。
 - 中文名稱要用單引號包住。`analysis`、`test` 等是保留字，不能直接當名稱。
 
 ## 修改流程

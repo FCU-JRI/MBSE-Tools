@@ -88,6 +88,39 @@ requirement <'REQ-SYS-001'> '遠地點高度' : SystemRequirement {
 | 驗證 | 在驗證事件內 `objective { verify 需求; }`，並加 `@VerificationMethod { kind = VerificationMethodKind::test; }`（值是 test、analyze、inspect、demo） |
 | 出處 | 在項目主體內 `@Source { sourceDoc = "DOC-001"; sourceRef = "章節"; }`，文件清單在 `pm.json` 的 `docs` |
 
+### 說明性欄位（為什麼、判定條件、否決原因等）
+
+每個項目都要寫「為什麼這樣定」和「用什麼條件判定通過」。沒寫只會出現提醒，不擋卡點，但模型頁的說明頁、表格和審查報告都會顯示這兩欄。
+
+| 欄位 | 寫法 | 掛在 |
+|---|---|---|
+| 為什麼／判定條件 | `@DesignRationale { why = "…"; judge = "…"; }` | 任何項目 |
+| 否決原因 | `@Rejection { rejectWhy = "…"; }` | 被否決的候選（`variant part`）；選定的不寫 |
+| 評分標準 | `@CriterionScale { scale1 = "…"; scale3 = "…"; scale5 = "…"; }` | 當準則的需求 |
+| 權重敏感度 | `@TradeSensitivity { sensitivity = "…"; }` | 設計方案（`variation part def`） |
+| 調整後分數 | `attribute adjusted_<需求編號> : TradeScore = 5.0;`（和 `score_<需求編號>` 並列） | 候選 |
+| 回頭修正 | `:>> fixNote = "…";`，再寫 `#fix dependency from 風險 to 被修正的元素;` | 風險（Risk） |
+| 放行／喊卡 | `:>> releaseStatus = "ok";` 或 `"hold"`，喊卡時加 `:>> holdReason = "…";` | 設計決策（DesignDecision） |
+| TPM 各節點的值 | 在 `#tpm` 屬性主體內 `@TpmTrend { atProposal = 7.9; atMDR = 7.6; atPDR = 7.2; }`，欄位是 atProposal、atMDR、atPDR、atCDR、atTRR、atFRR | `#tpm` 屬性 |
+
+- 不要用 `@Rationale`（會和標準庫撞名），也沒有 `atSRR`、`atSDR`。
+- 喊卡只是警告：下一層照常可以寫，但會顯示警告，不擋迴圈與卡點。
+- 方案要用 `#trace` 連到它要滿足的本層需求；決策用 `#trace` 連到選定的候選。
+
+```sysml
+item <'DEC-001'> '動力決策' : DesignDecision {
+    :>> decidedBy = "總工程師"; :>> decidedOn = "2027-02-10";
+    :>> releaseStatus = "hold"; :>> holdReason = "待實秤，首批樣品 ≤ 1.9 kg 才放行";
+    @DesignRationale { why = "比較表最高分且領先 5 分"; judge = "比較結論成立、無開啟中的高風險"; }
+}
+```
+
+### 模型頁的圖
+
+模型頁的圖從模型自動產生，固定區帶、不可拖拉，不需要也不能另外存版面。元素歸到哪一層看關係：需求看 `satisfy` 的滿足者，方案、風險、決策看它們連到的需求或零件，所以新增項目後要記得建立這些關係，否則它不會出現在層級圖上。
+
+迴圈旁的「設計示意」只列兩種提交：寫入 `@CadLink` 版本的，以及修改說明以「設計：」開頭的。一般的修改不會成為一版設計。需求的滿足者寫成 `satisfy 需求 by 頂層實例.零件;`，`require constraint` 才能對實例判定。
+
 ## 送審與審查
 
 1. 在自己的分支上修改，不要直接改 `main`。只做局部修改，保留原有排版與註解；不要刪改沒被要求處理的項目。

@@ -119,6 +119,22 @@ test("模型地圖：一層一列，框上需求數、待驗證數、決策狀�
   assert.equal(specL2(M).nodes.filter((x) => x.id === "in").length, 1, "第 2 層有上一層的任務需求框");
 });
 
+test("審查報告與匯出：用同一套層級圖產生 SVG（G 包）", async () => {
+  const { specToSvg } = await import("../web/src/pages/model/svgString.ts");
+  const svg = specToSvg(specMap(M), { xml: true });
+  assert.match(svg, /^<\?xml/);
+  assert.match(svg, /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"[^>]*aria-label="模型地圖"/);
+  assert.match(svg, /class="n-out"/);
+  assert.match(svg, />喊卡中</);
+  assert.doesNotMatch(svg, /ld-add|pz-ring/, "匯出不含新增按鈕與協作標示");
+  const { buildReport } = await import("./report.ts");
+  const r = buildReport({ id: "syn", name: "合成", kind: "annual", createdAt: "", gates: ["proposal", "pdr"], manual: {}, signoffs: [] } as any, view.analysis, [], { tasks: [], costs: [], people: [], docs: [], milestones: {} } as any, { bindings: [], result: null } as any, "pdr", "abc1234");
+  const figs = r.sections.filter((s) => s.svg).map((s) => s.heading);
+  assert.ok(figs.includes("3.1　結構分解"), "結構分解的圖是模型地圖");
+  assert.ok(figs.some((h) => h.startsWith("第 4 層")), "附錄列出各層層級圖");
+  assert.ok(r.sections.find((s) => s.heading === "3.1　結構分解")!.svg!.includes('aria-label="模型地圖"'));
+});
+
 test("框架：元件層只有有組成零件的元件才當迴圈對象（Mars 2026-11-27）", async () => {
   const { evaluateFramework, loadFramework, defaultSettings } = await import("./framework.ts");
   const f = loadFramework();
