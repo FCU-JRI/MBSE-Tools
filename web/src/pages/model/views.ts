@@ -215,3 +215,12 @@ export function buildModel(view: View): Model {
 
 export const viewKeyOfPart = (id: string) => `p:${id}`;
 export type { Relation };
+
+/** 喊卡範圍（Mars 2026-11-27）：元素所在的層，加上它往上的層鏈上，所有喊卡中的決策 id。
+ *  例：機體的需求會看到系統層與機體層的喊卡，看不到推進或主翼的。元素還沒歸到任何一層時是空的。 */
+export function holdScope(M: Model, elementId: string): string[] {
+  const start = M.U.get(elementId)?.kind === "part" && M.V.has(viewKeyOfPart(elementId)) ? viewKeyOfPart(elementId) : M.where(elementId);
+  const chain = new Set<string>();
+  for (let v = start ? M.V.get(start) : undefined; v; v = v.parent ? M.V.get(v.parent) : undefined) chain.add(v.k);
+  return M.list.filter((u) => u.kind === "decision" && u.gate === "hold" && chain.has(M.viewOf.get(u.id) ?? "")).map((u) => u.id);
+}
