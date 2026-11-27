@@ -11,3 +11,12 @@
 .trade td.sel { font-weight: 700; }
 .trade td.rej { text-decoration: line-through; opacity: .7; }
 .howto { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; padding: 8px; border: 1px solid var(--line-strong, #bbb); overflow-x: auto; }
+.trade-adj { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.trade-adj .input { width: 3.6rem !important; }
+.trade-scale, .trade-reject { max-width: 22rem; white-space: normal; }
+.trade-sens { margin: 4px 0 8px; }
+.tpm-spark { display: block; overflow: visible; }
+.tpm-spark .tpm-line { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+.tpm-spark .tpm-thr { stroke: var(--ink-muted); stroke-dasharray: 3 2; stroke-width: 1; }
+.tpm-spark .tpm-pt { fill: var(--ink); }
+.tpm-spark .tpm-bad { fill: var(--danger); }
