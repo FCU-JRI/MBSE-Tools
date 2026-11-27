@@ -624,7 +624,7 @@
    "sources": "框架",
    "framework": "designLoop",
    "verify": "每層每個對象在第幾步一眼看出",
-   "note": "WP5b-2 #47：首頁設計迴圈進度，點對象到模型頁；C＋D 包：第 5 層（元件）只有「有組成零件的元件」才當迴圈對象（Mars 2026-11-27，server/framework.ts objectsOf）"
+   "note": "WP5b-2 #47：首頁設計迴圈進度，點對象到模型頁；C＋D 包：第 5 層（元件）只有「有組成零件的元件」才當迴圈對象（Mars 2026-11-27，server/framework.ts objectsOf）；設計提案：方案經由方案比較表（套件）連到的本層需求也算（Mars 2026-11-27，objectAlternatives）"
   },
   {
    "id": "PROC-01",

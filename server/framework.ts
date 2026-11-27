@@ -289,7 +289,10 @@ function objectAlternatives(h: Helpers, s: Scope): Element[] {
   for (const r of s.reqs) ids.add(r.id);
   return h.of("DesignAlternative").filter((alt) => {
     const mine = new Set([alt.id, ...h.a.elements.filter((e) => e.owner === alt.id).map((e) => e.id)]);
-    return [...mine].some((m) => h.linked(h.byId.get(m) as Element, ids)) || (s.object !== null && alt.owner === s.object.id);
+    if ([...mine].some((m) => h.linked(h.byId.get(m) as Element, ids)) || (s.object !== null && alt.owner === s.object.id)) return true;
+    // 經由方案比較表（Mars 2026-11-27）：和方案（或候選）有關係的比較表套件，它歸併的需求（套件連到的需求）也算方案連到的需求
+    const trades = h.a.elements.filter((p) => p.kind === "Package" && [...mine].some((m) => h.linked(p, new Set([m]))));
+    return trades.some((p) => h.linked(p, ids));
   });
 }
 const variantsOf = (h: Helpers, alt: Element) => h.a.elements.filter((e) => e.owner === alt.id && /Usage$/.test(e.kind) && e.kind !== "ReferenceUsage" && e.kind !== "AttributeUsage");
