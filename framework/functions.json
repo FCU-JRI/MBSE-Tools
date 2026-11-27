@@ -381,7 +381,7 @@
    "sources": "D：每個次系統一個檔案",
    "framework": "principles.filePerSubsystem",
    "verify": "新增次系統時自動建檔，元素寫進對應檔案",
-   "note": ""
+   "note": "B 包（2026-11-27）實測：一個專案放 5 個 .sysml 檔（各次系統一個頂層套件）可以解析、在模型頁與右欄編輯（寫回元素所在的檔案）。新增次系統時自動建檔還沒做"
   },
   {
    "id": "FW-01",
@@ -554,7 +554,7 @@
    "sources": "白板 貫穿全程；METHOD",
    "framework": "crossCutting.tpm",
    "verify": "每個節點記一次估計值並畫趨勢",
-   "note": "WP-A：@TpmTrend 可存各節點的值，右欄可填（MOD-35）；趨勢圖與自動檢查 tpmUpdatedPerGate 還沒做"
+   "note": "WP-A：@TpmTrend 可存各節點的值，右欄可填（MOD-35）；F 包：表格頁「TPM 追蹤」畫趨勢線與餘裕（TAB-17）。自動檢查 tpmUpdatedPerGate（每個節點都有更新）還沒做"
   },
   {
    "id": "HOME-01",
@@ -965,7 +965,6 @@
    "where": "模型頁",
    "api": "",
    "reads": [
-    "layout",
     "model"
    ],
    "writes": [],
@@ -973,7 +972,7 @@
    "sources": "TR-06",
    "framework": "",
    "verify": "下載檔案",
-   "note": "C＋D：名稱列「匯出 ▾」匯出目前這張層級圖或模型地圖（白底，配色同圖例）；審查報告改用層級圖留給工作包 G"
+   "note": "C＋D：名稱列「匯出 ▾」匯出目前這張層級圖或模型地圖（白底，配色同圖例）；G 包：改用 web/src/pages/model/svgString.ts 產生，和審查報告同一套"
   },
   {
    "id": "MOD-13",
@@ -996,7 +995,7 @@
   },
   {
    "id": "MOD-14",
-   "zh": "工具箱精簡（常用 7 顆＋更多）、新增按鈕在右欄最下方、名稱列「匯出 ▾」",
+   "zh": "新增按鈕在右欄最下方、區帶的「＋」、名稱列「匯出 ▾」（原工具箱已隨舊圖移除）",
    "area": "模型",
    "where": "模型頁",
    "api": "",
@@ -2126,7 +2125,7 @@
    "sources": "TR-06",
    "framework": "",
    "verify": "開啟、下載",
-   "note": "EDMS 格式是否完整未核對"
+   "note": "EDMS 格式是否完整未核對；G 包：網頁版的圖改用層級圖（2.3 第 1 層、3.1 模型地圖、3.2 第 2 層、4.1 系統層，附錄列各層層級圖）。Word 版仍只放「請見網頁版」的說明：docx 套件不能直接嵌 SVG，要轉 PNG 得另加點陣化套件（待 Mars 決定）"
   },
   {
    "id": "MGT-05",
@@ -2398,7 +2397,7 @@
    "sources": "TR-09",
    "framework": "",
    "verify": "Claude 能依 skill 操作",
-   "note": "WP6 #49：SKILL.md 依框架改寫"
+   "note": "WP6 #49：SKILL.md 依框架改寫；G 包：加說明性欄位的寫法（@DesignRationale、@Rejection、@CriterionScale、@TradeSensitivity、adjusted_、fixNote／#fix、releaseStatus、@TpmTrend）與層級圖的歸層規則"
   },
   {
    "id": "AI-02",

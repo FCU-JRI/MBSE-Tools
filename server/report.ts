@@ -1,5 +1,4 @@
 // 審查報告：依節點把模型內容組成一份文件，輸出成 Word（.docx）或可列印成 PDF 的網頁。
-import dagre from "@dagrejs/dagre";
 import { AlignmentType, Document, HeadingLevel, Packer, PageBreak, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import type { Analysis } from "./engine.ts";
 import type { Element } from "./extract.ts";
@@ -10,8 +9,9 @@ import { PRIORITY_ZH } from "./pm.ts";
 import type { Project } from "./projects.ts";
 import type { SimFile } from "./sim.ts";
 // 圖的資料與 SVG 繪製和前端共用同一份程式
-import { buildGraph, diagramsOf, frameLabel } from "../web/src/model.ts";
-import { toSvg } from "../web/src/exportSvg.ts";
+import { buildModel } from "../web/src/pages/model/views.ts";
+import { specFor } from "../web/src/pages/model/layout.ts";
+import { specToSvg } from "../web/src/pages/model/svgString.ts";
 
 interface Section { heading: string; level: 1 | 2; paragraphs: string[]; table?: { head: string[]; rows: string[][] }; svg?: string; breakBefore?: boolean }
 export interface Report { title: string; subtitle: string; meta: [string, string][]; sections: Section[] }
@@ -19,19 +19,11 @@ export interface Report { title: string; subtitle: string; meta: [string, string
 const METHOD: Record<string, string> = { "VerificationMethodKind::test": "測試", "VerificationMethodKind::analyze": "分析", "VerificationMethodKind::inspect": "檢查", "VerificationMethodKind::demo": "展示" };
 const STRUCTURAL = new Set(["System", "Subsystem", "Component", "ExternalEntity", "DesignAlternative"]);
 
-function diagramSvg(_title: string, a: Analysis, id: string): string | null {
-  const def = diagramsOf(a as any).find((d) => d.id === id || d.kind === id);
-  if (!def) return null;
-  const g = buildGraph(def, a as any);
-  if (g.nodes.length === 0) return null;
-  const dg = new dagre.graphlib.Graph();
-  dg.setGraph({ rankdir: g.direction, nodesep: 36, ranksep: 64 });
-  dg.setDefaultEdgeLabel(() => ({}));
-  for (const n of g.nodes) dg.setNode(n.id, { width: n.width, height: n.height });
-  for (const e of g.edges) if (e.source !== e.target) dg.setEdge(e.source, e.target);
-  dagre.layout(dg);
-  const placed = g.nodes.map((n) => { const p = dg.node(n.id); return { g: n, x: p.x - n.width / 2, y: p.y - n.height / 2 }; });
-  return toSvg(frameLabel(def), placed, g.edges);
+/** 審查報告的圖（G 包）：和模型頁同一套層級圖（模型地圖、第 1 層、第 2 層、各系統／次系統／元件）。k：map、L1、L2 或 p:<零件定義 id>。 */
+function layerSvg(project: Project, a: Analysis, k: string): string | null {
+  const M = buildModel({ project, analysis: a } as any);
+  const spec = specFor(M, k);
+  return spec && spec.nodes.length ? specToSvg(spec) : null;
 }
 
 export function buildReport(project: Project, a: Analysis, gates: GateStatus[], plan: Pm, sim: SimFile, gateId: string, commit: string): Report {
@@ -56,17 +48,16 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
   chapter("2　利害關係人與任務目標");
   add("2.1　利害關係人", [], { head: ["編號", "名稱", "角色與關注點", "相關期望"], rows: of("Stakeholder").map((e) => [e.shortName ?? "", e.name, e.attrs.role ?? "", ins(e, "trace")]) });
   add("2.2　期望、需要、目標、目的與效能量度", [], { head: ["編號", "類別", "名稱", "內容", "來源"], rows: of("Expectation", "Need", "Goal", "Objective", "MOE").map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "derive", "refine", "trace")]) });
-  add("2.3　使用案例", [], { head: ["編號", "名稱", "說明", "參與者"], rows: of("UseCase").map((e) => [e.shortName ?? "", e.name, e.doc, outs(e, "trace")]) }, { svg: diagramSvg(project.name, a, "uc") ?? undefined });
+  add("2.3　使用案例", [], { head: ["編號", "名稱", "說明", "參與者"], rows: of("UseCase").map((e) => [e.shortName ?? "", e.name, e.doc, outs(e, "trace")]) }, { svg: layerSvg(project, a, "L1") ?? undefined });
 
   chapter("3　系統架構");
-  add("3.1　結構分解", [], { head: ["類別", "編號", "名稱", "說明", "屬性"], rows: of("System", "Subsystem", "Component", "ExternalEntity").map((e) => [zh(e), e.shortName ?? "", e.name, e.doc, a.elements.filter((x) => x.owner === e.id && x.kind === "AttributeUsage").map((x) => x.name + (x.tags.includes("TPM") ? "（TPM）" : "")).join("、")]) }, { svg: diagramSvg(project.name, a, "bdd") ?? undefined });
-  add("3.2　任務階段與功能", [], { head: ["類別", "編號", "名稱", "下一步", "分配給"], rows: of("MissionPhase", "Function").map((e) => [zh(e), e.shortName ?? "", e.name, outs(e, "succession"), outs(e, "allocate")]) }, { svg: diagramSvg(project.name, a, "act") ?? undefined });
-  const stm = diagramSvg(project.name, a, "stm");
-  if (stm) S.push({ heading: "3.3　模式與狀態", level: 2, paragraphs: [], svg: stm });
+  add("3.1　結構分解", [], { head: ["類別", "編號", "名稱", "說明", "屬性"], rows: of("System", "Subsystem", "Component", "ExternalEntity").map((e) => [zh(e), e.shortName ?? "", e.name, e.doc, a.elements.filter((x) => x.owner === e.id && x.kind === "AttributeUsage").map((x) => x.name + (x.tags.includes("TPM") ? "（TPM）" : "")).join("、")]) }, { svg: layerSvg(project, a, "map") ?? undefined });
+  add("3.2　任務階段與功能", [], { head: ["類別", "編號", "名稱", "下一步", "分配給"], rows: of("MissionPhase", "Function").map((e) => [zh(e), e.shortName ?? "", e.name, outs(e, "succession"), outs(e, "allocate")]) }, { svg: layerSvg(project, a, "L2") ?? undefined });
+  // 模式與狀態畫在第 2 層的層級圖裡（3.2 的圖），不另外出圖
 
   chapter("4　需求與驗證");
   const reqs = of("MissionRequirement", "SystemRequirement", "SubsystemRequirement", "ComponentRequirement", "MOP");
-  add("4.1　需求表", [], { head: ["編號", "層級", "名稱", "需求內容", "衍生自", "滿足者", "計算判定"], rows: reqs.map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "derive", "refine", "trace"), ins(e, "satisfy"), verdict(e)]) }, { svg: diagramSvg(project.name, a, "req") ?? undefined });
+  add("4.1　需求表", [], { head: ["編號", "層級", "名稱", "需求內容", "衍生自", "滿足者", "計算判定"], rows: reqs.map((e) => [e.shortName ?? "", zh(e), e.name, e.doc, outs(e, "derive", "refine", "trace"), ins(e, "satisfy"), verdict(e)]) }, { svg: (() => { const M = buildModel({ project, analysis: a } as any); const sys = M.views.find((v) => v.layer === 3); return sys ? layerSvg(project, a, sys.k) ?? undefined : undefined; })() });
   const rvm: string[][] = [];
   for (const r of reqs) {
     const ev = a.relations.filter((x) => x.kind === "verify" && x.to === r.id).map((x) => byId.get(x.from)).filter((x): x is Element => !!x);
@@ -89,6 +80,14 @@ export function buildReport(project: Project, a: Analysis, gates: GateStatus[], 
   chapter("6　時程與成本");
   add("6.1　時程", [], { head: ["ID", "任務", "優先級", "責任工程師", "開始", "結束", "相依", "狀態"], rows: plan.tasks.map((t) => [t.id, t.title, `${t.priority} ${PRIORITY_ZH[t.priority]}`, t.re, t.start, t.end, t.deps.join("、"), t.done ? "完成" : t.end < new Date().toISOString().slice(0, 10) ? "逾期" : "進行中"]) });
   add("6.2　成本", [`預算合計 ${plan.costs.reduce((s, c) => s + c.planned, 0).toLocaleString("zh-TW")} 元，實支合計 ${plan.costs.reduce((s, c) => s + c.actual, 0).toLocaleString("zh-TW")} 元。`], { head: ["次系統", "項目", "預算", "實支", "狀態"], rows: plan.costs.map((c) => [c.subsystem, c.item, c.planned.toLocaleString("zh-TW"), c.actual.toLocaleString("zh-TW"), c.status]) });
+
+  // 附錄：各層層級圖（系統以下每張；和模型頁同一套固定區帶的圖）
+  const LM = buildModel({ project, analysis: a } as any);
+  chapter("附錄　各層層級圖", ["和模型頁的層級圖相同：白＝上一層給的、綠＝本層建構、黃＝往下一層的產出、藍虛線＝工具產生的表；橘虛線是風險回頭修正，紅線是介面兩端不一致。"]);
+  for (const v of LM.views.filter((x) => x.layer >= 3)) {
+    const svg = layerSvg(project, a, v.k);
+    if (svg) S.push({ heading: v.title.replace(/\s+/g, " "), level: 2, paragraphs: [], svg });
+  }
 
   // 沒有任何小節的章不印
   const sections = S.filter((s, i) => s.level === 2 || s.paragraphs.length > 0 || S[i + 1]?.level === 2);
@@ -144,7 +143,7 @@ export async function renderDocx(r: Report): Promise<Buffer> {
     if (s.breakBefore) children.push(new Paragraph({ children: [new PageBreak()] }));
     children.push(new Paragraph({ heading: s.level === 1 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2, spacing: { before: 240, after: 120 }, children: [run(s.heading, { bold: true, size: s.level === 1 ? 30 : 24 })] }));
     for (const p of s.paragraphs) children.push(new Paragraph({ spacing: { after: 80 }, children: [run(p)] }));
-    if (s.svg) children.push(new Paragraph({ spacing: { after: 80 }, children: [run("（本節的圖請見網頁版或 PDF 版報告。）", { color: "777777", size: 18 })] }));
+    if (s.svg) children.push(new Paragraph({ spacing: { after: 80 }, children: [run("（本節的層級圖請見網頁版或 PDF 版報告；也可在模型頁用「匯出 ▾」存成 SVG／PNG 再貼入。）", { color: "777777", size: 18 })] }));
     if (s.table) {
       const cell = (text: string, head: boolean) => new TableCell({ shading: head ? { fill: "EEEEEE" } : undefined, margins: { top: 50, bottom: 50, left: 80, right: 80 }, children: (text || " ").split("\n").map((line) => new Paragraph({ alignment: AlignmentType.LEFT, children: [run(line, { bold: head, size: 18 })] })) });
       children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ tableHeader: true, children: s.table.head.map((h) => cell(h, true)) }), ...s.table.rows.map((row) => new TableRow({ children: row.map((c) => cell(c, false)) }))] }));

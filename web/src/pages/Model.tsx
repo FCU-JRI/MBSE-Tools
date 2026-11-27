@@ -14,7 +14,9 @@ import type { Model } from "./model/views.ts";
 import { specFor, viewStats } from "./model/layout.ts";
 import type { Add, Go, Live } from "./model/layout.ts";
 import { fwOf } from "../Process.tsx";
-import { LayerDiagram, svgForExport } from "./model/LayerDiagram.tsx";
+import { LayerDiagram } from "./model/LayerDiagram.tsx";
+import { specToSvg } from "./model/svgString.ts";
+import type { Spec } from "./model/layout.ts";
 import { ProductTree } from "./model/ProductTree.tsx";
 import { ElementPage } from "./model/ElementPage.tsx";
 import "./model.css";
@@ -89,7 +91,7 @@ export function ModelPage(p: PageProps) {
           <button className="tbtn" disabled={busy || !view.history?.undo} onClick={() => step("undo")} title="回到上一步（對模型的修改），Ctrl+Z">↶ 復原</button>
           <button className="tbtn" disabled={busy || !view.history?.redo} onClick={() => step("redo")} title="把剛才復原的那一步做回來，Ctrl+Y">↷ 重做</button>
         </>}
-        {spec && <ExportMenu svg={svgRef} name={title} />}
+        {spec && <ExportMenu spec={spec} name={title} />}
         <button className="tbtn" aria-pressed={source} onClick={() => p.setSpot({ source: !source })} title="SysML v2 文字原始碼">{"</>"} 原始碼</button>
       </div>
       <div className={`model-main ${source ? "with-source" : ""}`}>
@@ -151,7 +153,7 @@ function Legend() {
 }
 
 /** 名稱列的「匯出 ▾」：目前這張層級圖存成 SVG 或 PNG（MOD-12），白底、配色同圖例。 */
-function ExportMenu({ svg, name }: { svg: RefObject<SVGSVGElement | null>; name: string }) {
+function ExportMenu({ spec, name }: { spec: Spec; name: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -161,7 +163,7 @@ function ExportMenu({ svg, name }: { svg: RefObject<SVGSVGElement | null>; name:
     return () => window.removeEventListener("mousedown", close);
   }, [open]);
   const file = name.replace(/[\\/:*?"<>|\s]+/g, "_") || "層級圖";
-  const run = (kind: "svg" | "png") => { setOpen(false); if (!svg.current) return; const s = svgForExport(svg.current); void (kind === "svg" ? downloadSvg(s, file) : downloadPng(s, file)); };
+  const run = (kind: "svg" | "png") => { setOpen(false); const s = specToSvg(spec, { xml: true }); void (kind === "svg" ? downloadSvg(s, file) : downloadPng(s, file)); };
   return (
     <div className="export-menu" ref={ref}>
       <button className="tbtn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="把這張層級圖匯出成檔案，放進審查報告">匯出 ▾</button>
