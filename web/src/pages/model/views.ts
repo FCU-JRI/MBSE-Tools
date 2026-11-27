@@ -73,7 +73,8 @@ export function buildModel(view: View): Model {
   const layerOf = (id: string, n = 0): number => { const p = parentOf.get(id); return p && n < 20 ? Math.min(5, layerOf(p, n + 1) + 1) : CAT_LAYER[byId.get(id)?.category ?? ""] ?? 5; };
   for (const u of U.values()) if (u.kind === "part") u.layer = layerOf(u.id);
 
-  const satisfier = (reqId: string) => inn(reqId, ["satisfy"]).map((r) => r.from).find((f) => defIds.has(f)) ?? null;
+  // 滿足者：定義本身，或 satisfy … by 實例路徑 指到的零件用法（順著型別對到定義）
+  const satisfier = (reqId: string) => inn(reqId, ["satisfy"]).map((r) => r.from).map((f) => (defIds.has(f) ? f : byId.get(f)?.typeIds.find((t) => defIds.has(t)))).find((f): f is string => !!f) ?? null;
   const ports = els.filter((e) => e.kind === "PortUsage" && e.shortName);
   for (const e of els) {
     const c = e.category ?? "";

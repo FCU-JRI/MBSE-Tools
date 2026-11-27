@@ -11,6 +11,8 @@ export interface Block { name: string; sub: string; hi: boolean }
 export interface DNode {
   id: string; x: number; y: number; w: number; h?: number; hfix?: number; kw?: string; name: string; lines: string[]; tone: Tone;
   def?: boolean; frame?: boolean; badge?: [string, string] | null; blocks?: Block[]; caption?: string[]; go?: Go; el?: string;
+  /** 設計示意這一版的 CAD（@CadLink）：圖片網址就畫縮圖，其他給連結 */
+  cad?: { url: string; version: string; image: boolean };
 }
 export interface DEdge {
   f?: string; t?: string; fs?: Side; ts?: Side; fo?: number; to?: number; k: "rel" | "flow" | "derive" | "trace" | "fb" | "comp" | "iface" | "satisfy" | "dep";
@@ -99,7 +101,14 @@ function grid(items: U[], x0: number, y0: number, cols: number, w: number, gx: n
   return { nodes, bottom: items.length ? y - gy : y0 };
 }
 
-interface Ctx { owner?: string; blocks?: () => { id: string; sn: string; name: string; sub: string }[] }
+/** 伺服器算的真值（E 包）：計算引擎的質量預算（ANA-11）與需求判定（ANA-09）、版本紀錄（VER-06）、專案的 FMEA 門檻（PRJ-05）。沒有時退回只用模型值。 */
+export interface Live {
+  budget: { element: string; name: string; limitKg: number; sumKg: number; marginKg: number; status: "PASS" | "FAIL"; items: { name: string; massKg: number | null }[] }[];
+  verdicts: { qualifiedName: string; requirement: string; condition: string; status: "holds" | "fails" | "undecided"; terms: { attribute: string; op: string; threshold: string; value: number | null; unit: string; margin: number | null }[]; note: string }[];
+  iterations: { commit: string; date: string; author: string; message: string; touched: string[]; cad: { part: string; url: string; version: string }[]; marked: boolean }[];
+  fmeaThreshold: number | null;
+}
+interface Ctx { owner?: string; blocks?: () => { id: string; sn: string; name: string; sub: string }[]; live?: Live | null }
 /** 設計迴圈帶：方案 → 比較表 → 風險（回頭修正用橘虛線）→ 決策 → TPM；下半排是設計示意與計算 */
 function loopBand(M: Model, y0: number, els: U[], ctx: Ctx) {
   const alt = els.find((e) => e.kind === "alt"), trade = els.find((e) => e.kind === "trade" && e.alt === alt?.id) ?? els.find((e) => e.kind === "trade");
@@ -135,7 +144,7 @@ function loopBand(M: Model, y0: number, els: U[], ctx: Ctx) {
   return { nodes, edges, bottom: Math.max(bottom, R2.bottom), dec: nD, adopt: R2.adopt ?? nD };
 }
 
-/** 迴圈下半排：每一輪的設計示意（初始提案＋每個回頭修正的風險各一版），加上帶入模型值的計算。E 包會改成版本紀錄與計算引擎的真值。 */
+/** 迴圈下半排：每一輪的設計示意，加上計算框。有版本紀錄時一次提交一版（E 包）；沒有時退回「初始提案＋每個回頭修正的風險各一版」的方塊配置圖。 */
 function designRow(M: Model, y: number, els: U[], ctx: Ctx, k: { nT: DNode | null; nD: DNode | null; risks: DNode[] }) {
   const nodes: DNode[] = [], edges: DEdge[] = [];
   const alt = els.find((e) => e.kind === "alt");
@@ -144,22 +153,39 @@ function designRow(M: Model, y: number, els: U[], ctx: Ctx, k: { nT: DNode | nul
   const base = ctx.blocks();
   const hit = (txt: string, b: { sn: string; name: string }) => !!txt && ((!!b.sn && txt.includes(b.sn)) || (b.name.length >= 2 && txt.includes(b.name)));
   const fixes = els.filter((e) => e.kind === "risk" && fixApplies(e));
-  const its = [{ id: "it0", ver: "v1", title: "初始提案", cap: picked ? "選定 " + picked : "還沒有選定", txt: "", go: { el: alt.el.id } as Go, rid: "" }]
-    .concat(fixes.map((r, i) => ({ id: `it${i + 1}`, ver: `v${i + 2}`, title: `${label(r)}修正後`, cap: r.fix, txt: r.fix, go: { el: r.el.id } as Go, rid: r.sn })));
+  // 有版本紀錄就用它（E 包）：改到本層定義或組成零件的提交，各一版（最近 5 版）；這一版改到的零件、#fix 的目標用橘框；有 CAD 就附連結或縮圖
+  const owner = ctx.owner ? M.U.get(ctx.owner) : undefined;
+  const keys = (u: { sn: string; name: string }) => [u.sn, u.name].filter(Boolean);
+  const fixTargets = new Set(M.list.filter((r) => r.kind === "risk" && fixApplies(r)).flatMap((r) => r.targets));
+  // 只算兩種提交（Mars 2026-11-27）：寫入了本層定義或組成零件的 CAD 版本（@CadLink），或修改說明以「設計：」開頭且改到本層
+  const layerKeys = owner ? [owner, ...owner.kids.map((c) => M.U.get(c)!).filter(Boolean)].flatMap(keys) : [];
+  const mine = owner && ctx.live ? ctx.live.iterations.filter((it) => it.cad.some((c) => layerKeys.includes(c.part)) || (it.marked && it.touched.some((k) => layerKeys.includes(k)))).slice(-5) : [];
+  type It = { id: string; ver: string; title: string; cap: string; touched: string[]; go: Go; rid: string; cad?: { url: string; version: string } };
+  const its: It[] = mine.length
+    ? mine.map((it, i) => ({ id: `it${i}`, ver: `v${i + 1}`, title: `${it.date.slice(0, 10)} ${it.commit}`, cap: it.message, touched: it.touched, go: { el: owner!.el.id } as Go, rid: it.commit,
+        cad: it.cad.filter((c) => layerKeys.includes(c.part)).pop() }))
+    : [{ id: "it0", ver: "v1", title: "初始提案", cap: picked ? "選定 " + picked : "還沒有選定", touched: [], go: { el: alt.el.id } as Go, rid: "" },
+      ...fixes.map((r, i) => ({ id: `it${i + 1}`, ver: `v${i + 2}`, title: `${label(r)}修正後`, cap: r.fix, touched: [] as string[], go: { el: r.el.id } as Go, rid: r.sn, txt: r.fix }))];
+  // 目前這一版的 CAD：本層定義上的 @CadLink（沒有就看版本紀錄裡最後寫入的）
+  const curCad = owner?.el.attrs.cadUrl ? { url: owner.el.attrs.cadUrl, version: owner.el.attrs.cadVersion ?? "" } : undefined;
+  if (its.length && curCad) its[its.length - 1].cad = curCad;
   const calcW = 400, avail = 1185 - 24 - calcW - 40, n = its.length, gap = 22;
   const w = Math.min(250, (avail - (n - 1) * gap) / n), cols = w < 200 ? 2 : 3, rows = Math.max(1, Math.ceil(base.length / cols));
-  const caps = its.map((it) => wrap(it.cap, w, 3)), capN = Math.max(...caps.map((c) => c.length));
+  const caps = its.map((it) => [...wrap(it.cap, w, it.cad ? 2 : 3), ...(it.cad ? [clip(`CAD ${it.cad.version}`, w)] : [])]), capN = Math.max(...caps.map((c) => c.length));
   const h = 34 + 10 + rows * 36 + 10 + capN * 14 + 4;
   its.forEach((it, i) => {
     const last = i === n - 1;
-    nodes.push({ id: it.id, x: 24 + i * (w + gap), y, w, hfix: h, kw: `設計示意 ${it.ver}${last ? "（目前）" : ""}`, name: it.title, lines: [],
-      blocks: base.map((b) => ({ name: b.name, sub: last ? b.sub : "", hi: hit(it.txt, b) })), caption: caps[i], tone: last ? "build" : "in", go: it.go });
+    const txt = (it as It & { txt?: string }).txt ?? "";
+    const changed = (b: { id: string; sn: string; name: string }) => keys(b).some((k) => it.touched.includes(k)) || (mine.length > 0 && fixTargets.has(b.id) && keys(b).some((k) => it.touched.includes(k))) || hit(txt, b);
+    nodes.push({ id: it.id, x: 24 + i * (w + gap), y, w, hfix: h, kw: `設計示意 ${it.ver}${last ? "（目前）" : ""}${mine.length ? "・版本紀錄" : ""}`, name: it.title, lines: [],
+      blocks: base.map((b) => ({ name: b.name, sub: last ? b.sub : "", hi: changed(b) })), caption: caps[i], tone: last ? "build" : "in", go: it.go,
+      ...(it.cad ? { cad: { ...it.cad, image: /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(it.cad.url) } } : {}) });
     if (i) edges.push({ f: its[i - 1].id, fs: "r", t: it.id, ts: "l", k: "flow", label: it.rid });
   });
   const rowsC = calcRows(M, els, ctx);
   const cl = rowsC.flatMap((r) => [clip(r.t + (r.ok === true ? "　✓" : r.ok === false ? "　✗" : ""), calcW), ...wrap(r.s, calcW, 2).map((s) => "$ " + s)]);
   const bad = rowsC.some((r) => r.ok === false);
-  const cn: DNode = { id: "calc", x: 1185 - calcW, y, w: calcW, kw: "«calc» 計算（帶入模型值）", name: "計算與判定", lines: cl, tone: "build", badge: rowsC.length ? (bad ? ["有不符合", "bad"] : ["全部符合", "ok"]) : null, go: { table: "formula" } };
+  const cn: DNode = { id: "calc", x: 1185 - calcW, y, w: calcW, kw: ctx.live ? "«calc» 計算（計算引擎＋模型值）" : "«calc» 計算（帶入模型值）", name: "計算與判定", lines: cl, tone: "build", badge: rowsC.length ? (bad ? ["有不符合", "bad"] : ["全部符合", "ok"]) : null, go: { table: "formula" } };
   nodes.push(cn);
   const src = k.risks.length ? k.risks[k.risks.length - 1] : k.nT;
   if (src) edges.push({ f: src.id, fs: "b", t: "it0", ts: "t", k: "rel", label: "是否解決 → CAD／示意", my: y - 28 });
@@ -172,11 +198,17 @@ function designRow(M: Model, y: number, els: U[], ctx: Ctx, k: { nT: DNode | nul
 export function calcRows(M: Model, els: U[], ctx: Ctx): { t: string; s: string; ok?: boolean }[] {
   const out: { t: string; s: string; ok?: boolean }[] = [];
   const o = ctx.owner ? M.U.get(ctx.owner) : undefined;
-  if (o) {
+  // 質量預算：計算引擎（ANA-11）對頂層實例算出的那一列；用組成零件的名稱對到本層的定義
+  const usageNames = o ? M.list.filter((x) => x.kind === "part" && o.kids.includes(x.id)).map((x) => x.name) : [];
+  const brow = o && ctx.live ? ctx.live.budget.map((r) => ({ r, hit: r.items.filter((i) => usageNames.includes(i.name)).length })).filter((x) => x.hit > 0).sort((a, b) => b.hit - a.hit)[0]?.r : undefined;
+  if (o && brow) {
+    const items = brow.items.filter((i) => i.massKg != null);
+    out.push({ t: `質量 Σ m(子零件) ≤ m 配額（${o.name}，計算引擎）`, s: `${items.map((i) => (i.massKg ?? 0).toFixed(2)).join(" + ")} = ${brow.sumKg.toFixed(2)} kg ≤ ${+brow.limitKg.toFixed(3)} kg（餘裕 ${brow.marginKg.toFixed(2)}）`, ok: brow.status === "PASS" });
+  } else if (o) {
     const ks = o.kids.map((k) => M.U.get(k)!).filter((k) => k && k.mass != null);
     if (ks.length) {
       const sum = ks.reduce((a, c) => a + (c.mass ?? 0), 0), ok = o.alloc == null || sum <= o.alloc + 1e-9;
-      out.push({ t: `質量 m(${o.name}) = Σ 子零件 ≤ 配額`, s: `${ks.map((c) => (c.mass ?? 0).toFixed(2)).join(" + ")} = ${sum.toFixed(2)} kg ≤ ${fmt(o.alloc)}${o.alloc != null ? `（餘裕 ${(o.alloc - sum).toFixed(2)}）` : ""}`, ok });
+      out.push({ t: `質量 m(${o.name}) = Σ 子零件 ≤ 配額（模型值）`, s: `${ks.map((c) => (c.mass ?? 0).toFixed(2)).join(" + ")} = ${sum.toFixed(2)} kg ≤ ${fmt(o.alloc)}${o.alloc != null ? `（餘裕 ${(o.alloc - sum).toFixed(2)}）` : ""}`, ok });
     }
   }
   for (const t of els.filter((e) => e.kind === "trade")) {
@@ -186,9 +218,18 @@ export function calcRows(M: Model, els: U[], ctx: Ctx): { t: string; s: string; 
     const others = t.variants.filter((v) => v !== pick).map(tot), lead = others.length ? tot(pick) - Math.max(...others) : null;
     out.push({ t: `${label(t)}加權總分 Σ wᵢ·sᵢ（${pick.name}）`, s: `${t.crit.map((c) => `${c.w}×${pick.adj[c.id] ?? pick.scores[c.id] ?? 0}`).join(" + ")} = ${fmt(tot(pick))}${lead != null ? `，領先第二名 ${fmt(lead)}` : ""}`, ok: lead == null ? undefined : lead > 0 });
   }
+  // 需求判定：計算引擎對 require constraint 求值（ANA-09），每項寫 條件 → 帶入值 → 餘裕
+  const reqQn = new Set(els.filter((e) => e.kind === "req").map((e) => e.el.qualifiedName));
+  for (const v of ctx.live?.verdicts ?? []) {
+    if (!reqQn.has(v.qualifiedName)) continue;
+    const terms = v.terms.map((t) => `${t.attribute} = ${t.value ?? "?"}${t.unit ? " " + t.unit : ""}（${t.op} ${t.threshold}${t.margin != null ? `，餘裕 ${+t.margin.toFixed(3)}` : ""}）`).join("；");
+    out.push({ t: `${v.requirement} ${v.condition}`, s: terms || v.note || "條件寫法較複雜，只顯示判定結果", ok: v.status === "holds" ? true : v.status === "fails" ? false : undefined });
+  }
+  // 殘餘風險門檻讀專案設定（PRJ-05）
+  const thr = ctx.live?.fmeaThreshold ?? 4, thrZh = ctx.live?.fmeaThreshold != null ? "專案設定" : "預設";
   for (const r of els.filter((e) => e.kind === "risk")) {
     const s0 = score(r.L, r.C), s1 = score(r.L2, r.C2);
-    out.push({ t: `${label(r)}風險分數 L×C（殘餘門檻 ≤ 4）`, s: `${r.L ?? "?"}×${r.C ?? "?"} = ${s0 ?? "?"} → ${s1 == null ? "緩解後待重評" : `${r.L2}×${r.C2} = ${s1}`}`, ok: s1 == null ? undefined : s1 <= 4 });
+    out.push({ t: `${label(r)}風險分數 L×C（殘餘門檻 ≤ ${thr}，${thrZh}）`, s: `${r.L ?? "?"}×${r.C ?? "?"} = ${s0 ?? "?"} → ${s1 == null ? "緩解後待重評" : `${r.L2}×${r.C2} = ${s1}`}`, ok: s1 == null ? undefined : s1 <= thr });
   }
   for (const t of els.filter((e) => e.kind === "tpm")) {
     const cur = t.vals[t.vals.length - 1]?.v; if (cur == null || t.thr == null) continue;
@@ -257,11 +298,11 @@ export function specL1(M: Model): Spec {
 }
 
 /** 第 2 層：設計迴圈＋剖面節點＋模式 */
-export function specL2(M: Model): Spec {
+export function specL2(M: Model, live: Live | null = null): Spec {
   const els = M.inView("L2"), nodes: DNode[] = [], edges: DEdge[] = [];
   const mrs = M.list.filter((e) => e.kind === "req" && e.layer === 1);
   const acts = els.filter((e) => e.kind === "action").sort((a, b) => a.seq - b.seq);
-  const L = loopBand(M, 45, els, { blocks: () => acts.map((a) => ({ id: a.id, sn: a.sn, name: `${label(a)}${a.name}`, sub: "" })) });
+  const L = loopBand(M, 45, els, { live, blocks: () => acts.map((a) => ({ id: a.id, sn: a.sn, name: `${label(a)}${a.name}`, sub: "" })) });
   nodes.push(...L.nodes); edges.push(...L.edges);
   const inp: DNode = { id: "in", x: 835, y: L.nodes.some((n) => n.id === "tpm") ? 160 : 45, w: 190, kw: "上一層", name: "任務需求", lines: mrs.map((m) => clip(`${label(m)}${m.text || m.name}`, 190)), tone: "in", go: { view: "L1" } };
   nodes.push(inp);
@@ -292,7 +333,7 @@ export function specL2(M: Model): Spec {
 }
 
 /** 第 3–5 層：需求帶＋設計迴圈帶＋架構帶 */
-export function specArch(M: Model, k: string): Spec {
+export function specArch(M: Model, k: string, live: Live | null = null): Spec {
   const v = M.V.get(k)!, els = M.inView(k), nodes: DNode[] = [], edges: DEdge[] = [];
   const reqs = els.filter((e) => e.kind === "req");
   const up = [...new Set(reqs.flatMap((r) => r.from))].filter((id) => M.viewOf.get(id) !== k);
@@ -305,7 +346,7 @@ export function specArch(M: Model, k: string): Spec {
   nodes.push(...G.nodes);
   if (G.nodes[0]) edges.push({ f: G.nodes[0].id, fs: "l", fo: 0.4, t: "in", ts: "r", to: 0.3, k: "derive", label: "«derive»" });
   const rb = Math.max(G.bottom, inp.y + nodeH(inp)) + 20;
-  const L = loopBand(M, rb + 40, els, { owner: v.owner!, blocks: () => ow.kids.map((c) => M.U.get(c)!).filter(Boolean).map((c) => ({ id: c.id, sn: c.sn, name: c.name, sub: c.mass != null ? c.mass.toFixed(2) + " kg" : "" })) });
+  const L = loopBand(M, rb + 40, els, { owner: v.owner!, live, blocks: () => ow.kids.map((c) => M.U.get(c)!).filter(Boolean).map((c) => ({ id: c.id, sn: c.sn, name: c.name, sub: c.mass != null ? c.mass.toFixed(2) + " kg" : "" })) });
   nodes.push(...L.nodes); edges.push(...L.edges);
   const lb = L.bottom + 24;
   const A = archBand(M, lb + 50, v.owner!, L.dec, els.filter((e) => e.kind === "iface"), L.adopt);
@@ -359,9 +400,9 @@ export function specMap(M: Model): Spec {
   return { label: "模型地圖", nodes, edges, heads };
 }
 
-export function specFor(M: Model, k: string): Spec | null {
+export function specFor(M: Model, k: string, live: Live | null = null): Spec | null {
   if (k === "map") return specMap(M);
   if (k === "L1") return specL1(M);
-  if (k === "L2") return specL2(M);
-  return M.V.has(k) ? specArch(M, k) : null;
+  if (k === "L2") return specL2(M, live);
+  return M.V.has(k) ? specArch(M, k, live) : null;
 }

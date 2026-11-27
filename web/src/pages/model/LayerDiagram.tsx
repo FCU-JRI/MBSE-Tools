@@ -38,10 +38,16 @@ function Blocks({ n, h }: { n: DNode; h: number }) {
   const blocks = n.blocks ?? [], cap = n.caption ?? [];
   const sy = n.y + 34, cols = n.w < 200 ? 2 : 3, gap = 6, bw = (n.w - 20 - (cols - 1) * gap) / cols, bh = 30;
   const cy = n.y + h - 10 - (cap.length - 1) * 14;
+  const frameH = Math.ceil(Math.max(1, blocks.length) / cols) * (bh + gap) + 6;
+  const safe = (u: string) => (/^https?:\/\//i.test(u) ? u : null); // 只接受 http(s) 連結
+  const cadUrl = n.cad ? safe(n.cad.url) : null;
   return <>
     <line x1={n.x} x2={n.x + n.w} y1={sy} y2={sy} className="sep" />
-    <rect x={n.x + 6} y={sy + 6} width={n.w - 12} height={Math.ceil(Math.max(1, blocks.length) / cols) * (bh + gap) + 6} rx={2} className="sk-frame" />
-    {blocks.map((b, i) => {
+    <rect x={n.x + 6} y={sy + 6} width={n.w - 12} height={frameH} rx={2} className="sk-frame" />
+    {/* 有 CAD 圖片就畫縮圖（取代方塊配置圖）；其他 CAD 連結在右上角給「開啟 CAD ↗」 */}
+    {cadUrl && n.cad!.image && <image href={cadUrl} x={n.x + 8} y={sy + 8} width={n.w - 16} height={frameH - 4} preserveAspectRatio="xMidYMid meet" />}
+    {cadUrl && <a href={cadUrl} target="_blank" rel="noopener noreferrer" data-export="skip" onClick={(e) => e.stopPropagation()}><text x={n.x + n.w - 8} y={n.y + 27} className="ld-cad" textAnchor="end">開啟 CAD ↗</text></a>}
+    {!(cadUrl && n.cad!.image) && blocks.map((b, i) => {
       const bx = n.x + 10 + (i % cols) * (bw + gap), by = sy + 10 + Math.floor(i / cols) * (bh + gap);
       return <g key={i}><rect x={bx} y={by} width={bw} height={bh} rx={3} className={b.hi ? "sk-hi" : "sk-b"} />
         <text x={bx + bw / 2} y={by + 13} className="sk-t" textAnchor="middle">{clip(b.name, bw + 8)}</text>

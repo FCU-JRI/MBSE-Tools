@@ -3,6 +3,7 @@ import * as store from "../projects.ts";
 import * as auth from "../auth.ts";
 import * as versions from "../versions.ts";
 import * as reviews from "../reviews.ts";
+import { iterations } from "../iterations.ts";
 import { wrap, author, pid, view, admin, me } from "./common.ts";
 
 /** 版本：GitHub 同步、分支審查、基線比較 */
@@ -36,4 +37,6 @@ export function mount(app: Express): void {
   app.get("/api/projects/:id/compare", wrap(async (req, res) => res.json(await versions.compare(pid(req), String(req.query.from ?? ""), String(req.query.to ?? "")))));
 
   app.get("/api/projects/:id/history", wrap(async (req, res) => res.json(await store.history(pid(req)))));
+  // 迴圈旁的設計示意（E 包）：每次提交改到哪些零件定義、寫入的 CAD 版本
+  app.get("/api/projects/:id/iterations", wrap(async (req, res) => res.json({ iterations: await iterations(pid(req)) })));
 }

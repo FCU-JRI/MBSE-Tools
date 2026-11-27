@@ -12,7 +12,8 @@ import { downloadPng, downloadSvg } from "../download.ts";
 import { buildModel } from "./model/views.ts";
 import type { Model } from "./model/views.ts";
 import { specFor, viewStats } from "./model/layout.ts";
-import type { Add, Go } from "./model/layout.ts";
+import type { Add, Go, Live } from "./model/layout.ts";
+import { fwOf } from "../Process.tsx";
 import { LayerDiagram, svgForExport } from "./model/LayerDiagram.tsx";
 import { ProductTree } from "./model/ProductTree.tsx";
 import { ElementPage } from "./model/ElementPage.tsx";
@@ -34,6 +35,19 @@ export function ModelPage(p: PageProps) {
   const source = p.spot.source;
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [busy, setBusy] = useState(false);
+  // 迴圈下半排的真值（E 包）：計算引擎的質量預算與需求判定、版本紀錄；模型一變就重抓。抓不到時圖照樣畫，只用模型值。
+  const [live, setLive] = useState<Live | null>(null);
+  const fmeaThreshold = fwOf(view)?.settings.fmeaThreshold ?? null;
+  useEffect(() => {
+    let off = false;
+    if (!view.analysis.ok) { setLive(null); return; }
+    Promise.all([
+      api<{ rows: Live["budget"] }>(`/projects/${id}/calc/budget`).then((r) => r.rows ?? []).catch(() => []),
+      api<{ rows: Live["verdicts"] }>(`/projects/${id}/calc/verdicts`).then((r) => r.rows ?? []).catch(() => []),
+      api<{ iterations: Live["iterations"] }>(`/projects/${id}/iterations`).then((r) => r.iterations ?? []).catch(() => []),
+    ]).then(([budget, verdicts, iterations]) => { if (!off) setLive({ budget, verdicts, iterations, fmeaThreshold }); });
+    return () => { off = true; };
+  }, [id, view, fmeaThreshold]);
 
   const onGo = (g: Go) => {
     if ("view" in g) open(g.view);
@@ -62,7 +76,7 @@ export function ModelPage(p: PageProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const spec = k.startsWith("e:") ? null : specFor(M, k);
+  const spec = k.startsWith("e:") ? null : specFor(M, k, live);
   const title = k === "map" ? "模型地圖" : k.startsWith("e:") ? M.U.get(k.slice(2))?.name ?? "" : M.V.get(k)?.title ?? "";
   const left = <ProductTree M={M} current={k} onView={open} onElement={openElement} />;
   return (
