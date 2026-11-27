@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { buildModel, holdScope } from "./pages/model/views.ts";
 import type { FormEvent } from "react";
 import { api } from "./api.ts";
 import type { Category, Element, Meta, MetaSpec, View } from "./api.ts";
@@ -668,12 +669,13 @@ function MetaForm({ pid, spec, el, busy, call, title }: { pid: string; spec: Met
   );
 }
 
-/** 喊卡中的設計決策（server/framework.ts 的 holdDecisions，只警告）：在該決策與下一層（有卡點的類別）的元素上顯示。 */
+/** 喊卡中的設計決策（server/framework.ts 的 holdDecisions，只警告）：在該決策本身，以及它所在的層與更下層（同一棵子樹）的元素上顯示。 */
 function HoldNotes({ view, el }: { view: View; el: Element }) {
-  const fw = (view as View & { framework?: { holdDecisions?: { id: string; text: string }[]; holdPoints?: { category: string }[] } | null }).framework;
-  const all = fw?.holdDecisions ?? [];
-  const nextLayer = !!el.category && (fw?.holdPoints ?? []).some((h) => h.category === el.category);
-  const shown = all.filter((d) => d.id === el.id || nextLayer);
+  const fw = (view as View & { framework?: { holdDecisions?: { id: string; text: string }[] } | null }).framework;
+  const M = useMemo(() => buildModel(view), [view]);
+  // 只列同一棵子樹的喊卡決策（Mars 2026-11-27）：決策所在的層是這個元素所在的層，或在它的上層鏈上
+  const ids = new Set(holdScope(M, el.id));
+  const shown = (fw?.holdDecisions ?? []).filter((d) => d.id === el.id || ids.has(d.id));
   if (!shown.length) return null;
   return <>{shown.map((d) => <p key={d.id} className="msg"><span className="tag warn">喊卡</span><span>{d.text}</span></p>)}</>;
 }

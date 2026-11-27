@@ -419,7 +419,10 @@ export function layerReqCats(l: Layer): string[] {
 
 function objectsOf(h: Helpers, l: Layer): (Element | null)[] {
   if (l.subject === "mission" || !l.forEach) return [null];
-  return h.of(l.subject);
+  const all = h.of(l.subject);
+  // 元件層（Mars 2026-11-27 決定）：只有「有組成零件的元件」才跑設計迴圈；沒有組成零件的元件是葉節點，在上一層的迴圈裡處理
+  if (l.subject === "Component") return all.filter((e) => h.a.elements.some((x) => x.owner === e.id && x.kind === "PartUsage"));
+  return all;
 }
 
 function reqsOf(h: Helpers, l: Layer, obj: Element | null, objs: (Element | null)[]): Element[] {
