@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Analysis } from "./engine.ts";
 import type { Element } from "./extract.ts";
+import { CATEGORIES } from "./metamodel.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const FRAMEWORK_FILE = path.join(ROOT, "framework", "jri.json");
@@ -534,9 +535,10 @@ export function evaluateFramework(f: Framework, ctx: FwContext): FrameworkEval {
   return { name: f.name, version: f.version, settings: ctx.settings, layers, twoSources, holdPoints, approval: ctx.approval, problems: [], rationaleGaps: rationaleGaps(h), holdDecisions: holdDecisions(h) };
 }
 
-/** 有 JRI 類別的元素，缺 why 或 judge 的列出來（只警告）。 */
+/** 元模型類別（server/metamodel.ts 的 CATEGORIES）的元素，缺 why 或 judge 的列出來（只警告）。
+ * 連接埠（InterfacePort）、分數屬性（TradeScore）這類輔助元素不是使用者寫說明的對象，不列。 */
 function rationaleGaps(h: Helpers): RationaleGap[] {
-  const cats = [...new Set(h.a.elements.map((e) => e.category).filter((c): c is string => !!c))];
+  const cats = CATEGORIES.map((c) => c.id);
   const out: RationaleGap[] = [];
   for (const e of h.of(...cats)) {
     const missing = (["why", "judge"] as const).filter((k) => !(e.attrs[k] ?? "").trim());
@@ -550,7 +552,7 @@ function rationaleGaps(h: Helpers): RationaleGap[] {
 function holdDecisions(h: Helpers): HoldDecision[] {
   return h.of("DesignDecision").filter((e) => (e.attrs.releaseStatus ?? "").trim() === "hold").map((e) => {
     const reason = (e.attrs.holdReason ?? "").trim();
-    return { id: e.id, name: h.name(e), reason, text: `${h.name(e)} 喊卡中：${reason || "（沒寫原因）"}；下一層可以寫，但會顯示警告。` };
+    return { id: e.id, name: h.name(e), reason, text: `${h.name(e)} 喊卡中：${reason.replace(/[。；]+$/, "") || "（沒寫原因）"}；下一層可以寫，但會顯示警告。` };
   });
 }
 

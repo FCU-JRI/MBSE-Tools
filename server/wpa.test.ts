@@ -158,6 +158,7 @@ test("調整分數：寫在候選上、改、刪；刪準則時一併拿掉", as
   await send("/trade/adjusted", "POST", { ...body, score: "5" });
   assert.equal(named("合成甲").attrs.score_REQ_SYS_901, "2.0");
   assert.equal(named("合成甲").attrs.adjusted_REQ_SYS_901, "5.0");
+  assert.ok(!v.framework.rationaleGaps.some((g: any) => !v.analysis.elements.some((e: any) => e.id === g.id && e.category && !["TradeScore", "InterfacePort"].includes(e.category)) ), "分數屬性、連接埠不列在缺說明");
   await send("/trade/adjusted", "POST", { ...body, score: "4.5" });
   assert.equal(named("合成甲").attrs.adjusted_REQ_SYS_901, "4.5");
   await send("/trade/adjusted", "POST", { ...body, score: "abc" }, 400);
@@ -186,9 +187,9 @@ test("風險回頭修正：修正內容＋「修正了」關係；起點不是�
 });
 
 test("決策喊卡：切放行／喊卡與原因；不在清單的值被拒絕；喊卡只警告", async () => {
-  await send("/elements", "PATCH", { id: named("合成決策").id, attrs: { releaseStatus: "hold", holdReason: "合成：待秤重" } });
+  await send("/elements", "PATCH", { id: named("合成決策").id, attrs: { releaseStatus: "hold", holdReason: "合成：待秤重。" } });
   assert.equal(named("合成決策").attrs.releaseStatus, "hold");
-  assert.equal(named("合成決策").attrs.holdReason, "合成：待秤重");
+  assert.equal(named("合成決策").attrs.holdReason, "合成：待秤重。");
   const hd = v.framework.holdDecisions.find((d: any) => d.id === named("合成決策").id);
   assert.equal(hd?.text, "DEC-901 合成決策 喊卡中：合成：待秤重；下一層可以寫，但會顯示警告。");
   // 下一層照常可寫，回應帶警告；卡點與迴圈判定和放行時一樣
