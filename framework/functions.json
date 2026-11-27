@@ -1356,7 +1356,7 @@
    "id": "MOD-33",
    "zh": "風險回頭修正與調整分數",
    "area": "模型",
-   "where": "右欄、伺服器",
+   "where": "右欄、表格頁",
    "api": "",
    "reads": [
     "model"
@@ -1365,11 +1365,11 @@
     "model",
     "git"
    ],
-   "status": "partial",
+   "status": "ok",
    "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
    "framework": "designLoop.resolved",
    "verify": "風險可寫修正內容並以「修正了」指向被修正的元素；候選可存調整後分數",
-   "note": "WP-A：Risk.fixNote＋#fix dependency（FixLink，關係種類 fix）；候選 adjusted_<需求編號> : TradeScore，寫回 /trade/adjusted。調整分數的表格輸入留給工作包 F"
+   "note": "WP-A：Risk.fixNote＋#fix dependency（FixLink，關係種類 fix）；候選 adjusted_<需求編號> : TradeScore，寫回 /trade/adjusted。F 包：方案比較表每格可填調整後分數（/trade/adjusted），另列調整後加權總分；FMEA 表加「回頭修正」與「修正了」欄"
   },
   {
    "id": "MOD-34",
@@ -1557,7 +1557,7 @@
    "sources": "SPEC 表格",
    "framework": "designLoop.fmea",
    "verify": "熱圖與切換正常",
-   "note": ""
+   "note": "F 包：加「回頭修正」（fixNote）與「修正了」（#fix 指向的元素，可點）欄"
   },
   {
    "id": "TAB-04",
@@ -1687,7 +1687,7 @@
    "sources": "TR-06",
    "framework": "",
    "verify": "整本下載",
-   "note": "WP5a #45：Excel 加公式清單與驗證矩陣工作表"
+   "note": "WP5a #45：Excel 加公式清單與驗證矩陣工作表；F 包：加方案比較、候選方案、決策、模型元素總表工作表；TPM 改為各啟用節點的值、餘裕與判定；FMEA 加回頭修正與修正了"
   },
   {
    "id": "TAB-12",
@@ -1703,7 +1703,7 @@
    "sources": "框架 F1 第 2 步；METHOD 圖 9",
    "framework": "designLoop.tradeStudy",
    "verify": "準則、權重、分數、選定與否決",
-   "note": "WP5a #45：共用庫 @TradeWeight 與 TradeScore；表上加準則、填權重與分數、刪準則，算加權總分（整合後實點 3×4=12、3×2=6）"
+   "note": "WP5a #45：共用庫 @TradeWeight 與 TradeScore；表上加準則、填權重與分數、刪準則，算加權總分（整合後實點 3×4=12、3×2=6）；F 包：準則附評分標準、每格可填調整後分數、方案下方列權重敏感度、否決的候選列否決原因"
   },
   {
    "id": "TAB-13",
@@ -1755,6 +1755,74 @@
    "framework": "designLoop.outputs",
    "verify": "對角線次系統、格子是介面",
    "note": "WP5a #45：N² 依介面 A→B 方向放格，上下兩側不同"
+  },
+  {
+   "id": "TAB-16",
+   "zh": "決策表：方案／選定、決策人、日期、理由、放行／喊卡與原因",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "",
+   "verify": "喊卡中的決策標紅；可篩「喊卡中」",
+   "note": "F 包：web/src/pages/tables/Records.tsx Decisions；喊卡只警告（Mars 2026-11-27）"
+  },
+  {
+   "id": "TAB-17",
+   "zh": "TPM 追蹤：各啟用審查節點的值、趨勢線、門檻與餘裕",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "crossCutting.tpm",
+   "verify": "欄只列專案啟用的節點；超過門檻的點標紅",
+   "note": "F 包：Records.tsx TpmTrack；值在模型頁右欄填（MOD-35）"
+  },
+  {
+   "id": "TAB-18",
+   "zh": "候選方案（含被否決的）與否決原因",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "",
+   "verify": "被否決但沒寫原因的可篩出",
+   "note": "F 包：Records.tsx Variants"
+  },
+  {
+   "id": "TAB-19",
+   "zh": "模型元素總表：為什麼、判定條件、被引用數",
+   "area": "表格",
+   "where": "表格頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
+   "framework": "",
+   "verify": "可篩「缺說明」「沒被引用」",
+   "note": "F 包：Records.tsx ElementsAll"
   },
   {
    "id": "ANA-01",

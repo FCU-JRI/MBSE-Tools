@@ -76,6 +76,9 @@ export function Fmea({ view, selectedId, onSelect }: Props) {
   const pre = useCallback((e: Element) => !pick || pick.includes(e.id), [pick]);
   const tag = (v: number) => (v >= 15 ? <span className="tag danger">{v}</span> : v >= 8 ? <span className="tag warn">{v}</span> : v > 0 ? <span className="tag">{v}</span> : <span className="faint">—</span>);
   const dash = (v: number) => (v ? String(v) : "");
+  // 回頭修正（F 包）：風險緩解時改了模型哪裡（fixNote），以及「修正了」關係（#fix）指向的元素
+  const byId = new Map(view.analysis.elements.map((x) => [x.id, x]));
+  const fixed = (e: Element) => view.analysis.relations.filter((r) => r.kind === "fix" && r.from === e.id).map((r) => byId.get(r.to)).filter((x): x is Element => !!x);
   const cols: Col<Element>[] = [
     { key: "id", title: "編號", text: (e) => e.shortName ?? "", cls: "id" },
     { key: "layer", title: "層級", text: layerZh, render: (e) => <span title={layerById.get(e.id)?.how ? `由${layerById.get(e.id)?.how}推出` : "沒有標記也沒連到元素"}>{layerZh(e)}</span> },
@@ -89,7 +92,10 @@ export function Fmea({ view, selectedId, onSelect }: Props) {
     { key: "rpn", title: "RPN", text: (e) => dash(score(e) * n(e, "detection")).padStart(4, "0"), render: (e) => <>{score(e) * n(e, "detection") || "—"}</>, cls: "id" },
     { key: "mit", title: "緩解措施", text: (e) => e.attrs.mitigation ?? "MISS", render: (e) => <>{e.attrs.mitigation || <span className="tag danger">MISS</span>}</> },
     { key: "after", title: "緩解後", text: (e) => dash(after(e)).padStart(3, "0"), render: (e) => tag(after(e)) },
-    { key: "owner", title: "負責人", text: (e) => e.attrs.owner ?? "" },
+    { key: "fix", title: "回頭修正", text: (e) => e.attrs.fixNote ?? "" },
+    { key: "fixed", title: "修正了", text: (e) => fixed(e).map((x) => x.shortName ?? x.name).join("、"),
+      render: (e) => <>{fixed(e).map((x, i) => <span key={x.id}>{i > 0 && "、"}<button type="button" className="link" onClick={(ev) => { ev.stopPropagation(); onSelect(x.id); }}>{x.shortName ?? x.name}</button></span>)}{!fixed(e).length && <span className="faint">—</span>}</> },
+        { key: "owner", title: "負責人", text: (e) => e.attrs.owner ?? "" },
     { key: "status", title: "狀態", text: (e) => e.attrs.status || "開啟" },
   ];
   const grid = (
