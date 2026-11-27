@@ -624,7 +624,7 @@
    "sources": "框架",
    "framework": "designLoop",
    "verify": "每層每個對象在第幾步一眼看出",
-   "note": "WP5b-2 #47：首頁設計迴圈進度，點對象到模型頁"
+   "note": "WP5b-2 #47：首頁設計迴圈進度，點對象到模型頁；C＋D 包：第 5 層（元件）只有「有組成零件的元件」才當迴圈對象（Mars 2026-11-27，server/framework.ts objectsOf）"
   },
   {
    "id": "PROC-01",
@@ -1216,7 +1216,7 @@
    "sources": "框架 F1 第 8 步",
    "framework": "designLoop.outputs",
    "verify": "系統對次系統下配額，加總檢查",
-   "note": "WP1：需求右欄「數值條件」（對象、屬性、比較、值、單位）可寫、改、清；有滿足者時判定 PASS／FAIL。限制：滿足者要是實例（頂層零件），次系統配額的實例路徑在 WP4 處理"
+   "note": "WP1：需求右欄「數值條件」（對象、屬性、比較、值、單位）可寫、改、清；有滿足者時判定 PASS／FAIL。限制：滿足者要是實例（頂層零件），次系統配額的實例路徑在 WP4 處理；E 包：satisfy 需求 by 實例.零件（特徵鏈）的滿足者解析為鏈上最後一段的零件，次系統的 require constraint 可以對實例判定"
   },
   {
    "id": "MOD-26",
@@ -1387,7 +1387,7 @@
    "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）",
    "framework": "designLoop.outputs",
    "verify": "設計決策可切放行／喊卡並寫原因；喊卡時框架評估與右欄顯示警告",
-   "note": "WP-A：DesignDecision.releaseStatus（ok／hold）、holdReason；沒寫視為放行。喊卡只警告（Mars 2026-11-27）：框架評估回傳 holdDecisions，新增下一層元素時回應帶警告；不擋迴圈與卡點，FW-02 不變"
+   "note": "WP-A：DesignDecision.releaseStatus（ok／hold）、holdReason；沒寫視為放行。喊卡只警告（Mars 2026-11-27）：框架評估回傳 holdDecisions，新增下一層元素時回應帶警告；不擋迴圈與卡點，FW-02 不變；右欄的喊卡警告只列同一棵子樹（元素所在層與上層鏈）的決策（Mars 2026-11-27，C＋D 包，views.ts holdScope）"
   },
   {
    "id": "MOD-35",
@@ -1508,7 +1508,7 @@
    "status": "ok",
    "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
    "framework": "",
-   "verify": "設計示意列出改到本層定義或組成零件的提交（最近 5 版），標出改到的零件，有 @CadLink 時附連結或縮圖；沒有版本紀錄時退回方塊配置圖。計算框：質量預算與需求判定來自計算引擎，殘餘風險門檻讀專案設定",
+   "verify": "設計示意只列兩種提交（Mars 2026-11-27）：寫入本層定義或組成零件的 CAD 版本（@CadLink），或修改說明以「設計：」開頭且改到本層；最近 5 版，標出改到的零件，有 @CadLink 時附連結或縮圖；都沒有時退回方塊配置圖。計算框：質量預算與需求判定來自計算引擎，殘餘風險門檻讀專案設定",
    "note": "E 包：server/iterations.ts（git log -p，以 part def 為 hunk 標頭比對改到的零件，不逐版解析）＋ GET /iterations；計算框讀 /calc/budget（ANA-11）、/calc/verdicts（ANA-09）；FMEA 門檻讀 PRJ-05。加權總分、L×C、TPM 餘裕仍是模型值的四則運算"
   },
   {

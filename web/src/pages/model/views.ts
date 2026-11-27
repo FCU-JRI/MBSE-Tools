@@ -73,7 +73,8 @@ export function buildModel(view: View): Model {
   const layerOf = (id: string, n = 0): number => { const p = parentOf.get(id); return p && n < 20 ? Math.min(5, layerOf(p, n + 1) + 1) : CAT_LAYER[byId.get(id)?.category ?? ""] ?? 5; };
   for (const u of U.values()) if (u.kind === "part") u.layer = layerOf(u.id);
 
-  const satisfier = (reqId: string) => inn(reqId, ["satisfy"]).map((r) => r.from).find((f) => defIds.has(f)) ?? null;
+  // 滿足者：定義本身，或 satisfy … by 實例路徑 指到的零件用法（順著型別對到定義）
+  const satisfier = (reqId: string) => inn(reqId, ["satisfy"]).map((r) => r.from).map((f) => (defIds.has(f) ? f : byId.get(f)?.typeIds.find((t) => defIds.has(t)))).find((f): f is string => !!f) ?? null;
   const ports = els.filter((e) => e.kind === "PortUsage" && e.shortName);
   for (const e of els) {
     const c = e.category ?? "";
@@ -215,3 +216,12 @@ export function buildModel(view: View): Model {
 
 export const viewKeyOfPart = (id: string) => `p:${id}`;
 export type { Relation };
+
+/** 喊卡範圍（Mars 2026-11-27）：元素所在的層，加上它往上的層鏈上，所有喊卡中的決策 id。
+ *  例：機體的需求會看到系統層與機體層的喊卡，看不到推進或主翼的。元素還沒歸到任何一層時是空的。 */
+export function holdScope(M: Model, elementId: string): string[] {
+  const start = M.U.get(elementId)?.kind === "part" && M.V.has(viewKeyOfPart(elementId)) ? viewKeyOfPart(elementId) : M.where(elementId);
+  const chain = new Set<string>();
+  for (let v = start ? M.V.get(start) : undefined; v; v = v.parent ? M.V.get(v.parent) : undefined) chain.add(v.k);
+  return M.list.filter((u) => u.kind === "decision" && u.gate === "hold" && chain.has(M.viewOf.get(u.id) ?? "")).map((u) => u.id);
+}

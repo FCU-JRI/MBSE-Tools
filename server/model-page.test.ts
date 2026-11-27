@@ -134,3 +134,20 @@ test("審查報告與匯出：用同一套層級圖產生 SVG（G 包）", async
   assert.ok(figs.some((h) => h.startsWith("第 4 層")), "附錄列出各層層級圖");
   assert.ok(r.sections.find((s) => s.heading === "3.1　結構分解")!.svg!.includes('aria-label="模型地圖"'));
 });
+
+test("框架：元件層只有有組成零件的元件才當迴圈對象（Mars 2026-11-27）", async () => {
+  const { evaluateFramework, loadFramework, defaultSettings } = await import("./framework.ts");
+  const f = loadFramework();
+  const ev = evaluateFramework(f, { a: view.analysis, settings: defaultSettings(f), docs: 0, approval: { ok: true, detail: "", source: "branches" } });
+  const comp = ev.layers.find((l: any) => l.subject === "Component" || l.id === "detailDesign")!;
+  assert.deepEqual(comp.objects!.map((o: any) => o.name), ["元丙"], "元丙有組成零件（元丁），元丁沒有，不算");
+});
+
+test("喊卡範圍：只列同一棵子樹（所在層與上層鏈）的喊卡決策", async () => {
+  const { holdScope } = await import("../web/src/pages/model/views.ts");
+  assert.deepEqual(holdScope(M, SSR), [DEC], "次甲的需求看得到次甲的喊卡");
+  assert.deepEqual(holdScope(M, CR), [DEC], "元丙（次甲的下層）也看得到");
+  assert.deepEqual(holdScope(M, SR), [], "系統層不在次甲之下");
+  assert.deepEqual(holdScope(M, B), [], "次乙不在同一棵子樹");
+  assert.deepEqual(holdScope(M, C), [DEC], "元丙本身的圖在次甲之下");
+});

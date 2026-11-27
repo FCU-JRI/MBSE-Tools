@@ -30,6 +30,9 @@ test("版本紀錄：每次提交改到哪些零件定義、寫入的 CAD 版本
   const it = parseLog(log);
   assert.deepEqual(it.map((x) => [x.commit, x.touched]), [["aaa1111", ["af-wing", "主翼"]], ["bbb2222", ["af-new", "新件"]], ["ccc3333", []]]);
   assert.deepEqual(it[0].cad, [{ part: "af-wing", url: "https://cad.example/wing.png", version: "v3" }]);
+  assert.deepEqual(it.map((x) => x.marked), [false, false, false]);
+  assert.equal(parseLog("@@@ddd4444\t2027-01-04T10:00:00+08:00\t丁\t設計：主翼改兩段")[0].marked, true, "「設計：」開頭是設計標記");
+  assert.equal(parseLog("@@@eee5555\t2027-01-04T10:00:00+08:00\t丁\t設計:半形冒號也可以")[0].marked, true);
 });
 
 // 合成模型：次系統 A（兩個元件）、一個方案、一個風險、一條需求
@@ -57,9 +60,10 @@ const live: Live = {
   budget: [{ element: "P::inst::次甲", name: "次甲", limitKg: 3, sumKg: 2.5, marginKg: 0.5, status: "PASS", items: [{ name: "元一", massKg: 1 }, { name: "元二", massKg: 1.5 }, { name: "某介面", massKg: null }] }],
   verdicts: [{ qualifiedName: "P::次甲質量", requirement: "SSR-1", condition: "a.mass <= 3 [kg]", status: "holds", terms: [{ attribute: "mass", op: "<=", threshold: "3 [kg]", value: 2.5, unit: "kg", margin: 0.5 }], note: "" }],
   iterations: [
-    { commit: "aaa1111", date: "2027-01-01T10:00:00+08:00", author: "甲", message: "加元一", touched: ["c1", "元一"], cad: [] },
-    { commit: "zzz9999", date: "2027-01-01T11:00:00+08:00", author: "甲", message: "別的次系統", touched: ["x-other"], cad: [] },
-    { commit: "bbb2222", date: "2027-01-02T10:00:00+08:00", author: "乙", message: "R-1 改了元二", touched: ["c2"], cad: [{ part: "SUB-A", url: "https://cad.example/a.png", version: "v6" }] },
+    { commit: "aaa1111", date: "2027-01-01T10:00:00+08:00", author: "甲", message: "設計：加元一", touched: ["c1", "元一"], cad: [], marked: true },
+    { commit: "zzz9999", date: "2027-01-01T11:00:00+08:00", author: "甲", message: "設計：別的次系統", touched: ["x-other"], cad: [], marked: true },
+    { commit: "ccc3333", date: "2027-01-01T12:00:00+08:00", author: "甲", message: "改元一的屬性值", touched: ["c1"], cad: [], marked: false },
+    { commit: "bbb2222", date: "2027-01-02T10:00:00+08:00", author: "乙", message: "R-1 改了元二", touched: ["c2"], cad: [{ part: "SUB-A", url: "https://cad.example/a.png", version: "v6" }], marked: false },
   ],
   fmeaThreshold: 6,
 };
@@ -74,10 +78,10 @@ test("計算框：質量讀計算引擎、需求判定讀 require constraint、�
   assert.match(noLive, /（模型值）/); assert.match(noLive, /殘餘門檻 ≤ 4，預設/);
 });
 
-test("設計示意：一次提交一版（只取改到本層的），標出改到的零件，附 CAD", () => {
+test("設計示意：只算有 CAD 版本變更或「設計：」標記的提交，標出改到的零件，附 CAD", () => {
   const s = specArch(M, `p:${A}`, live);
   const its = s.nodes.filter((x) => /^it\d$/.test(x.id));
-  assert.deepEqual(its.map((x) => x.name), ["2027-01-01 aaa1111", "2027-01-02 bbb2222"], "別的次系統的提交不算");
+  assert.deepEqual(its.map((x) => x.name), ["2027-01-01 aaa1111", "2027-01-02 bbb2222"], "只算有設計標記（且改到本層）或寫入本層 CAD 版本的提交；別的次系統、沒標記的一般修改都不算");
   assert.deepEqual(its[0].blocks!.map((b) => [b.name, b.hi]), [["元一", true], ["元二", false]]);
   assert.deepEqual(its[1].blocks!.map((b) => [b.name, b.hi]), [["元一", false], ["元二", true]]);
   assert.deepEqual(its[1].cad, { url: "https://cad.example/a.step", version: "v7", image: false }, "目前這一版用定義上的 @CadLink");
@@ -85,4 +89,34 @@ test("設計示意：一次提交一版（只取改到本層的），標出改�
   // 沒有版本紀錄：退回方塊配置圖（初始提案＋回頭修正）
   const old = specArch(M, `p:${A}`, { ...live, iterations: [] }).nodes.filter((x) => /^it\d$/.test(x.id));
   assert.deepEqual(old.map((x) => x.name), ["初始提案", "R-1 修正後"]);
+});
+
+test("satisfy 需求 by 實例.零件：滿足者是鏈上最後一段的零件，require constraint 判定得出來（範例判定式，Mars 2026-11-27）", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { analyze } = await import("./engine.ts");
+  const lib = fs.readFileSync(path.join(import.meta.dirname, "..", "library", "JRI.sysml"), "utf8");
+  const src = `package Project {
+    private import ScalarValues::*; private import ISQ::*; private import SI::*; private import JRI::*;
+    part def '合成機' :> System { attribute mtow : MassValue = 7.2 [kg]; part '合成甲' : '合成次甲'; }
+    part def '合成次甲' :> Subsystem { attribute mass : MassValue = 3.1 [kg]; attribute endurance : DurationValue; }
+    requirement <'R-1'> '起飛重' : SystemRequirement { subject subj : '合成機'; require constraint { subj.mtow <= 8.0 [kg] } }
+    requirement <'R-2'> '甲質量' : SubsystemRequirement { subject subj : '合成次甲'; require constraint { subj.mass <= 2.8 [kg] } }
+    requirement <'R-3'> '甲航時' : SubsystemRequirement { subject subj : '合成次甲'; require constraint { subj.endurance >= 60.0 [min] } }
+    part inst : '合成機';
+    satisfy '起飛重' by inst;
+    satisfy '甲質量' by inst.'合成甲';
+    satisfy '甲航時' by inst.'合成甲';
+  }`;
+  const a = await analyze([["JRI.sysml", lib], ["model.sysml", src]], []);
+  assert.ok(a.ok, JSON.stringify(a.diagnostics.slice(0, 2)));
+  const el = (sn: string) => a.elements.find((e: any) => e.shortName === sn)!;
+  const from = (sn: string) => a.elements.find((e: any) => e.id === a.relations.find((r: any) => r.kind === "satisfy" && r.to === el(sn).id)?.from);
+  assert.equal(from("R-1")?.name, "inst");
+  assert.deepEqual([from("R-2")?.kind, from("R-2")?.name], ["PartUsage", "合成甲"], "鏈上最後一段的零件，不是套件");
+  const st = (sn: string) => a.satisfaction.find((x: any) => x.requirement === el(sn).qualifiedName)?.status;
+  assert.deepEqual([st("R-1"), st("R-2"), st("R-3")], ["holds", "fails", "undecided"], "有值才判定；沒有值的維持未判定");
+  // 層級圖的滿足者順著型別對到定義
+  const M = buildModel({ project: { gates: ["pdr"] }, analysis: a } as any);
+  assert.equal(M.U.get(el("R-2").id)!.sat, a.elements.find((e: any) => e.name === "合成次甲" && e.kind === "PartDefinition")!.id);
 });

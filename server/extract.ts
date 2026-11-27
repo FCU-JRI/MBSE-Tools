@@ -241,6 +241,23 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
   }
 
   const known = new Set(elements.map((e) => e.id));
+  const unq = (n: string) => n.trim().replace(/^'(.*)'$/s, "$1").replace(/\\'/g, "'");
+  /** 「a.'b'.c」：第一段從 satisfy 所在處往外找同名元素，之後每段在上一段的型別（定義）裡找同名特徵 */
+  const resolveChain = (text: string, owner: string | null): string | null => {
+    const segs = text.match(/'(?:[^'\\]|\\.)*'|[^.\s]+/g)?.map(unq) ?? [];
+    if (segs.length < 2) return null;
+    const scopes: string[] = [];
+    for (let cur = owner, n = 0; cur && n < 30; cur = ref(byId.get(cur)?.owner), n++) scopes.push(cur);
+    const head = segs[0].split("::").pop()!;
+    let cur = elements.find((x) => x.name === head && x.owner !== null && scopes.includes(x.owner)) ?? elements.find((x) => x.name === head && /Usage$/.test(x.kind));
+    for (const seg of segs.slice(1)) {
+      if (!cur) return null;
+      const types = [cur.id, ...cur.typeIds];
+      cur = elements.find((x) => x.name === seg && x.owner !== null && types.includes(x.owner));
+    }
+    return cur && known.has(cur.id) ? cur.id : null;
+  };
+
   const relations: Relation[] = [];
   const push = (kind: Relation["kind"], from: string | null, to: string | null, src: Raw | undefined, whole?: Raw, form?: Relation["form"]) => {
     if (from && to && known.has(from) && known.has(to)) relations.push({ kind, from, to, ...(form ? { form } : {}), line: src?.["sysx:sourceLine"] ?? null, loc: locOf(src), outer: whole ? locOf(whole) : null, file: fileOf(src) });
@@ -275,7 +292,9 @@ export function extract(raw: Raw[], files: Set<string>, shared: Set<string>, tex
     } else if (t === "SatisfyRequirementUsage") {
       const req = ref(e.subsets) ?? (generals.get(e["@id"]) ?? [])[0] ?? null;
       // 寫在定義主體內的 satisfy 沒有明示滿足者，以所在的元素為準
-      const by = ref(e.subject);
+      let by = ref(e.subject);
+      // satisfy 需求 by 實例.零件（特徵鏈，例如 uavInstance.'機體'）：解析器給的是文字，沿著名稱一段段找到最後一段的零件
+      if ((!by || !known.has(by)) && typeof e.subject === "string" && e.subject.includes(".")) by = resolveChain(e.subject, ref(e.owner)) ?? by;
       push("satisfy", by && known.has(by) ? by : namedOwner(ref(e.owner)), req, e);
     } else if (t === "RequirementVerificationMembership") {
       const member = ref(e.ownedMemberElement) ?? ref(e.memberElement);
