@@ -74,6 +74,7 @@ svg.ld text { font-family: var(--font-sans); fill: var(--ld-ink); }
 .ld .sk-frame { fill: none; stroke: var(--ld-line); stroke-dasharray: 2 2; opacity: .6; }
 .ld .sk-b { fill: var(--ld-paper); stroke: var(--ld-in); } .ld .sk-hi { fill: var(--ld-out-fill); stroke: var(--ld-fb); stroke-width: 1.8; }
 .ld .sk-t { font-size: 10.5px; font-weight: 600; }
+.ld .ld-cad { font-size: 10.5px; fill: var(--ld-table); text-decoration: underline; cursor: pointer; }
 .ld g.go { cursor: pointer; } .ld g.go:hover > rect:not(.pz-ring) { stroke-width: 2.4; }
 .ld g.go:focus-visible { outline: 2px solid var(--ld-table); outline-offset: 1px; }
 .ld .bd-hold { fill: var(--ld-hold); } .ld .bd-ok { fill: var(--ld-ok); } .ld .bd-pend { fill: var(--ld-pend); } .ld .bd-bad { fill: var(--ld-bad); }

@@ -363,7 +363,7 @@
    "sources": "D：預算餘裕不釘死、負責人每專案可改",
    "framework": "settings",
    "verify": "每項可設、預設值來自框架檔",
-   "note": "WP3 #46：專案設定加門檻、餘裕、候選數、負責人、是否強制卡點"
+   "note": "WP3 #46：專案設定加門檻、餘裕、候選數、負責人、是否強制卡點；E 包：模型頁計算框的殘餘風險門檻讀這裡的 FMEA 門檻"
   },
   {
    "id": "PRJ-06",
@@ -1496,20 +1496,21 @@
   },
   {
    "id": "MOD-41",
-   "zh": "迴圈下半排：設計示意（每個回頭修正一版）與計算框（帶入模型值）",
+   "zh": "迴圈下半排：設計示意（版本紀錄，一次提交一版，附 CAD）與計算框（計算引擎真值）",
    "area": "模型",
    "where": "模型頁",
    "api": "",
    "reads": [
     "model",
-    "project"
+    "project",
+    "git"
    ],
    "writes": [],
-   "status": "partial",
+   "status": "ok",
    "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
    "framework": "",
-   "verify": "設計示意由風險 #fix 推出各版；計算框列質量加總、加權總分、L×C、TPM 餘裕",
-   "note": "C＋D 先照示意頁的推法；設計示意改讀版本紀錄、計算改用計算引擎與專案的 FMEA 門檻留給工作包 E"
+   "verify": "設計示意列出改到本層定義或組成零件的提交（最近 5 版），標出改到的零件，有 @CadLink 時附連結或縮圖；沒有版本紀錄時退回方塊配置圖。計算框：質量預算與需求判定來自計算引擎，殘餘風險門檻讀專案設定",
+   "note": "E 包：server/iterations.ts（git log -p，以 part def 為 hunk 標頭比對改到的零件，不逐版解析）＋ GET /iterations；計算框讀 /calc/budget（ANA-11）、/calc/verdicts（ANA-09）；FMEA 門檻讀 PRJ-05。加權總分、L×C、TPM 餘裕仍是模型值的四則運算"
   },
   {
    "id": "TAB-01",
@@ -1985,7 +1986,7 @@
    "sources": "框架 elementTypes.Calculation",
    "framework": "designLoop.calc",
    "verify": "每條公式有合成數值驗算測試",
-   "note": "WP2 #43：server/calc.ts 用解析器 instantiate 求值，含合成驗算測試"
+   "note": "WP2 #43：server/calc.ts 用解析器 instantiate 求值，含合成驗算測試；E 包：模型頁計算框列出本層需求的判定（條件 → 帶入值 → 餘裕 → ✓／✗）"
   },
   {
    "id": "ANA-10",
@@ -2019,7 +2020,7 @@
    "sources": "TR-04",
    "framework": "designLoop.calc",
    "verify": "子項質量加總、超過上限判 FAIL",
-   "note": "WP2 #43：零件有 massLimit／massBudget 時加總比較，超過判 FAIL"
+   "note": "WP2 #43：零件有 massLimit／massBudget 時加總比較，超過判 FAIL；E 包：模型頁計算框的質量列改用計算引擎的質量預算"
   },
   {
    "id": "ANA-12",
@@ -2342,7 +2343,7 @@
    "sources": "既有",
    "framework": "",
    "verify": "選兩版比較差異",
-   "note": ""
+   "note": "E 包：模型頁迴圈的設計示意由版本紀錄產生（/iterations）"
   },
   {
    "id": "VER-07",
