@@ -105,7 +105,7 @@ function grid(items: U[], x0: number, y0: number, cols: number, w: number, gx: n
 export interface Live {
   budget: { element: string; name: string; limitKg: number; sumKg: number; marginKg: number; status: "PASS" | "FAIL"; items: { name: string; massKg: number | null }[] }[];
   verdicts: { qualifiedName: string; requirement: string; condition: string; status: "holds" | "fails" | "undecided"; terms: { attribute: string; op: string; threshold: string; value: number | null; unit: string; margin: number | null }[]; note: string }[];
-  iterations: { commit: string; date: string; author: string; message: string; touched: string[]; cad: { part: string; url: string; version: string }[] }[];
+  iterations: { commit: string; date: string; author: string; message: string; touched: string[]; cad: { part: string; url: string; version: string }[]; marked: boolean }[];
   fmeaThreshold: number | null;
 }
 interface Ctx { owner?: string; blocks?: () => { id: string; sn: string; name: string; sub: string }[]; live?: Live | null }
@@ -157,11 +157,13 @@ function designRow(M: Model, y: number, els: U[], ctx: Ctx, k: { nT: DNode | nul
   const owner = ctx.owner ? M.U.get(ctx.owner) : undefined;
   const keys = (u: { sn: string; name: string }) => [u.sn, u.name].filter(Boolean);
   const fixTargets = new Set(M.list.filter((r) => r.kind === "risk" && fixApplies(r)).flatMap((r) => r.targets));
-  const mine = owner && ctx.live ? ctx.live.iterations.filter((it) => [owner, ...owner.kids.map((c) => M.U.get(c)!).filter(Boolean)].some((u) => keys(u).some((k) => it.touched.includes(k)))).slice(-5) : [];
+  // 只算兩種提交（Mars 2026-11-27）：寫入了本層定義或組成零件的 CAD 版本（@CadLink），或修改說明以「設計：」開頭且改到本層
+  const layerKeys = owner ? [owner, ...owner.kids.map((c) => M.U.get(c)!).filter(Boolean)].flatMap(keys) : [];
+  const mine = owner && ctx.live ? ctx.live.iterations.filter((it) => it.cad.some((c) => layerKeys.includes(c.part)) || (it.marked && it.touched.some((k) => layerKeys.includes(k)))).slice(-5) : [];
   type It = { id: string; ver: string; title: string; cap: string; touched: string[]; go: Go; rid: string; cad?: { url: string; version: string } };
   const its: It[] = mine.length
     ? mine.map((it, i) => ({ id: `it${i}`, ver: `v${i + 1}`, title: `${it.date.slice(0, 10)} ${it.commit}`, cap: it.message, touched: it.touched, go: { el: owner!.el.id } as Go, rid: it.commit,
-        cad: it.cad.filter((c) => keys(owner!).includes(c.part)).pop() }))
+        cad: it.cad.filter((c) => layerKeys.includes(c.part)).pop() }))
     : [{ id: "it0", ver: "v1", title: "初始提案", cap: picked ? "選定 " + picked : "還沒有選定", touched: [], go: { el: alt.el.id } as Go, rid: "" },
       ...fixes.map((r, i) => ({ id: `it${i + 1}`, ver: `v${i + 2}`, title: `${label(r)}修正後`, cap: r.fix, touched: [] as string[], go: { el: r.el.id } as Go, rid: r.sn, txt: r.fix }))];
   // 目前這一版的 CAD：本層定義上的 @CadLink（沒有就看版本紀錄裡最後寫入的）

@@ -12,7 +12,12 @@ export interface Iteration {
   touched: string[];
   /** 這次提交寫入的 CAD 連結與版本（@CadLink），依零件 */
   cad: { part: string; url: string; version: string }[];
+  /** 修改說明有設計標記（「設計：」開頭）：使用者標明這是一版設計 */
+  marked: boolean;
 }
+
+/** 設計標記（Mars 2026-11-27 決定只算有 CAD 版本變更、或有標記的提交）：修改說明以「設計：」或「設計:」開頭 */
+export const DESIGN_MARK = /^\s*設計[：:]/;
 
 const FUNC = "^[ \\t]*((variation[ \\t]+)?part[ \\t]+def[ \\t].*)$";
 let attrsFile: string | null = null;
@@ -38,7 +43,7 @@ export function parseLog(text: string): Iteration[] {
   for (const line of text.split("\n")) {
     if (line.startsWith("@@@")) {
       const [commit, date, author, ...msg] = line.slice(3).split("\t");
-      cur = { commit, date, author, message: msg.join("\t"), touched: [], cad: [] };
+      cur = { commit, date, author, message: msg.join("\t"), touched: [], cad: [], marked: DESIGN_MARK.test(msg.join("\t")) };
       out.push(cur); scope = []; continue;
     }
     if (!cur) continue;

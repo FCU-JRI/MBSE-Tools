@@ -65,7 +65,7 @@ export function SourceTab({ id, onSaved, readOnly }: { id: string; onSaved: () =
       <p className="caption" style={{ marginBottom: 12 }}>模型的原始文字，支援完整 SysML v2 語法。有錯誤時不會儲存。</p>
       <div className="row">
         <label className="field" style={{ flex: "0 0 12rem" }}><span className="label">檔案</span><select className="input" value={file} onChange={(e) => setFile(e.target.value)} disabled={dirty}>{files.map((f) => <option key={f}>{f}</option>)}</select></label>
-        <label className="field" style={{ flex: 1 }}><span className="label">修改說明</span><input className="input" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="這次改了什麼" /></label>
+        <label className="field" style={{ flex: 1 }}><span className="label">修改說明</span><input className="input" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="這次改了什麼；以「設計：」開頭會列入迴圈的設計示意" /></label>
         <div className="tbtn-row" style={{ marginBottom: 12 }}>
           {!readOnly && <button className="btn" disabled={!dirty || errors.length > 0 || checking} onClick={save}>寫入</button>}
           <button className="tbtn" disabled={!dirty} onClick={() => { setContent(saved); setDiags([]); }}>放棄修改</button>
