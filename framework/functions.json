@@ -7,7 +7,8 @@
   "partial": "部分",
   "wrong": "與框架衝突",
   "missing": "缺",
-  "orphan": "無依據"
+  "orphan": "無依據",
+  "removed": "已移除"
  },
  "stores": [
   {
@@ -776,7 +777,7 @@
   },
   {
    "id": "MOD-02",
-   "zh": "左欄：依框架層級排列（取代「圖依種類」）",
+   "zh": "左欄：依產品架構的樹（第 1、2 層；系統可收合；次系統一律列出；元件可收合）",
    "area": "模型",
    "where": "模型頁左欄",
    "api": "",
@@ -789,7 +790,7 @@
    "sources": "D：照流程生框架、畫面從框架長出",
    "framework": "layers",
    "verify": "左欄層級與框架檔一致",
-   "note": "WP5b-1 #48：左欄由框架檔 7 層長出，層標題帶節點進度與現在、類別與迴圈對象進度"
+   "note": "C＋D：取代原本依框架 7 層的左欄。打開某層時上層自動展開；收合狀態存在瀏覽器"
   },
   {
    "id": "MOD-03",
@@ -801,11 +802,11 @@
     "model"
    ],
    "writes": [],
-   "status": "ok",
+   "status": "removed",
    "sources": "SPEC 模型",
    "framework": "",
    "verify": "點元素開右欄",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。改為產品架構樹（MOD-37）；元素用搜尋（MOD-01）或層級圖找。"
   },
   {
    "id": "MOD-04",
@@ -839,11 +840,11 @@
    "writes": [
     "layout"
    ],
-   "status": "ok",
+   "status": "removed",
    "sources": "TR-02",
    "framework": "",
    "verify": "從模型產生",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。改為模型地圖（MOD-36）與層級圖（MOD-38）。"
   },
   {
    "id": "MOD-06",
@@ -858,11 +859,11 @@
    "writes": [
     "diagrams"
    ],
-   "status": "ok",
+   "status": "removed",
    "sources": "S1 閉環；PR #35",
    "framework": "",
    "verify": "增改刪都可",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。層級圖由模型自動產生，不再有自訂圖。"
   },
   {
    "id": "MOD-07",
@@ -877,11 +878,11 @@
     "model",
     "git"
    ],
-   "status": "ok",
+   "status": "removed",
    "sources": "TR-02",
    "framework": "",
    "verify": "在圖上建立並寫進模型",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。圖上不拉線、不新增；新增改由各區帶的「＋」（MOD-40）與右欄，關係在右欄建立。"
   },
   {
    "id": "MOD-08",
@@ -896,11 +897,11 @@
     "model",
     "git"
    ],
-   "status": "ok",
+   "status": "removed",
    "sources": "既有",
    "framework": "",
    "verify": "增改刪都可",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。模型頁不再管理套件；套件仍可在原始碼抽屜（MOD-04）裡寫。"
   },
   {
    "id": "MOD-09",
@@ -915,11 +916,11 @@
     "model",
     "git"
    ],
-   "status": "ok",
+   "status": "removed",
    "sources": "既有",
    "framework": "",
    "verify": "增改刪都可",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。圖上不放註解；說明改寫在元素的「為什麼／判定條件」（MOD-30），註解仍可在原始碼裡寫。"
   },
   {
    "id": "MOD-10",
@@ -933,11 +934,11 @@
    "writes": [
     "diagrams"
    ],
-   "status": "ok",
+   "status": "removed",
    "sources": "既有",
    "framework": "",
    "verify": "增改刪都可",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。層級圖不放便箋與外框標註。"
   },
   {
    "id": "MOD-11",
@@ -951,15 +952,15 @@
    "writes": [
     "layout"
    ],
-   "status": "ok",
+   "status": "removed",
    "sources": "TR-02",
    "framework": "",
    "verify": "位置保存",
-   "note": ""
+   "note": "C＋D 移除。Mars 決定（2026-11-27）：模型頁照固定翼無人機框架示意整個重做，原有六種 SysML 圖不保留，只要求符合 SysML v2 語法。層級圖固定區帶、自動排版，不可拖拉。"
   },
   {
    "id": "MOD-12",
-   "zh": "匯出圖 SVG／PNG",
+   "zh": "匯出層級圖 SVG／PNG",
    "area": "模型",
    "where": "模型頁",
    "api": "",
@@ -972,7 +973,7 @@
    "sources": "TR-06",
    "framework": "",
    "verify": "下載檔案",
-   "note": ""
+   "note": "C＋D：名稱列「匯出 ▾」匯出目前這張層級圖或模型地圖（白底，配色同圖例）；審查報告改用層級圖留給工作包 G"
   },
   {
    "id": "MOD-13",
@@ -1005,7 +1006,7 @@
    "sources": "R3",
    "framework": "",
    "verify": "—",
-   "note": "WP5b-1 #48：工具箱 7 顆＋更多、右欄最下方新增按鈕、名稱列匯出 ▾"
+   "note": "C＋D：圖上工具箱隨舊圖移除；右欄最下方新增按鈕與名稱列「匯出 ▾」保留，另有各區帶的「＋」（MOD-40）"
   },
   {
    "id": "MOD-15",
@@ -1127,7 +1128,7 @@
    "id": "MOD-21",
    "zh": "刪除元素（連帶關係）",
    "area": "模型",
-   "where": "右欄、圖上",
+   "where": "右欄",
    "api": "/elements/delete",
    "reads": [
     "model"
@@ -1140,7 +1141,7 @@
    "sources": "既有",
    "framework": "",
    "verify": "刪除後關係一併清掉",
-   "note": ""
+   "note": "C＋D：圖上刪除隨舊圖移除，改在右欄"
   },
   {
    "id": "MOD-22",
@@ -1407,6 +1408,108 @@
    "framework": "crossCutting.tpm",
    "verify": "#tpm 屬性可填 SRR、SDR、MDR、PDR、CDR、TRR、FRR 各節點的值",
    "note": "WP-A：@TpmTrend（atProposal、atMDR、atPDR、atCDR、atTRR、atFRR，Real，跟著審查節點）寫在 TPM 屬性主體內；右欄只顯示專案啟用的節點；趨勢圖留給後續工作包"
+  },
+  {
+   "id": "MOD-36",
+   "zh": "模型地圖：一層一列（任務定義 → 任務剖面 → 系統 → 次系統 → 元件），框上需求數、待驗證數、決策狀態、質量配額，點框打開那一層",
+   "area": "模型",
+   "where": "模型頁（預設）",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
+   "framework": "",
+   "verify": "打開模型頁先看到地圖；點框進入該層",
+   "note": "C＋D：web/src/pages/model/layout.ts specMap"
+  },
+  {
+   "id": "MOD-37",
+   "zh": "產品架構樹與麵包屑（從「模型地圖」開始）",
+   "area": "模型",
+   "where": "模型頁左欄、名稱列",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
+   "framework": "",
+   "verify": "點樹或麵包屑切換層；打開某層時上層展開",
+   "note": "C＋D：ProductTree.tsx、Model.tsx Crumbs"
+  },
+  {
+   "id": "MOD-38",
+   "zh": "層級圖：固定三區帶、自動排版（需求帶含上一層輸入與 «derive»／#basis；設計迴圈帶照白板順序；架構帶含組成、配額、方向性介面與兩端不一致標紅）；第 1 層追溯欄位圖、第 2 層迴圈＋剖面節點＋模式",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
+   "framework": "designLoop.proposal designLoop.tradeStudy designLoop.fmea",
+   "verify": "各層圖由模型產生；白／綠／黃＝上層給的／本層建的／往下交的；狀態標籤通過、待驗證、已放行、喊卡中；〔表〕框跳表；點零件下鑽；風險回頭修正（#fix）為橘色虛線",
+   "note": "C＋D：views.ts（元素歸層）、layout.ts（排版）、LayerDiagram.tsx（繪製）。協作感知：別人選取的元素在圖上有他的顏色框"
+  },
+  {
+   "id": "MOD-39",
+   "zh": "元素說明頁：為什麼、判定條件、各欄位、被誰引用",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
+   "framework": "",
+   "verify": "選取元素後按「說明頁 →」或從搜尋進入",
+   "note": "C＋D：ElementPage.tsx"
+  },
+  {
+   "id": "MOD-40",
+   "zh": "區帶的「＋ 新增」：需求、方案、風險、決策、剖面節點、模式、次系統／元件",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "ok",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
+   "framework": "",
+   "verify": "按了在右欄打開對應類別的新增表單",
+   "note": "C＋D：新增後元素依關係自動歸到該層"
+  },
+  {
+   "id": "MOD-41",
+   "zh": "迴圈下半排：設計示意（每個回頭修正一版）與計算框（帶入模型值）",
+   "area": "模型",
+   "where": "模型頁",
+   "api": "",
+   "reads": [
+    "model",
+    "project"
+   ],
+   "writes": [],
+   "status": "partial",
+   "sources": "固定翼無人機框架示意（Mars 認可，2026-11-26）；Mars 決定模型頁照示意重做（2026-11-27）",
+   "framework": "",
+   "verify": "設計示意由風險 #fix 推出各版；計算框列質量加總、加權總分、L×C、TPM 餘裕",
+   "note": "C＋D 先照示意頁的推法；設計示意改讀版本紀錄、計算改用計算引擎與專案的 FMEA 門檻留給工作包 E"
   },
   {
    "id": "TAB-01",
@@ -2250,7 +2353,7 @@
    "id": "FLOW-1",
    "zh": "需求 → 驗證 → TRR",
    "steps": [
-    "MOD-07",
+    "MOD-40",
     "MOD-19",
     "TAB-02",
     "MGT-02",
