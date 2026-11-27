@@ -289,7 +289,10 @@ function objectAlternatives(h: Helpers, s: Scope): Element[] {
   for (const r of s.reqs) ids.add(r.id);
   return h.of("DesignAlternative").filter((alt) => {
     const mine = new Set([alt.id, ...h.a.elements.filter((e) => e.owner === alt.id).map((e) => e.id)]);
-    return [...mine].some((m) => h.linked(h.byId.get(m) as Element, ids)) || (s.object !== null && alt.owner === s.object.id);
+    if ([...mine].some((m) => h.linked(h.byId.get(m) as Element, ids)) || (s.object !== null && alt.owner === s.object.id)) return true;
+    // 經由方案比較表（Mars 2026-11-27）：和方案（或候選）有關係的比較表套件，它歸併的需求（套件連到的需求）也算方案連到的需求
+    const trades = h.a.elements.filter((p) => p.kind === "Package" && [...mine].some((m) => h.linked(p, new Set([m]))));
+    return trades.some((p) => h.linked(p, ids));
   });
 }
 const variantsOf = (h: Helpers, alt: Element) => h.a.elements.filter((e) => e.owner === alt.id && /Usage$/.test(e.kind) && e.kind !== "ReferenceUsage" && e.kind !== "AttributeUsage");
@@ -419,7 +422,10 @@ export function layerReqCats(l: Layer): string[] {
 
 function objectsOf(h: Helpers, l: Layer): (Element | null)[] {
   if (l.subject === "mission" || !l.forEach) return [null];
-  return h.of(l.subject);
+  const all = h.of(l.subject);
+  // 元件層（Mars 2026-11-27 決定）：只有「有組成零件的元件」才跑設計迴圈；沒有組成零件的元件是葉節點，在上一層的迴圈裡處理
+  if (l.subject === "Component") return all.filter((e) => h.a.elements.some((x) => x.owner === e.id && x.kind === "PartUsage"));
+  return all;
 }
 
 function reqsOf(h: Helpers, l: Layer, obj: Element | null, objs: (Element | null)[]): Element[] {
